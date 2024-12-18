@@ -32,8 +32,9 @@ class DiagonalGaussianDistribution(object):
         if self.deterministic:
             self.var = self.std = torch.zeros_like(self.mean).to(device=self.parameters.device)
 
-    def sample(self):
-        x = self.mean + self.std * torch.randn(self.mean.shape).to(device=self.parameters.device)
+    def sample(self, K=1, squeeze=True):
+        sample_shape = [K, *self.mean.shape] if K > 1 or squeeze == False else self.mean.shape
+        x = self.mean + self.std * torch.randn(sample_shape).to(device=self.parameters.device)
         return x
 
     def kl(self, other=None):
@@ -60,6 +61,26 @@ class DiagonalGaussianDistribution(object):
 
     def mode(self):
         return self.mean
+
+    def detach(self):
+        """ Detatches mean, variance etc from computational graph"""
+        self.mean, self.logvar = self.mean.detach(), self.logvar.detach()
+        self.std = self.std.detach()
+        self.var = self.var.detach()
+
+    def scatter(self, target_gpus, dim=0):
+        if len(self.mean.shape) == 5:
+            dim += 1  # We dont want to split on the K dimension if it exists
+        mean_scattered = torch.nn.parallel.scatter(self.mean, target_gpus, dim)
+        logvar_scattered = torch.nn.parallel.scatter(self.logvar, target_gpus, dim)
+        return [DiagonalGaussianDistribution(m, l) for m, l in zip(mean_scattered, logvar_scattered)]
+
+    def gather(self, target_device, dim=0):
+        if len(self.mean.shape) == 5:
+            dim += 1  # We dont want to merge on the K dimension if it exists
+        mean_gathered = torch.nn.parallel.gather(self.mean, target_device, dim)
+        logvar_gathered = torch.nn.parallel.gather(self.logvar, target_device, dim)
+        return DiagonalGaussianDistribution(mean_gathered, logvar_gathered)
 
 
 def normal_kl(mean1, logvar1, mean2, logvar2):

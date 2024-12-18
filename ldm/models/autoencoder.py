@@ -9,23 +9,40 @@ from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
 from ldm.util import instantiate_from_config
 from ldm.modules.ema import LitEma
 
+import torch.nn as nn
+
+import torch.distributions as dist
+
 
 class AutoencoderKL(pl.LightningModule):
     def __init__(self,
                  ddconfig,
                  lossconfig,
                  embed_dim,
+                 embed_spatial_dim,
                  ckpt_path=None,
                  ignore_keys=[],
                  image_key="image",
                  colorize_nlabels=None,
                  monitor=None,
                  ema_decay=None,
-                 learn_logvar=False
+                 learn_logvar=False,
+                 prior_dist=dist.Normal,
+                 likelihood_dist=dist.Laplace,
+                 post_dist=dist.Normal,
+                 conform_to_3_channel=False
                  ):
         super().__init__()
         self.learn_logvar = learn_logvar
         self.image_key = image_key
+
+        self.conform_to_3_channel = conform_to_3_channel
+        if conform_to_3_channel:
+            self.input_expansion_factor = int(3 / ddconfig["in_channels"])
+
+            ddconfig["in_channels"] = 3
+            ddconfig["out_ch"] = 3
+
         self.encoder = Encoder(**ddconfig)
         self.decoder = Decoder(**ddconfig)
         self.loss = instantiate_from_config(lossconfig)
@@ -39,6 +56,20 @@ class AutoencoderKL(pl.LightningModule):
         if monitor is not None:
             self.monitor = monitor
 
+        self.qu_x = post_dist
+        self.px_u = likelihood_dist
+        self.pw = prior_dist
+
+        self.llik_scaling = 1
+
+        self._qu_x_params = None
+        self._pw_params_aux = None
+
+        self._pw_params_aux = nn.ParameterList([
+            nn.Parameter(torch.zeros(1, ddconfig["w_channels"], embed_spatial_dim, embed_spatial_dim), requires_grad=False),
+            nn.Parameter(torch.zeros(1, ddconfig["w_channels"], embed_spatial_dim, embed_spatial_dim), requires_grad=True)  # It is important that this log-variance vector is learnable (see paper)
+        ])
+
         self.use_ema = ema_decay is not None
         if self.use_ema:
             self.ema_decay = ema_decay
@@ -48,6 +79,9 @@ class AutoencoderKL(pl.LightningModule):
 
         if ckpt_path is not None:
             self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys)
+
+    def expand_input_channels(self, x):
+        return x.repeat(1, self.input_expansion_factor, 1, 1)
 
     def init_from_ckpt(self, path, ignore_keys=list()):
         sd = torch.load(path, map_location="cpu")["state_dict"]
@@ -79,25 +113,62 @@ class AutoencoderKL(pl.LightningModule):
         if self.use_ema:
             self.model_ema(self)
 
+    @property
+    def pw_params_aux(self):
+        """ Returns: Parameters of prior distribution for the mode specific latent code """
+        if self.pw == dist.Normal:
+            return self._pw_params_aux[0], F.softplus(self._pw_params_aux[1]) + 1e-20
+        else:
+            return self._pw_params_aux[0], F.softmax(self._pw_params_aux[1], dim=(1, 2, 3)) * self._pw_params_aux[1].size(-1) + 1e-20
+
+    @property
+    def qu_x_params(self):
+        """Get encoding distribution parameters (already adapted for the specific distribution at the end of the Encoder class)"""
+        if self._qu_x_params is None:
+            raise NameError("qz_x params not initalised yet!")
+        return self._qu_x_params
+
     def encode(self, x):
+        if self.conform_to_3_channel:
+            x = self.expand_input_channels(x)
         h = self.encoder(x)
         moments = self.quant_conv(h)
         posterior = DiagonalGaussianDistribution(moments)
         return posterior
 
     def decode(self, z):
-        z = self.post_quant_conv(z)
-        dec = self.decoder(z)
-        return dec
-
-    def forward(self, input, sample_posterior=True):
-        posterior = self.encode(input)
-        if sample_posterior:
-            z = posterior.sample()
+        if len(z.shape) == 5:
+            orig_shape = z.shape
+            z = self.post_quant_conv(z.view(-1, *orig_shape[2:]))
+            dec = self.decoder(z)
+            new_shape = [*orig_shape[:2], *dec.shape[1:]]
+            dec = dec.view(*new_shape)
+            if self.conform_to_3_channel:
+                dec = dec.mean(dim=2, keepdim=True)
         else:
-            z = posterior.mode()
+            z = self.post_quant_conv(z)
+            dec = self.decoder(z)
+            if self.conform_to_3_channel:
+                dec = dec.mean(dim=1, keepdim=True)
+
+        # Use a Fixed scale for the distribution as in MMVAE+ paper
+        dec_dist = self.px_u(dec, torch.tensor(0.01).to(dec.device))
+        return dec_dist
+
+    def forward(self, input, sample_posterior=True, K=1):
+        posterior = self.encode(input)
+        self._qu_x_params = posterior
+
+        if sample_posterior:
+            z = posterior.sample(K, squeeze=False)
+        else:
+            z = posterior.mode().expand(K, -1, -1, -1, -1)
+
         dec = self.decode(z)
-        return dec, posterior
+        return posterior, dec, z
+
+    def reconstruct(self, input, sample_posterior=True):
+        return self.forward(input, sample_posterior)[1].mean
 
     def get_input(self, batch, k):
         x = batch[k]
@@ -106,6 +177,9 @@ class AutoencoderKL(pl.LightningModule):
         x = x.permute(0, 3, 1, 2).to(memory_format=torch.contiguous_format).float()
         return x
 
+    """
+    # Functions from stable diffusion - not used for mm training
+    
     def training_step(self, batch, batch_idx, optimizer_idx):
         inputs = self.get_input(batch, self.image_key)
         reconstructions, posterior = self(inputs)
@@ -196,6 +270,7 @@ class AutoencoderKL(pl.LightningModule):
         x = F.conv2d(x, weight=self.colorize)
         x = 2.*(x-x.min())/(x.max()-x.min()) - 1.
         return x
+    """
 
 
 class IdentityFirstStage(torch.nn.Module):

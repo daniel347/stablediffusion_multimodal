@@ -1,8 +1,11 @@
 import importlib
+import argparse
+import os
 
 import torch
 from torch import optim
 import numpy as np
+import time
 
 from inspect import isfunction
 from PIL import Image, ImageDraw, ImageFont
@@ -95,6 +98,70 @@ def get_obj_from_str(string, reload=False):
         module_imp = importlib.import_module(module)
         importlib.reload(module_imp)
     return getattr(importlib.import_module(module, package=None), cls)
+
+
+def dict_to_namespace(config):
+    namespace = argparse.Namespace()
+    for key, value in config.items():
+        if isinstance(value, dict):
+            new_value = dict_to_namespace(value)
+        elif isinstance(value, list):
+            new_value = [dict_to_namespace(v) if isinstance(v, dict) else v for v in value]
+        else:
+            new_value = value
+        setattr(namespace, key, new_value)
+    return namespace
+
+
+def namespace_to_dict(namespace):
+    dict = vars(namespace)
+    for n, i in dict.items():
+        if isinstance(i, argparse.Namespace):
+            dict[n] = namespace_to_dict(i)
+        elif isinstance(i, list):
+            dict[n] = [namespace_to_dict(item) if isinstance(item, argparse.Namespace) else item for item in i]
+    return dict
+
+
+# Stolen from MMVAE+
+class Timer:
+    def __init__(self, name):
+        self.name = name
+
+    def __enter__(self):
+        self.begin = time.time()
+        return self
+
+    def __exit__(self, *args):
+        self.end = time.time()
+        self.elapsed = self.end - self.begin
+        self.elapsedH = time.gmtime(self.elapsed)
+        print('====> [{}] Time: {:7.3f}s or {}'
+              .format(self.name,
+                      self.elapsed,
+                      time.strftime("%H:%M:%S", self.elapsedH)))
+
+
+def save_vars(vs, filepath):
+    """
+    Saves variables to the given filepath in a safe manner.
+    """
+    if os.path.exists(filepath):
+        shutil.copyfile(filepath, '{}.old'.format(filepath))
+    torch.save(vs, filepath)
+
+
+def save_model_light(model, filepath):
+    """
+    To load a saved model, simply use
+    `model.load_state_dict(torch.load('path-to-saved-model'))`.
+    """
+    save_vars(model.state_dict(), filepath)
+    # if hasattr(model, 'vaes'):
+        # for vae in model.vaes:
+            # fdir, fext = os.path.splitext(filepath)
+            # save_vars(vae.state_dict(), fdir + '_' + vae.modelName + fext)
+
 
 
 class AdamWwithEMAandWings(optim.Optimizer):

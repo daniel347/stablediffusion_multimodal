@@ -132,6 +132,8 @@ To sample from the _SD2.1-v_ model, run the following:
 
 ```
 python scripts/txt2img.py --prompt "a professional photograph of an astronaut riding a horse" --ckpt <path/to/768model.ckpt/> --config configs/stable-diffusion/v2-inference-v.yaml --H 768 --W 768  
+
+python -m scripts.txt2img --prompt "A photograph of an astronaut riding a horse" --ckpt /home/ds3119/multimodal_generation/stablediffusion/checkpoints/v2-1_512-ema-pruned.ckpt --config configs/stable-diffusion/v2-inference.yaml --H 768 --W 768
 ```
 or try out the Web Demo: [![Hugging Face Spaces](https://img.shields.io/badge/%F0%9F%A4%97%20Hugging%20Face-Spaces-blue)](https://huggingface.co/spaces/stabilityai/stable-diffusion).
 

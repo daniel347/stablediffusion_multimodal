@@ -37,7 +37,7 @@ model:
         legacy: False
 
     first_stage_config:
-      target: ldm.models.autoencoder.AutoencoderKL
+      target: ldm.models.autoencoder_orig.AutoencoderKL
       params:
         embed_dim: 4
         monitor: val/rec_loss
