@@ -18,7 +18,7 @@ class NYUDepth(Dataset):
         self.root_data_dir = root_data_dir
 
         self.index_path = os.path.join(root_data_dir, "data/nyu2_train.csv" if train else "data/nyu2_test.csv")
-        self.index = pd.read_csv(self.index_path, names=["colour", "depth"], dtype=pd.StringDtype)
+        self.index = pd.read_csv(self.index_path, names=["colour", "depth"])
 
         self.mode_types = {"colour": cv2.IMREAD_COLOR, "depth": cv2.IMREAD_GRAYSCALE}
 
