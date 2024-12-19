@@ -1,5 +1,5 @@
 seed: 1
-device: "cuda:1"  # ["cuda:0", "cuda:1"]
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU Depth Autoencoder (Stable Diffusion)"
 print_freq: 50
 
