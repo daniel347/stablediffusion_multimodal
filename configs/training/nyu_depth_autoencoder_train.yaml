@@ -27,4 +27,3 @@ eval:
 
 model_conf: configs/stable-diffusion/v2-inference-mm.yaml
 model_initialisation: "../trained_models/stable_diff_mmvae_nyu_2024_12_10__16_11_41/model_1.rar"
-init_from_stable_diffusion: False

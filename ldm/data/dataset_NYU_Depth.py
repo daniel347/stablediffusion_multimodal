@@ -21,7 +21,7 @@ class NYUDepth(Dataset):
         self.index = pd.read_csv(self.index_path, names=["colour", "depth"])
 
         self.mode_types = {"colour": cv2.IMREAD_COLOR, "depth": cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH}
-        self.image_depths = {"colour": 255, "depth": 255} if train else {"colour": 255, "depth": 1}
+        self.image_depths = {"colour": 255, "depth": 255} if train else {"colour": 255, "depth": 10000}
 
         if isinstance(modality, str):
             modality = [modality]
