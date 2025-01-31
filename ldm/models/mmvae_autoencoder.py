@@ -191,3 +191,31 @@ class MMVAEplus(nn.Module):
             # cross-modal matrix of reconstructions
             recons = [[px_u.mean for px_u in r] for r in px_us]
         return recons
+
+    def encode(self, data):
+        # Encode data into z and W
+        zs = []
+        W = []
+
+        for dm, vae in zip(data, self.vaes):
+            qu_x = vae.encode(dm)
+            latents_w, latents_z = torch.split(qu_x.mean, [self.latent_channel_w, self.latent_channel_z], dim=1)
+            zs.append(latents_z)
+            W.append(latents_w)
+
+        z = torch.stack(zs).mean(dim=0)
+        full_latent = torch.concat([*W, z], dim=1)
+
+        return full_latent
+
+    def decode(self, full_latent):
+        # convert z and W to image and depth
+        zW = torch.split(full_latent, [*[self.latent_channel_w for _ in range(len(self.vaes))], self.latent_channel_z], dim=1)
+        z = zW[-1]
+        W = zW[:-1]
+
+        recons = []
+        for vae, w in zip(self.vaes, W):
+            recons.append(vae.decode(torch.cat([w, z], dim=1)))
+
+        return recons

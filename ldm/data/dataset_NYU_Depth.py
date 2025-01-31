@@ -20,7 +20,8 @@ class NYUDepth(Dataset):
         self.index_path = os.path.join(root_data_dir, "data/nyu2_train.csv" if train else "data/nyu2_test.csv")
         self.index = pd.read_csv(self.index_path, names=["colour", "depth"])
 
-        self.mode_types = {"colour": cv2.IMREAD_COLOR, "depth": cv2.IMREAD_GRAYSCALE}
+        self.mode_types = {"colour": cv2.IMREAD_COLOR, "depth": cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH}
+        self.image_depths = {"colour": 255, "depth": 255} if train else {"colour": 255, "depth": 10000}
 
         if isinstance(modality, str):
             modality = [modality]
@@ -40,7 +41,7 @@ class NYUDepth(Dataset):
                 img = np.expand_dims(img, axis=-1)
             if img.shape[-1] == 3:
                 img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img = (img.astype(np.float32) - np.iinfo(img.dtype).min) / (np.iinfo(img.dtype).max - np.iinfo(img.dtype).min)
+            img = img.astype(np.float32) / self.image_depths[mod]  # Normalise
             img = torch.Tensor(img).permute((2, 0, 1))
             if self.transform is not None:
                 img = self.transform(img)
