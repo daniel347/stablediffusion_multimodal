@@ -13,7 +13,7 @@ data:
 training:
   objective: dreg
   lr: 3.0e-4
-  batch_size: 7
+  batch_size: 1
   num_epochs: 5
 
   beta: 2.5
@@ -27,3 +27,4 @@ eval:
 
 model_conf: configs/stable-diffusion/v2-inference-mm.yaml
 model_initialisation: "../trained_models/stable_diff_mmvae_nyu_2024_12_10__16_11_41/model_1.rar"
+init_from_stable_diffusion: False
