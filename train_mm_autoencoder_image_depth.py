@@ -155,6 +155,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             group=f"DDP_{runId}",
         )
 
+        wandb.alert(title="Starting Run", text="Started training stable diffusion autoencoder on HPC")
+
         # preparation for training
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=conf.training.lr, amsgrad=True)
@@ -238,6 +240,27 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             for j in range(NUM_VAES):
                                 wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=epoch)
                         del cg_imgs
+
+                        # Also save some example latent vectors
+                        latents = model.module("encode", data) if data_parallel else model("encode", data)
+                        reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
+
+                        latent_dim_w = model.module.module.w_channels if data_parallel else model.module.w_channels
+                        latent_dim_z = model.module.module.params.z_channels if data_parallel else model.module.z_channels
+
+                        for j in range(NUM_VAES):
+                            latent_img = latents[:, j:j + latent_dim_w].detach().cpu()
+                            latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
+                            latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
+
+                            wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=i)
+                            wandb.log({f'Reconstructions/m{j}': wandb.Image(reconstructions[j].mean)}, step=i)
+
+                        latent_img = latents[:, -latent_dim_z:].detach().cpu()
+                        latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
+                        latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
+
+                        wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)

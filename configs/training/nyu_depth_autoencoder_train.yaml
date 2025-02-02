@@ -14,7 +14,7 @@ training:
   objective: dreg
   lr: 3.0e-4
   batch_size: 12
-  num_epochs: 5
+  num_epochs: 8
 
   beta: 2.5
 

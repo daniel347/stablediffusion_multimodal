@@ -164,7 +164,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
 
         test_dataset = NYUDepth(conf.data.datadir, transform=tx, train=False, modality=['colour', 'depth'])
         test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False) if data_parallel else None
-        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False, sampler=test_sampler, **kwargs)
+        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.batch_size, shuffle=False, sampler=test_sampler, **kwargs)
 
         def unpack_data_nyu(data, device="cuda"):
             return [data[0].to(device), data[1].to(device)]
@@ -258,7 +258,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train.yaml")
+@hydra.main(version_base=None, config_path="configs/testing/", config_name="nyu_depth_autoencoder_test.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
