@@ -216,6 +216,9 @@ class MemoryEfficientCrossAttention(nn.Module):
     def forward(self, x, context=None, mask=None):
         q = self.to_q(x)
         context = default(context, x)
+        print(f"to_k weight: {self.to_k.weight.shape}")
+        print(f"x: {x.shape}, context: {context.shape}, q: {q.shape}")
+
         k = self.to_k(context)
         v = self.to_v(context)
 

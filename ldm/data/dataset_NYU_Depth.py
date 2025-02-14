@@ -7,11 +7,14 @@ from PIL import Image
 import cv2
 import numpy as np
 import torch
+from torchvision.transforms.v2.functional import horizontal_flip
+from torchvision.transforms.v2 import ColorJitter
+import random
 
 
 class NYUDepth(Dataset):
 
-    def __init__(self, root_data_dir, transform, train, modality):
+    def __init__(self, root_data_dir, transform, train, modality, p_hor_flip=0, p_colour_jitter=0):
 
         super().__init__()
         self.train = train
@@ -27,6 +30,11 @@ class NYUDepth(Dataset):
             modality = [modality]
         self.modality = modality
         self.transform = transform
+
+        self.p_hor_flip = p_hor_flip
+        self.p_colour_jitter = p_colour_jitter
+        if p_colour_jitter > 0:
+            self.colour_jitter = ColorJitter(0.1, 0.1, 0.1, 0.02)
 
     def __len__(self):
         return len(self.index.index)
@@ -46,5 +54,15 @@ class NYUDepth(Dataset):
             if self.transform is not None:
                 img = self.transform(img)
             outs.append(img)
+
+        flip = random.random() < self.p_hor_flip
+        if flip:
+            for i in range(len(outs)):
+                outs[i] = horizontal_flip(outs[i])
+
+        colour_jitter = random.random() < self.p_colour_jitter
+        if colour_jitter and "colour" in self.modality:
+            colour_ind = self.modality.index("colour")
+            outs[colour_ind] = self.colour_jitter(outs[colour_ind])
 
         return outs

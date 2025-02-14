@@ -19,9 +19,14 @@ from ldm.modules.attention import SpatialTransformer
 from ldm.util import exists
 
 
-# dummy replace
+
 def convert_module_to_f16(x):
-    pass
+    if isinstance(x, nn.Conv2d) or isinstance(x, nn.Linear) or isinstance(x, nn.LayerNorm):
+        x.weight.data = x.weight.data.half()
+        if x.bias is not None:
+            x.bias.data = x.bias.data.half()
+    for child in x.children():
+        convert_module_to_f16(child)
 
 def convert_module_to_f32(x):
     pass
@@ -756,6 +761,8 @@ class UNetModel(nn.Module):
             #nn.LogSoftmax(dim=1)  # change to cross_entropy and produce non-normalized logits
         )
 
+        self.conditioning_key = "unconditional"
+
     def convert_to_fp16(self):
         """
         Convert the torso of the model to float16.
@@ -792,7 +799,7 @@ class UNetModel(nn.Module):
             assert y.shape[0] == x.shape[0]
             emb = emb + self.label_emb(y)
 
-        h = x.type(self.dtype)
+        h = x  # .type(self.dtype)
         for module in self.input_blocks:
             h = module(h, emb, context)
             hs.append(h)

@@ -1,0 +1,26 @@
+seed: 1
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
+experiment: "NYU Depth Stable Diffusion"
+print_freq: 50
+
+data:
+  datadir: ../mmvaeplus/data/nyu_data
+  input_size: 128
+
+  outputdir: ../outputs
+
+training:
+  lr: 8.0e-5
+  gamma: 0.996
+  batch_size: 8
+  num_epochs: 10
+  start_epoch: 0
+  patience: 3
+  test_only: False
+
+eval:
+  inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
+
+model_conf: configs/stable-diffusion/v2-inference-mm.yaml
+model_initialisation: # "/home/ds3119/multimodal_generation/trained_models/stable_diffusion_nyu_2025_02_07__11_11_50/model_5.rar"
+init_from_stable_diffusion: False

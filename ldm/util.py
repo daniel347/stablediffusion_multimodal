@@ -272,3 +272,20 @@ class AdamWwithEMAandWings(optim.Optimizer):
                 ema_param.mul_(cur_ema_decay).add_(param.float(), alpha=1 - cur_ema_decay)
 
         return loss
+
+
+def remove_module_prefix(state_dict):
+    """
+    This function removes the "module." prefix from the state_dict keys.
+    This is commonly needed after wrapping a model with DataParallel or DistributedDataParallel.
+    """
+    new_state_dict = {}
+
+    for key, value in state_dict.items():
+        if key.startswith("module."):
+            new_key = key[7:]  # Remove the "module." prefix (7 characters)
+            new_state_dict[new_key] = value
+        else:
+            new_state_dict[key] = value
+
+    return new_state_dict

@@ -56,8 +56,7 @@ class DDPM(pl.LightningModule):
                  monitor="val/loss",
                  use_ema=True,
                  first_stage_key="image",
-                 image_size=256,
-                 channels=3,
+                 input_shape=[3, 256, 256],
                  log_every_t=100,
                  clip_denoised=True,
                  linear_start=1e-4,
@@ -85,11 +84,13 @@ class DDPM(pl.LightningModule):
         self.cond_stage_model = None
         self.clip_denoised = clip_denoised
         self.log_every_t = log_every_t
+
         self.first_stage_key = first_stage_key
-        self.image_size = image_size  # try conv?
-        self.channels = channels
+        self.input_shape = input_shape
+
         self.use_positional_encodings = use_positional_encodings
-        self.model = DiffusionWrapper(unet_config, conditioning_key)
+
+        self.model = instantiate_from_config(unet_config)
         count_params(self.model, verbose=True)
         self.use_ema = use_ema
         if self.use_ema:
@@ -335,6 +336,7 @@ class DDPM(pl.LightningModule):
         b = shape[0]
         img = torch.randn(shape, device=device)
         intermediates = [img]
+
         for i in tqdm(reversed(range(0, self.num_timesteps)), desc='Sampling t', total=self.num_timesteps):
             img = self.p_sample(img, torch.full((b,), i, device=device, dtype=torch.long),
                                 clip_denoised=self.clip_denoised)
@@ -346,9 +348,7 @@ class DDPM(pl.LightningModule):
 
     @torch.no_grad()
     def sample(self, batch_size=16, return_intermediates=False):
-        image_size = self.image_size
-        channels = self.channels
-        return self.p_sample_loop((batch_size, channels, image_size, image_size),
+        return self.p_sample_loop((batch_size, *self.input_shape),
                                   return_intermediates=return_intermediates)
 
     def q_sample(self, x_start, t, noise=None):
@@ -534,6 +534,7 @@ class LatentDiffusion(DDPM):
                  scale_by_std=False,
                  force_null_conditioning=False,
                  *args, **kwargs):
+
         self.force_null_conditioning = force_null_conditioning
         self.num_timesteps_cond = default(num_timesteps_cond, 1)
         self.scale_by_std = scale_by_std
@@ -651,9 +652,7 @@ class LatentDiffusion(DDPM):
         return denoise_grid
 
     def get_first_stage_encoding(self, encoder_posterior):
-        if isinstance(encoder_posterior, DiagonalGaussianDistribution):
-            z = encoder_posterior.sample()
-        elif isinstance(encoder_posterior, torch.Tensor):
+        if isinstance(encoder_posterior, torch.Tensor):
             z = encoder_posterior
         else:
             raise NotImplementedError(f"encoder_posterior of type '{type(encoder_posterior)}' not yet implemented")
@@ -663,8 +662,6 @@ class LatentDiffusion(DDPM):
         if self.cond_stage_forward is None:
             if hasattr(self.cond_stage_model, 'encode') and callable(self.cond_stage_model.encode):
                 c = self.cond_stage_model.encode(c)
-                if isinstance(c, DiagonalGaussianDistribution):
-                    c = c.mode()
             else:
                 c = self.cond_stage_model(c)
         else:
@@ -834,15 +831,8 @@ class LatentDiffusion(DDPM):
         loss = self(x, c)
         return loss
 
-    def forward(self, x, c, *args, **kwargs):
+    def forward(self, x, c=None, *args, **kwargs):
         t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
-        if self.model.conditioning_key is not None:
-            assert c is not None
-            if self.cond_stage_trainable:
-                c = self.get_learned_conditioning(c)
-            if self.shorten_cond_schedule:  # TODO: drop this option
-                tc = self.cond_ids[t].to(self.device)
-                c = self.q_sample(x_start=c, t=tc, noise=torch.randn_like(c.float()))
         return self.p_losses(x, c, t, *args, **kwargs)
 
     def apply_model(self, x_noisy, t, cond, return_ids=False):
@@ -866,19 +856,21 @@ class LatentDiffusion(DDPM):
         return (extract_into_tensor(self.sqrt_recip_alphas_cumprod, t, x_t.shape) * x_t - pred_xstart) / \
                extract_into_tensor(self.sqrt_recipm1_alphas_cumprod, t, x_t.shape)
 
+    """
     def _prior_bpd(self, x_start):
-        """
-        Get the prior KL term for the variational lower-bound, measured in
-        bits-per-dim.
-        This term can't be optimized, as it only depends on the encoder.
-        :param x_start: the [N x C x ...] tensor of inputs.
-        :return: a batch of [N] KL values (in bits), one per batch element.
-        """
+        
+        # Get the prior KL term for the variational lower-bound, measured in
+        # bits-per-dim.
+        # This term can't be optimized, as it only depends on the encoder.
+        # :param x_start: the [N x C x ...] tensor of inputs.
+        # :return: a batch of [N] KL values (in bits), one per batch element.
+        
         batch_size = x_start.shape[0]
         t = torch.tensor([self.num_timesteps - 1] * batch_size, device=x_start.device)
         qt_mean, _, qt_log_variance = self.q_mean_variance(x_start, t)
         kl_prior = normal_kl(mean1=qt_mean, logvar1=qt_log_variance, mean2=0.0, logvar2=0.0)
         return mean_flat(kl_prior) / np.log(2.0)
+    """
 
     def p_losses(self, x_start, cond, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
@@ -897,10 +889,12 @@ class LatentDiffusion(DDPM):
         else:
             raise NotImplementedError()
 
-        loss_simple = self.get_loss(model_output, target, mean=False).mean([1, 2, 3])
+        mean_dims = [i+1 for i, _ in enumerate(self.input_shape)]
+
+        loss_simple = self.get_loss(model_output, target, mean=False).mean(dim=mean_dims)
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
 
-        logvar_t = self.logvar[t].to(self.device)
+        logvar_t = self.logvar[t.cpu()].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
         # loss = loss_simple / torch.exp(self.logvar) + self.logvar
         if self.learn_logvar:
@@ -909,7 +903,7 @@ class LatentDiffusion(DDPM):
 
         loss = self.l_simple_weight * loss.mean()
 
-        loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=(1, 2, 3))
+        loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=mean_dims)
         loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
         loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
         loss += (self.original_elbo_weight * loss_vlb)
@@ -1090,14 +1084,16 @@ class LatentDiffusion(DDPM):
     def sample(self, cond, batch_size=16, return_intermediates=False, x_T=None,
                verbose=True, timesteps=None, quantize_denoised=False,
                mask=None, x0=None, shape=None, **kwargs):
-        if shape is None:
-            shape = (batch_size, self.channels, self.image_size, self.image_size)
         if cond is not None:
             if isinstance(cond, dict):
                 cond = {key: cond[key][:batch_size] if not isinstance(cond[key], list) else
                 list(map(lambda x: x[:batch_size], cond[key])) for key in cond}
             else:
                 cond = [c[:batch_size] for c in cond] if isinstance(cond, list) else cond[:batch_size]
+
+        if shape is None:
+            shape = (batch_size, *self.input_shape)
+
         return self.p_sample_loop(cond,
                                   shape,
                                   return_intermediates=return_intermediates, x_T=x_T,
@@ -1108,7 +1104,7 @@ class LatentDiffusion(DDPM):
     def sample_log(self, cond, batch_size, ddim, ddim_steps, **kwargs):
         if ddim:
             ddim_sampler = DDIMSampler(self)
-            shape = (self.channels, self.image_size, self.image_size)
+            shape = self.input_shape
             samples, intermediates = ddim_sampler.sample(ddim_steps, batch_size,
                                                          shape, cond, verbose=False, **kwargs)
 
@@ -1261,7 +1257,7 @@ class LatentDiffusion(DDPM):
         if plot_progressive_rows:
             with ema_scope("Plotting Progressives"):
                 img, progressives = self.progressive_denoising(c,
-                                                               shape=(self.channels, self.image_size, self.image_size),
+                                                               shape=self.input_shape,
                                                                batch_size=N)
             prog_row = self._get_denoise_row_from_list(progressives, desc="Progressive Generation")
             log["progressive_row"] = prog_row

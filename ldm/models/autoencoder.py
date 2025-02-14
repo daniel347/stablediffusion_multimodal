@@ -78,20 +78,27 @@ class AutoencoderKL(pl.LightningModule):
             print(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
 
         if ckpt_path is not None:
+            print(f"Loading AutoencoderKL checkpoint from {ckpt_path}")
             self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys)
+
+
 
     def expand_input_channels(self, x):
         return x.repeat(1, self.input_expansion_factor, 1, 1)
 
     def init_from_ckpt(self, path, ignore_keys=list()):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        sd = torch.load(path, map_location="cpu")
         keys = list(sd.keys())
         for k in keys:
             for ik in ignore_keys:
                 if k.startswith(ik):
                     print("Deleting key {} from state_dict.".format(k))
                     del sd[k]
-        self.load_state_dict(sd, strict=False)
+        M, U = self.load_state_dict(sd, strict=False)
+        for m in M:
+            print(f"missing key: {m}")
+        for u in U:
+            print(f"unused key: {u}")
         print(f"Restored from {path}")
 
     @contextmanager

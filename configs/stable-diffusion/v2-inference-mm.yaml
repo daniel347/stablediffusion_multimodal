@@ -1,5 +1,5 @@
 model:
-  base_learning_rate: 1.0e-4
+  base_learning_rate: 1.0e-4  # not used
   target: ldm.models.diffusion.ddpm.LatentDiffusion
   params:
     linear_start: 0.00085
@@ -9,31 +9,30 @@ model:
     timesteps: 1000
     first_stage_key: "jpg"
     cond_stage_key: "txt"
-    image_size: 64
-    channels: 4
+    input_shape: [6, 32, 32]
     cond_stage_trainable: false
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
     scale_factor: 0.18215
-    use_ema: False # we set this to false because this is an inference only config
+    use_ema: True
 
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
-        use_checkpoint: True
-        use_fp16: True
+        use_checkpoint: False
+        use_fp16: False
         image_size: 32 # unused
-        in_channels: 4
-        out_channels: 4
+        in_channels: 6
+        out_channels: 6
         model_channels: 320
         attention_resolutions: [ 4, 2, 1 ]
         num_res_blocks: 2
         channel_mult: [ 1, 2, 4, 4 ]
         num_head_channels: 64 # need to fix for flash-attn
-        use_spatial_transformer: True
+        use_spatial_transformer: False
         use_linear_in_transformer: True
         transformer_depth: 1
-        context_dim: 1024
+        context_dim:
         legacy: False
 
     first_stage_config:
@@ -42,6 +41,7 @@ model:
         prior_dist: normal
         latent_channel_z: 2
         latent_channel_w: 2
+        ckpt_path: "/home/ds3119/multimodal_generation/trained_models/model_8.rar"
 
         vae_params:
           - target: ldm.models.autoencoder.AutoencoderKL  # RGB images
@@ -96,3 +96,5 @@ model:
                 checkpoint: True
               lossconfig:
                 target: torch.nn.Identity
+
+    cond_stage_config: '__is_unconditional__'

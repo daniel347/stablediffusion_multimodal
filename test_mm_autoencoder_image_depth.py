@@ -222,7 +222,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
 
                     for j in range(NUM_VAES):
                         latent_img = latents[:, j:j+latent_dim_w].detach().cpu()
-                        latent_img = torch.transpose(latent_img, 0, 1).view(-1, *latent_img.shape[2:]).unsqueeze(1)
+                        latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
                         latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
 
                         latent_img_path = os.path.join(runPath, f"batch_{i}_latents_wm{j}.png")

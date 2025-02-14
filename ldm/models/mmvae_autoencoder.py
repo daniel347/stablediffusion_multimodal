@@ -1,7 +1,7 @@
 # Base MMVAEplus class definition
 import torch
 import torch.nn as nn
-from ..util import instantiate_from_config
+from ..util import instantiate_from_config, remove_module_prefix
 from torch.distributions import Normal, Laplace
 import torch.nn.functional as F
 
@@ -10,7 +10,7 @@ class MMVAEplus(nn.Module):
     """
     MMVAEplus class definition.
     """
-    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, vae_params=None):
+    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, vae_params=None, ckpt_path=None):
         super(MMVAEplus, self).__init__()
         if isinstance(prior_dist, str):
             if prior_dist == 'normal':
@@ -44,6 +44,16 @@ class MMVAEplus(nn.Module):
 
         self.latent_channel_z = latent_channel_z
         self.latent_channel_w = latent_channel_w
+
+        if ckpt_path is not None:
+            print("Loading MMVAE checkpoint from {params.ckpt_path}")
+            ckpt = torch.load(ckpt_path)
+            ckpt = remove_module_prefix(ckpt)
+            missing, unexpected = self.load_state_dict(ckpt, strict=False)
+            if len(missing) > 0:
+                print(f"Missing Keys:\n {missing}")
+            if len(unexpected) > 0:
+                print(f"\nUnexpected Keys:\n {unexpected}")
 
     @staticmethod
     def getDataSets(batch_size, shuffle=True, device="cuda"):
