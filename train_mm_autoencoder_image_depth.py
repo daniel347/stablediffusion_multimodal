@@ -155,6 +155,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             group=f"DDP_{runId}",
         )
 
+        wandb.alert(title="Starting Run", text="Started training stable diffusion autoencoder on HPC")
+
         # preparation for training
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=conf.training.lr, amsgrad=True)
@@ -239,7 +241,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=epoch)
                         del cg_imgs
 
-                        # Plot latent vectors
                         # Also save some example latent vectors
                         latents = model.module("encode", data) if data_parallel else model("encode", data)
                         reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
