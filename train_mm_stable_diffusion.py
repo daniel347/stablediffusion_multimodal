@@ -120,6 +120,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         model_first_stage = model.module.first_stage_model if data_parallel else model.first_stage_model
 
         NUM_VAES = len(model_first_stage.vaes)
+        print(f"Using {NUM_VAES} vaes")
 
         # Set experiment name if not set
         if not conf.experiment:
@@ -160,6 +161,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 group=f"DDP_{runId}",
             )
 
+            wandb.alert(title=f"Experiment {conf.experiment} has started", text=f"Run id: {runId}")
+
         # preparation for training
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=conf.training.lr, amsgrad=True)
@@ -192,7 +195,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
 
         # Load NYU dataset
-        modalities = ['colour']
+        modalities = ['colour', 'depth']
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
         tx = v2.Compose([v2.Resize([conf.data.input_size, conf.data.input_size])])
 
@@ -252,6 +255,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     scaler.scale(loss).backward()
                 else:
                     latents = model_first_stage.encode(data)
+                    print(f"Latent shape: {latents.shape}")
                     loss, loss_dict = model(latents)
                     loss.backward()
 
@@ -362,14 +366,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
 
         with Timer('MMVAEplus') as t:
-            # test_epoch(start_epoch)
-            # fid_colour = test_fid(start_epoch)
-            # print(f"FID colour: {fid_colour}   FID depth: {fid_depth}")
+            test_epoch(start_epoch)
+            fid_colour, fid_depth = test_fid(start_epoch)
+            print(f"FID colour: {fid_colour}   FID depth: {fid_depth}")
             for epoch in range(start_epoch + 1, conf.training.num_epochs + 1 + start_epoch):
                 train_epoch(epoch)
 
                 test_loss = test_epoch(epoch)
-                fid_colour = test_fid(epoch)
+                fid_colour, fid_depth = test_fid(epoch)
 
                 if test_loss < best_test_loss:
                     best_test_loss = test_loss
@@ -396,7 +400,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             pickle.dump(checkpoint_data, fp)
 
                         checkpoint = Checkpoint.from_directory(checkpoint_dir)
-                        train.report({"loss": best_test_loss, "fid_colour": fid_colour}, checkpoint=checkpoint)  # "fid_depth": fid_depth
+                        train.report({"loss": best_test_loss, "fid_colour": fid_colour, "fid_depth": fid_depth}, checkpoint=checkpoint)  # "fid_depth": fid_depth
 
     finally:
         if data_parallel:
