@@ -10,21 +10,23 @@ import torch
 from torchvision.transforms.v2.functional import horizontal_flip
 from torchvision.transforms.v2 import ColorJitter
 import random
+from .__init__ import register_dataset
 
 
+@register_dataset("nyu_depth")
 class NYUDepth(Dataset):
 
-    def __init__(self, root_data_dir, transform, train, modality, p_hor_flip=0, p_colour_jitter=0):
+    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0):
 
         super().__init__()
-        self.train = train
+        self.split = split
         self.root_data_dir = root_data_dir
 
-        self.index_path = os.path.join(root_data_dir, "data/nyu2_train.csv" if train else "data/nyu2_test.csv")
+        self.index_path = os.path.join(root_data_dir, "data/nyu2_train.csv" if split == "train" else "data/nyu2_test.csv")
         self.index = pd.read_csv(self.index_path, names=["colour", "depth"])
 
         self.mode_types = {"colour": cv2.IMREAD_COLOR, "depth": cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH}
-        self.image_depths = {"colour": 255, "depth": 255} if train else {"colour": 255, "depth": 10000}
+        self.image_depths = {"colour": 255, "depth": 255} if split == "train" else {"colour": 255, "depth": 10000}
 
         if isinstance(modality, str):
             modality = [modality]

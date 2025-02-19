@@ -42,7 +42,7 @@ import tempfile
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light
 from mmvae_objectives import m_dreg
-from ldm.data.dataset_NYU_Depth import NYUDepth
+from ldm.data import get_dataset
 import pyiqa
 
 enable_wandb = True
@@ -196,8 +196,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
         tx = v2.Compose([v2.Resize([conf.data.input_size, conf.data.input_size])])
 
-        train_dataset = NYUDepth(conf.data.datadir, transform=tx, train=True, modality=modalities, p_hor_flip=0.5, p_colour_jitter=0.1)
-        test_dataset = NYUDepth(conf.data.datadir, transform=tx, train=False, modality=modalities)
+        train_dataset = get_dataset(conf.data.dataset_name,
+                                    root_data_dir=conf.data.datadir,
+                                    transform=tx,
+                                    split="train",
+                                    modality=modalities,
+                                    p_hor_flip=0.5,
+                                    p_colour_jitter=0.1)
+        test_dataset = get_dataset(conf.data.dataset_name,
+                                   root_data_dir=conf.data.datadir,
+                                   transform=tx,
+                                   split="val",
+                                   modality=modalities)
 
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True) if data_parallel else None
         test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False) if data_parallel else None
