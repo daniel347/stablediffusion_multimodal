@@ -11,7 +11,7 @@ from torchvision.transforms.v2.functional import horizontal_flip
 from torchvision.transforms.v2 import ColorJitter
 import random
 import glob
-from .__init__ import register_dataset
+from .register_datasets import register_dataset
 
 
 @register_dataset("imagenet")
@@ -28,15 +28,20 @@ class ImagenetMultiModal(Dataset):
             modality = [modality]
         self.modality = modality
 
-        base_paths = glob.glob(os.path.join(root_data_dir, f"{split}/{modality[0]}/**/*.JPEG"), recursive=True)
+        self.image_extensions = {"colour": "JPEG", "depth": "JPX"}
+
         base_mod = modality[0]
+        base_mod_ext = self.image_extensions[base_mod]
+        base_paths = glob.glob(os.path.join(root_data_dir, f"{split}/{base_mod}/**/*.{base_mod_ext}"), recursive=True)
+
         self.mode_image_paths[modality[0]] = base_paths
 
         for mod in modality[1:]:
-            self.mode_image_paths[mod] = [bp.replace(base_mod, mod) for bp in base_paths]
+            self.mode_image_paths[mod] = [f"{bp.replace(base_mod, mod).strip(base_mod_ext)}{self.image_extensions[mod]}" for bp in base_paths]
 
         self.mode_types = {"colour": cv2.IMREAD_COLOR, "depth": cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH}
-        self.image_depths = {"colour": 255, "depth": 255} if self.split == "train" else {"colour": 255, "depth": 10000}
+        self.image_depths = {"colour": 255, "depth": 65535} if self.split == "train" else {"colour": 255, "depth": 65535}
+
 
         self.transform = transform
 
@@ -46,14 +51,14 @@ class ImagenetMultiModal(Dataset):
             self.colour_jitter = ColorJitter(0.1, 0.1, 0.1, 0.02)
 
     def __len__(self):
-        return len(self.index.index)
+        return len(self.mode_image_paths[self.modality[0]])
 
     def __getitem__(self, idx):
-        filepaths = {mod: self.mode_image_paths[idx] for mod in self.modality}
+        filepaths = {mod: self.mode_image_paths[mod][idx] for mod in self.modality}
 
         outs = []
         for mod in self.modality:
-            img = cv2.imread(os.path.join(self.root_data_dir, filepaths[mod]), self.mode_types[mod])
+            img = cv2.imread(filepaths[mod], self.mode_types[mod])
             if len(img.shape) == 2:
                 img = np.expand_dims(img, axis=-1)
             if img.shape[-1] == 3:

@@ -10,7 +10,7 @@ import torch
 from torchvision.transforms.v2.functional import horizontal_flip
 from torchvision.transforms.v2 import ColorJitter
 import random
-from .__init__ import register_dataset
+from .register_datasets import register_dataset
 
 
 @register_dataset("nyu_depth")
