@@ -40,7 +40,7 @@ import ray.cloudpickle as pickle
 import tempfile
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
-from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light
+from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light, save_model_ema
 from mmvae_objectives import m_dreg
 from ldm.data import get_dataset
 import pyiqa
@@ -269,6 +269,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 if conf.print_freq > 0 and i % conf.print_freq == 0 and enable_pbars:
                     pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
 
+                model.on_train_batch_end()  # Updates EMA if present
+
                 if i % scheduler_step_freq == 0:
                     scheduler.step()
                     # print(f"Learning rate: {scheduler.get_last_lr()}")
@@ -290,7 +292,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 pbar = enumerate(test_loader)
 
             b_loss = 0
-            with torch.no_grad():
+            with torch.no_grad(), model.ema_scope("Epoch test"):
                 for i, dataT in pbar:
                     data = unpack_data_nyu(dataT, device=device)
 
@@ -301,7 +303,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     if i == 0 and epoch % 1 == 0:
                         # Perform test generations
-                        N_gen = 8
+                        N_gen = 16
                         samples_zw = model.module.sample(None, batch_size=N_gen) if data_parallel else model.sample(
                             None, batch_size=N_gen)
                         samples_x = model_first_stage.decode(samples_zw)
@@ -367,13 +369,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         with Timer('MMVAEplus') as t:
             test_epoch(start_epoch)
-            fid_colour, fid_depth = test_fid(start_epoch)
-            print(f"FID colour: {fid_colour}   FID depth: {fid_depth}")
+            # fid_colour, fid_depth = test_fid(start_epoch)
+            # print(f"FID colour: {fid_colour}   FID depth: {fid_depth}")
             for epoch in range(start_epoch + 1, conf.training.num_epochs + 1 + start_epoch):
                 train_epoch(epoch)
 
                 test_loss = test_epoch(epoch)
-                fid_colour, fid_depth = test_fid(epoch)
+                # fid_colour, fid_depth = test_fid(epoch)
 
                 if test_loss < best_test_loss:
                     best_test_loss = test_loss
@@ -408,7 +410,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_stable_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="imagenet_stable_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

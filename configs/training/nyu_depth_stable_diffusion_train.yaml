@@ -4,8 +4,8 @@ experiment: "NYU Depth Stable Diffusion"
 print_freq: 50
 
 data:
-  dataset_name: "imagenet"
-  datadir: ../../datasets/imagenet/ILSVRC/Data/CLS-LOC
+  dataset_name: "nyu_depth"
+  datadir: ../mmvaeplus/data/nyu_data
   input_size: 256
 
   outputdir: ../outputs

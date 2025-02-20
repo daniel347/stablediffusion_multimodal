@@ -163,6 +163,15 @@ def save_model_light(model, filepath):
             # save_vars(vae.state_dict(), fdir + '_' + vae.modelName + fext)
 
 
+def save_model_ema(model, optimiser, epoch, filepath):
+    checkpoint = {
+        'model_state_dict': model.state_dict(),
+        'ema_state_dict': model.model_ema.state_dict(),
+        'optimizer_state_dict': optimiser.state_dict(),
+        'epoch': epoch
+    }
+    save_vars(checkpoint, filepath)
+
 
 class AdamWwithEMAandWings(optim.Optimizer):
     # credit to https://gist.github.com/crowsonkb/65f7265353f403714fce3b2595e0b298
