@@ -197,7 +197,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         # Load NYU dataset
         modalities = ['colour', 'depth']
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
-        tx = v2.Compose([v2.Resize([conf.data.input_size, conf.data.input_size])])
+        tx = v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])
 
         train_dataset = get_dataset(conf.data.dataset_name,
                                     root_data_dir=conf.data.datadir,
