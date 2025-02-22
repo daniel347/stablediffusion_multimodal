@@ -1,0 +1,32 @@
+import pyiqa
+import torch
+from pyiqa.archs.fid_arch import generate_reference_statistics
+import glob
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+fid = pyiqa.create_metric("fid", device=device)
+
+data_dir = "../../datasets/imagenet/ILSVRC/Data/CLS-LOC/val"
+
+colour_imgs = glob.glob(data_dir+"/colour/**/*")
+depth_imgs = glob.glob(data_dir+"/depth/**/*")
+
+print("Found {} colour images and {} depth images".format(len(colour_imgs), len(depth_imgs)))
+
+generate_reference_statistics(dir=None,
+                              files=colour_imgs,
+                              name="imagenet_colour",
+                              model=fid.net.model,
+                              device=device,
+                              center_crop=True)
+
+generate_reference_statistics(dir=None,
+                              files=colour_imgs,
+                              name="imagenet_depth",
+                              model=fid.net.model,
+                              device=device,
+                              center_crop=True)
+
+
+
