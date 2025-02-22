@@ -280,6 +280,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         grid = make_grid(d, nrow=8)
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
 
+
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
             if enable_wandb: wandb.log({"Loss/train": epoch_loss}, step=epoch)
@@ -321,7 +322,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             return epoch_loss
 
         def test_fid(epoch, n_samples=32, use_diffusion=True):
-            gen_batch_size = 8
+            gen_batch_size = 16
             n_batches = n_samples // gen_batch_size
 
             tempdirs = {}
@@ -356,7 +357,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             fid_scores = []
             for mod in modalities:
-                fid_score = fid(tempdirs[mod], dataset_name=f"nyu_{mod}", dataset_res=299, dataset_split="test")
+                split = "test" if conf.data.dataset_name == "nyu_depth" else "val"
+                fid_score = fid(tempdirs[mod], dataset_name=f"{conf.data.dataset_name}_{mod}", dataset_res=299, dataset_split=split)
                 if enable_wandb:
                     wandb.log({f"FID_{mod}": fid_score}, step=epoch)
 
@@ -369,13 +371,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         with Timer('MMVAEplus') as t:
             test_epoch(start_epoch)
-            # fid_colour, fid_depth = test_fid(start_epoch)
-            # print(f"FID colour: {fid_colour}   FID depth: {fid_depth}")
+            fid_colour, fid_depth = test_fid(start_epoch)
+            print(f"FID colour: {fid_colour}   FID depth: {fid_depth}")
             for epoch in range(start_epoch + 1, conf.training.num_epochs + 1 + start_epoch):
                 train_epoch(epoch)
 
                 test_loss = test_epoch(epoch)
-                # fid_colour, fid_depth = test_fid(epoch)
+                fid_colour, fid_depth = test_fid(epoch)
 
                 if test_loss < best_test_loss:
                     best_test_loss = test_loss

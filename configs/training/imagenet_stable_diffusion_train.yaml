@@ -5,7 +5,7 @@ print_freq: 50
 
 data:
   dataset_name: "imagenet"
-  datadir: ../../datasets/imagenet/ILSVRC/Data/CLS-LOC
+  datadir: ../../datasets/imagenet/ILSVRC/Data/CLS-LOC # /home/ds3119/multimodal_generation/stablediffusion/tests/imagenet_mock
   input_size: 128
 
   outputdir: ../outputs
@@ -15,7 +15,7 @@ training:
   gamma: 0.9995
   batch_size: 64
   num_epochs: 4
-  start_epoch: 0
+  start_epoch: 4
   patience: 3
   test_only: False
 
@@ -23,5 +23,5 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm-imagenet.yaml
-model_initialisation: # "/home/ds3119/multimodal_generation/trained_models/stable_diffusion_nyu_2025_02_07__11_11_50/model_5.rar"
+model_initialisation: ../outputs/ImageNet-Stable-Diffusion/checkpoints/2025_02_20__19_26_12/model_4.rar #  ../outputs/imagenet_stable_diffusion_4.rar  #  "/home/ds3119/multimodal_generation/trained_models/stable_diffusion_nyu_2025_02_07__11_11_50/model_5.rar"
 init_from_stable_diffusion: False
