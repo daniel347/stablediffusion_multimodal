@@ -68,3 +68,9 @@ class NYUDepth(Dataset):
             outs[colour_ind] = self.colour_jitter(outs[colour_ind])
 
         return outs
+
+    def depth_display(self, img):
+        return img.repeat(1, 1, 3, 1, 1)
+
+    def colour_display(self, img):
+        return img

@@ -554,7 +554,7 @@ class Decoder(nn.Module):
     def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
                  attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
                  resolution, z_channels, give_pre_end=False, tanh_out=False, use_linear_attn=False,
-                 attn_type="vanilla", checkpoint=False, **ignorekwargs):
+                 attn_type="vanilla", checkpoint=False, **kwargs):
         super().__init__()
         if use_linear_attn: attn_type = "linear"
         self.ch = ch
@@ -627,6 +627,10 @@ class Decoder(nn.Module):
                                         kernel_size=3,
                                         stride=1,
                                         padding=1)
+        self.is_semseg = kwargs.get("is_semseg", False)
+        if self.is_semseg:
+            self.act_out = torch.nn.Softmax(dim=1)
+
 
     def forward(self, z):
         #assert z.shape[1:] == self.z_shape[1:]
@@ -661,6 +665,8 @@ class Decoder(nn.Module):
         h = self.conv_out(h)
         if self.tanh_out:
             h = torch.tanh(h)
+        elif self.is_semseg:
+            h = self.act_out(h)
         return h
 
 

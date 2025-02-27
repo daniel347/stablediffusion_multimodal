@@ -2,6 +2,7 @@ import torch
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from contextlib import contextmanager
+from omegaconf import OmegaConf
 
 from ldm.modules.diffusionmodules.model import Encoder, Decoder
 from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
@@ -30,16 +31,30 @@ class AutoencoderKL(pl.LightningModule):
                  prior_dist=dist.Normal,
                  likelihood_dist=dist.Laplace,
                  post_dist=dist.Normal,
-                 conform_to_3_channel=False
+                 conform_to_3_channel=False,
+                 is_semseg=False
                  ):
         super().__init__()
         self.learn_logvar = learn_logvar
         self.image_key = image_key
 
-        self.conform_to_3_channel = conform_to_3_channel
-        if conform_to_3_channel:
-            self.input_expansion_factor = int(3 / ddconfig["in_channels"])
+        if isinstance(likelihood_dist, str): likelihood_dist = getattr(dist, likelihood_dist)
+        if isinstance(prior_dist, str): prior_dist = getattr(dist, prior_dist)
+        if isinstance(post_dist, str): post_dist = getattr(dist, post_dist)
 
+        ddconfig = OmegaConf.to_container(ddconfig)
+
+        self.is_semseg = is_semseg
+
+        self.conform_to_3_channel = conform_to_3_channel
+        if is_semseg:
+            ddconfig["is_semseg"] = True
+
+            assert likelihood_dist == dist.Categorical, "Semantic segmentation requires a Categorical likelihood distribution"
+
+        if conform_to_3_channel:
+            assert (not is_semseg), "You can only conform to 3 channels if your input is less than 3 channels (i.e. no semantic segmentation)"
+            self.input_expansion_factor = int(3 / ddconfig["in_channels"])
             ddconfig["in_channels"] = 3
             ddconfig["out_ch"] = 3
 
@@ -80,8 +95,6 @@ class AutoencoderKL(pl.LightningModule):
         if ckpt_path is not None:
             print(f"Loading AutoencoderKL checkpoint from {ckpt_path}")
             self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys)
-
-
 
     def expand_input_channels(self, x):
         return x.repeat(1, self.input_expansion_factor, 1, 1)
@@ -152,15 +165,39 @@ class AutoencoderKL(pl.LightningModule):
             dec = dec.view(*new_shape)
             if self.conform_to_3_channel:
                 dec = dec.mean(dim=2, keepdim=True)
+            if self.is_semseg:
+                # Categorical distribution requires the category probabilities at the last dimension
+                dec = dec.permute(0, 1, 3, 4, 2)
+
         else:
             z = self.post_quant_conv(z)
             dec = self.decoder(z)
             if self.conform_to_3_channel:
                 dec = dec.mean(dim=1, keepdim=True)
+            if self.is_semseg:
+                # Categorical distribution requires the category probabilities at the last dimension
+                dec = dec.permute(0, 2, 3, 1)
 
-        # Use a Fixed scale for the distribution as in MMVAE+ paper
-        dec_dist = self.px_u(dec, torch.tensor(0.01).to(dec.device))
+        if self.is_semseg:
+            # No scale for a Categorical distribution
+            dec_dist = self.px_u(dec)
+        else:
+            # Use a Fixed scale for the distribution as in MMVAE+ paper
+            dec_dist = self.px_u(dec, torch.tensor(0.01).to(dec.device))
         return dec_dist
+
+    def categorical_sample_to_one_hot(self, sample):
+        if sample.dim() == 4:
+            onehot = torch.zeros([*sample.shape[:2], self.ddconfig["in_channels"], *sample.shape[2:]]).to(sample.device)
+            for i in range(self.ddconfig["in_channels"]):
+                onehot[:, :, i] = sample == i
+        elif sample.dim() == 3:
+            onehot = torch.zeros([*sample.shape[0], self.ddconfig["in_channels"], *sample.shape[2:]]).to(sample.device)
+            for i in range(self.ddconfig["in_channels"]):
+                onehot[:, i] = sample == i
+
+        return onehot
+
 
     def forward(self, input, sample_posterior=True, K=1):
         posterior = self.encode(input)
@@ -169,7 +206,8 @@ class AutoencoderKL(pl.LightningModule):
         if sample_posterior:
             z = posterior.sample(K, squeeze=False)
         else:
-            z = posterior.mode().expand(K, -1, -1, -1, -1)
+            z = posterior.mode()
+            z = z.expand(K, *[-1 for _ in range(z.shape[1:])])
 
         dec = self.decode(z)
         return posterior, dec, z

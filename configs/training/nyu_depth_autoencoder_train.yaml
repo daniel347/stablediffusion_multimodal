@@ -22,6 +22,16 @@ training:
 
   K: 1
 
+  wlpips: 1.0
+  wadversary: 0.1
+  discriminator:
+    target: ldm.models.discriminator.MMDiscriminator
+    params:
+      disc_params:
+        - in_size: 128
+        - in_size: 128
+  discriminator_lr: 1.0e-4
+
 eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 

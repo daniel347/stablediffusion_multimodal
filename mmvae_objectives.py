@@ -2,6 +2,7 @@
 import torch
 from numpy import prod
 from utils import log_mean_exp, is_multidata
+from ldm.data.dataset_CelebAMask import MMCelebA
 
 eta = 1e-20
 
@@ -46,6 +47,7 @@ def _m_elbo(model, x, K=1, test=False):
         lws.append(lw)
     return torch.stack(lws)  # (n_modality * n_samples) x batch_size, batch_size
 
+
 def m_elbo(model, x, K=1, test=False):
     """
     ELBO (IWAE) objective
@@ -56,8 +58,11 @@ def m_elbo(model, x, K=1, test=False):
     lw = torch.cat(lw, 2)  # concat on batch
     return log_mean_exp(lw, dim=1).mean(0).sum()
 
-def _m_dreg(model, x, K=1, test=False, data_parallel=False, **kwargs):
+
+def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversary=0.0, train_adversary_f=None, **kwargs):
     beta = kwargs.get("beta", 1.0)
+
+    lpips = kwargs.get("lpips", None)
 
     if test:
         qu_xs, px_us, uss = model("self_and_cross_modal_generation_forward", x, K)
@@ -82,14 +87,65 @@ def _m_dreg(model, x, K=1, test=False, data_parallel=False, **kwargs):
         lpw = mod.pw(*mod.pw_params).log_prob(ws).sum(dim=(-1, -2, -3))
         lqz_x = log_mean_exp(torch.stack([qz_x.log_prob(zs).sum(dim=(-1, -2, -3)) for qz_x in qz_xs]))
         lqw_x = qw_xs[r].log_prob(ws).sum(dim=(-1, -2, -3))
-        lpx_u = [px_u.log_prob(x[d]).view(*px_u.batch_shape[:2], -1)
-                 .mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
-                 for d, px_u in enumerate(px_us[r])]
+
+        lpx_u = []
+        for d, px_u in enumerate(px_us[r]):
+            lpx_u_elem = 0
+
+            if isinstance(px_u, torch.distributions.Categorical):
+                x_num = MMCelebA.one_hot_semseg_to_index(x[d])
+                lpx_u_elem += px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
+            else:
+                lpx_u_elem += px_u.log_prob(x[d]).view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
+
+            wlpips_d = wlpips[d] if hasattr(wlpips, "__getitem__") else wlpips
+            if wlpips_d > 0.0:
+                lpx_u_elem += - wlpips_d * lpips(x[d].squeeze(0), px_u.mode.squeeze(0))
+
+            lpx_u.append(lpx_u_elem)
+
 
         lpx_u = torch.stack(lpx_u).sum(0)
         lw = lpx_u + beta * (lpz + lpw - lqz_x - lqw_x)
+
         lws.append(lw)
+
+    if train_adversary_f is not None:
+        disc_loss, autoencoder_loss = train_adversary_f(x, px_us[r])
+        lws = torch.stack(lws) - wadversary * autoencoder_loss / len(qu_xs_)
+        return lws, torch.stack(uss)
+
     return torch.stack(lws), torch.stack(uss)
+
+
+def train_adversary(real_data, px_us, discriminator, optimiser, device):
+    optimiser.zero_grad()
+
+    real_output = torch.stack(discriminator(real_data), dim=1)
+    fake_outputs_detach = [torch.stack(discriminator([t.detach() for t in px_u]), dim=1) for px_u in px_us]
+
+    real_labels = torch.ones(real_output.shape).to(device)
+    fake_labels = torch.zeros(fake_outputs_detach[0].shape).to(device)
+
+    weight_real = 1.0
+    weight_fake = 1.0
+
+    real_loss = torch.nn.functional.binary_cross_entropy(real_output, real_labels) * weight_real
+    fake_loss = 0
+    for out in fake_outputs_detach:
+        fake_loss += torch.nn.functional.binary_cross_entropy(out, fake_labels) * weight_fake
+
+    disc_loss = real_loss + fake_loss
+    disc_loss.backward()
+    optimiser.step()
+
+    fake_outputs = [torch.stack(discriminator(px_u), dim=1) for px_u in px_us]
+    autoencoder_loss = 0
+    for out in fake_outputs:
+        autoencoder_loss += torch.nn.functional.binary_cross_entropy(out, real_labels) * weight_fake
+
+    return disc_loss, autoencoder_loss
+
 
 def m_dreg(model, x, K=1, test=False, **kwargs):
     """

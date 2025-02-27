@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import pyiqa
 
 
 class AbstractDistribution:
@@ -81,6 +82,25 @@ class DiagonalGaussianDistribution(object):
         mean_gathered = torch.nn.parallel.gather(self.mean, target_device, dim)
         logvar_gathered = torch.nn.parallel.gather(self.logvar, target_device, dim)
         return DiagonalGaussianDistribution(mean_gathered, logvar_gathered)
+
+
+class L1L2LpipsDistribution():
+
+    def __init__(self, l1w, l2w, lpipsw, mean_like):
+        self.l1w = l1w
+        self.l2w = l2w
+
+
+        self.mean_like = mean_like
+        self.lpips = pyiqa.create_metric("lpips", as_loss=True)
+
+    def log_prob(self, sample):
+        l1_loss = torch.nn.functional.l1_loss(sample, self.mean_like, reduction='none')
+        l2_loss = torch.nn.functional.mse_loss(sample, self.mean_like, reduction='none')
+        lpips_loss = self.lpips(sample, self.mean_like)
+
+        return -self.l1w * l1_loss - self.l2w * l2_loss - self.lpipsw * lpips_loss
+
 
 
 def normal_kl(mean1, logvar1, mean2, logvar2):

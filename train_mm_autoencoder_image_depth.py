@@ -29,12 +29,16 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 import torchvision.utils as tvu
+from torch.amp import GradScaler, autocast
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light
-from mmvae_objectives import m_dreg
-from ldm.data.dataset_NYU_Depth import NYUDepth
+from mmvae_objectives import m_dreg, train_adversary
+from ldm.data import get_dataset
 
+import pyiqa
+
+enable_wandb = False
 
 def expand_sub_confs(conf):
     # Expand sub-configs
@@ -70,7 +74,16 @@ def initialise_model(conf):
                 first_stage_dict[new_name] = param
 
         for vae in model.vaes:
-            M, U = vae.load_state_dict(copy.deepcopy(first_stage_dict), strict=False)
+            ignore_keys = ["encoder.conv_in", "decoder.conv_out"] if vae.is_semseg else []
+            sd = copy.deepcopy(first_stage_dict)
+            keys = list(sd.keys())
+            for k in keys:
+                for ik in ignore_keys:
+                    if k.startswith(ik):
+                        print("Deleting key {} from state_dict.".format(k))
+                        del sd[k]
+
+            M, U = vae.load_state_dict(sd, strict=False)
             for m in M:
                 print(f"Missing key: {m}")
             for u in U:
@@ -84,7 +97,7 @@ def initialise_model(conf):
 
     return model
 
-def stack_generation_matrices(mats, data):
+def stack_generation_matrices(mats, data, mode_display_fs=None):
     # Given a list of N_gen cross and self generation matrices, get them into a single matix
     n_modes = len(mats[0])
     n_inputs = data[0].shape[0]
@@ -93,13 +106,14 @@ def stack_generation_matrices(mats, data):
     for i in range(n_modes):
         for j in range(n_modes):
             img_shape = (3, *mats[0][i][j].shape[3:])
-            input_data = data[i].unsqueeze(0).detach().cpu()
-            output_data = [m[i][j].detach().cpu() for m in mats]
+            input_data = data[i].detach().cpu()
+            output_data = [m[i][j].squeeze(0).detach().cpu() for m in mats]
 
-            if i == 1:
-                input_data = input_data.repeat(1, 1, 3, 1, 1)
-            if j == 1:
-                output_data = [m.repeat(1, 1, 3, 1, 1) for m in output_data]
+            if mode_display_fs is not None:
+                # display functions dont handle batches so we use list comprehension
+                input_data = torch.stack([mode_display_fs[i](inp) for inp in input_data], dim=0)
+                output_data = [torch.stack([mode_display_fs[j](o) for o in out], dim=0) for out in output_data]
+
             out_mat[i][j] = make_grid(torch.cat([input_data] + output_data, dim=0).view(-1, *img_shape),
                                       nrow=n_inputs)
 
@@ -144,18 +158,19 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 OmegaConf.save(config=conf, f=fp)
 
         # WandB
-        wandb.login()
-        wandb.init(
-            # Set the project where this run will be logged
-            project=conf.experiment,
-            # Track hyperparameters and run metadata
-            config=OmegaConf.to_container(conf),
-            # Run name
-            name=f"{runId}_{str(rank)}",
-            group=f"DDP_{runId}",
-        )
+        if enable_wandb:
+            wandb.login()
+            wandb.init(
+                # Set the project where this run will be logged
+                project=conf.experiment,
+                # Track hyperparameters and run metadata
+                config=OmegaConf.to_container(conf),
+                # Run name
+                name=f"{runId}_{str(rank)}",
+                group=f"DDP_{runId}",
+            )
 
-        wandb.alert(title="Starting Run", text="Started training stable diffusion autoencoder on HPC")
+            wandb.alert(title="Starting Run", text="Started training stable diffusion autoencoder")
 
         # preparation for training
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
@@ -164,18 +179,54 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=10),
                                       ExponentialLR(optimizer, 0.99)])
 
-        # Load NYU dataset
+        if "discriminator" in conf.training and conf.training.discriminator is not None:
+            disc = instantiate_from_config(conf.training.discriminator)
+            disc_optimizer = optim.Adam(disc.parameters(), lr=conf.training.discriminator_lr, amsgrad=True)
+
+            train_adversary_f = partial(train_adversary, discriminator=disc, optimiser=disc_optimizer, device=device)
+        else:
+            train_adversary_f = None
+            assert conf.training.wadversary == 0.0
+
+        lpips = pyiqa.create_metric("lpips", device=device, as_loss=True)
+
+
+        scheduler_step_freq = 100
+
+        use_mixed_precision = conf.training.use_mixed_precision
+        if use_mixed_precision:
+            print("Using mixed precision training")
+            scaler = GradScaler()
+
+        # Load dataset
+        modalities = conf.data.modalities
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
-        tx = v2.Compose([v2.Resize([256, 256])])
+        tx = v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])
 
-        train_dataset = NYUDepth(conf.data.datadir, transform=tx, train=True, modality=['colour', 'depth'])
-        test_dataset = NYUDepth(conf.data.datadir, transform=tx, train=False, modality=['colour', 'depth'])
+        train_dataset = get_dataset(conf.data.dataset_name,
+                                    root_data_dir=conf.data.datadir,
+                                    transform=tx,
+                                    split="train",
+                                    modality=modalities,
+                                    p_hor_flip=0.5,
+                                    p_colour_jitter=0.1)
+        test_dataset = get_dataset(conf.data.dataset_name,
+                                   root_data_dir=conf.data.datadir,
+                                   transform=tx,
+                                   split="val",
+                                   modality=modalities)
 
-        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True) if data_parallel else None
-        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False) if data_parallel else None
+        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in modalities]
 
-        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=conf.training.batch_size, shuffle=False, sampler=train_sampler, **kwargs)
-        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False, sampler=test_sampler, **kwargs)
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
+                                           shuffle=True) if data_parallel else None
+        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,
+                                          shuffle=False) if data_parallel else None
+
+        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=conf.training.batch_size,
+                                                   shuffle=not data_parallel, sampler=train_sampler, **kwargs)
+        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
+                                                  sampler=test_sampler, **kwargs)
 
         # Set the learning rate forward to continue training after pause
         if conf.training.start_epoch > 0:
@@ -183,10 +234,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 scheduler.step()
 
         def unpack_data_nyu(data, device="cuda"):
-            return [data[0].to(device), data[1].to(device)]
+            return [d.to(device) for d in data]
 
         objective = partial(m_dreg, beta=conf.training.beta)
         t_objective = objective
+
+        best_test_loss = 10000
+        test_worsening_count = 0
+        early_stop = False
 
         def train(epoch):
             model.train()
@@ -201,19 +256,42 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 data = unpack_data_nyu(dataT, device=device)
                 # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                 optimizer.zero_grad()
-                loss = -objective(model, data, K=conf.training.K, data_parallel=data_parallel)
-                loss.backward()
+
+                if use_mixed_precision:
+                    with autocast(dtype=torch.float16, device_type="cuda"):
+                        loss = -objective(model, data,
+                                          K=conf.training.K,
+                                          data_parallel=data_parallel,
+                                          wlpips=conf.training.wlpips,
+                                          wadversary=conf.training.wadversary,
+                                          train_adversary=None,
+                                          lpips=lpips)
+
+                    scaler.scale(loss).backward()
+                else:
+                    loss = -objective(model, data,
+                                      K=conf.training.K,
+                                      data_parallel=data_parallel,
+                                      wlpips=conf.training.wlpips,
+                                      wadversary=conf.training.wadversary,
+                                      train_adversary=None,
+                                      lpips=lpips)
+                    loss.backward()
+
                 optimizer.step()
                 b_loss += loss.detach().item()
                 if conf.print_freq > 0 and i % conf.print_freq == 0:
                     pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
 
-                if i % 100 == 0:
+                if i % scheduler_step_freq == 0:
                     scheduler.step()
+
+                if i > 3:
+                    break
 
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
-            wandb.log({"Loss/train": epoch_loss}, step=epoch)
+            if enable_wandb: wandb.log({"Loss/train": epoch_loss}, step=epoch)
             print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
 
 
@@ -222,7 +300,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = unpack_data_nyu(dataT, device=device)
-                    loss = -t_objective(model, data, K=conf.training.K, test=True, data_parallel=data_parallel)
+                    loss = -t_objective(model, data,
+                                        K=conf.training.K,
+                                        test=True,
+                                        data_parallel=data_parallel,
+                                        wlpips=conf.training.wlpips,
+                                        wadversary=conf.training.wadversary,
+                                        train_adversary=None,
+                                        lpips=lpips)
+
                     b_loss += loss.detach().item()
                     if i == 0  and epoch % 1 == 0:
                         # Compute cross-generations
@@ -234,11 +320,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         for n in range(N_gen):
                             cg_imgs.append(model("self_and_cross_modal_generation", limited_data))
 
-                        cg_imgs = stack_generation_matrices(cg_imgs, limited_data)
+                        cg_imgs = stack_generation_matrices(cg_imgs, limited_data, display_data_fs)
 
                         for i in range(NUM_VAES):
                             for j in range(NUM_VAES):
-                                wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=epoch)
+                                if enable_wandb:
+                                    wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=epoch)
                         del cg_imgs
 
                         # Also save some example latent vectors
@@ -253,38 +340,48 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
                             latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
 
-                            wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=i)
-                            wandb.log({f'Reconstructions/m{j}': wandb.Image(reconstructions[j].mean)}, step=i)
+                            if enable_wandb:
+                                wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=i)
+                                wandb.log({f'Reconstructions/m{j}': wandb.Image(reconstructions[j].mean)}, step=i)
 
                         latent_img = latents[:, -latent_dim_z:].detach().cpu()
                         latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
                         latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
 
-                        wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
+                        if enable_wandb:
+                            wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
+
+                    if i > 3:
+                        break
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
-            wandb.log({"Loss/test": epoch_loss}, step=epoch)
+            if enable_wandb: wandb.log({"Loss/test": epoch_loss}, step=epoch)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
+
+            return epoch_loss
 
 
         with Timer('MMVAEplus') as t:
             test(0)
-            gen_samples = model("generate_unconditional", N=4)
-            for j in range(NUM_VAES):
-                wandb.log({'Generations/m{}'.format(j): wandb.Image(gen_samples[j])}, step=0)
-            del gen_samples
 
             for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
                 train(epoch)
-                if epoch % 1 == 0:
-                    test(epoch)
-                    gen_samples = model("generate_unconditional", N=4)
-                    for j in range(NUM_VAES):
-                        wandb.log({'Generations/m{}'.format(j): wandb.Image(gen_samples[j])}, step=epoch)
-                    del gen_samples
-                if epoch % 1 == 0 and (rank == 0 or not data_parallel):
-                    save_model_light(model.module if data_parallel else model, runPath + '/model_'+str(epoch)+'.rar')
+                test_loss = test(epoch)
+
+                if test_loss < best_test_loss:
+                    best_test_loss = test_loss
+                    test_worsening_count = 0
+                    if rank == 0 or not data_parallel:
+                        save_model_light(model.module if data_parallel else model,
+                                         runPath + '/model_' + str(epoch) + '.rar')
+                else:
+                    test_worsening_count += 1
+                    if test_worsening_count > conf.training.patience:
+                        print(f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
+
+                        break
+
 
     finally:
         if data_parallel:
@@ -292,7 +389,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

@@ -1,5 +1,6 @@
 __DATASETS__ = {}
 
+
 def register_dataset(name: str):
     def wrapper(cls):
         if __DATASETS__.get(name, None):

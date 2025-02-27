@@ -123,6 +123,9 @@ def namespace_to_dict(namespace):
     return dict
 
 
+def one_hot_semseg_to_index(one_hot):
+    return torch.argmax(one_hot, dim=-3)
+
 # Stolen from MMVAE+
 class Timer:
     def __init__(self, name):
