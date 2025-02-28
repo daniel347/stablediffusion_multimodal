@@ -15,8 +15,8 @@ data:
 training:
   use_mixed_precision: False
   objective: dreg
-  lr: 0.0  # 3.0e-4
-  batch_size: 3
+  lr: 1.0e-4  # 3.0e-4
+  batch_size: 16
   num_epochs: 5
 
   beta: 2.5
@@ -25,7 +25,7 @@ training:
 
   K: 1
 
-  wlpips: [0.0, 0.0]
+  wlpips: [0.2, 0.0]
   wadversary: 0
 
   #discriminator:

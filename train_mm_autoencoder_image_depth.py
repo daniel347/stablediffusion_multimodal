@@ -281,13 +281,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 optimizer.step()
                 b_loss += loss.detach().item()
                 if conf.print_freq > 0 and i % conf.print_freq == 0:
-                    pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
+                    print("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))    
+                pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
 
                 if i % scheduler_step_freq == 0:
                     scheduler.step()
-
-                if i > 3:
-                    break
 
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)

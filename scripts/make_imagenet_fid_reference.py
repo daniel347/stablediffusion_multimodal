@@ -7,7 +7,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 fid = pyiqa.create_metric("fid", device=device)
 
-data_dir = "../../datasets/imagenet/ILSVRC/Data/CLS-LOC/val"
+data_dir = "../../../datasets/imagenet/ILSVRC/Data/CLS-LOC/val"
 
 colour_imgs = glob.glob(data_dir+"/colour/**/*")
 depth_imgs = glob.glob(data_dir+"/depth/**/*")

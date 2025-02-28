@@ -12,9 +12,9 @@ data:
 
 training:
   lr: 5.0e-5
-  gamma: 0.9995
+  gamma: 0.9998
   batch_size: 64
-  num_epochs: 4
+  num_epochs: 6
   start_epoch: 4
   patience: 3
   test_only: False
