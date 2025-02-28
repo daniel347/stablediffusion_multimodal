@@ -15,7 +15,7 @@ data:
 training:
   use_mixed_precision: False
   objective: dreg
-  lr: 0.0  # 3.0e-4
+  lr: 3.0e-4
   batch_size: 3
   num_epochs: 5
 

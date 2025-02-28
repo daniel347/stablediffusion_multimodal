@@ -112,7 +112,7 @@ class MMVAEplus(nn.Module):
                     # Resample modality-specific encoding from modality-specific auxiliary distribution for decoding modality m
                     if self.cross_w_mode == "sample":
                         pw = vae.pw(*pw_params)
-                        latents_w = pw.rsample(torch.Size([us.size()[0], us.size()[1]])).to(x[0].device)
+                        latents_w = pw.rsample([us.size()[1]]).transpose(0, 1).to(x[0].device)
                     elif self.cross_w_mode == "constant":
                         latents_w = pw_params[0].unsqueeze(0).expand(*us.shape[:2], -1, -1, -1).to(x[0].device)
                     elif self.cross_w_mode == "zero":
@@ -176,6 +176,8 @@ class MMVAEplus(nn.Module):
                 for j in range(len(px_us[i])):
                     if isinstance(px_us[i][j], torch.distributions.Categorical):
                         recons[i][j] = MMCelebA.index_semseg_to_one_hot(px_us[i][j].mode)
+                    elif isinstance(px_us[i][j], torch.distributions.Bernoulli):
+                        recons[i][j] = px_us[i][j].mode
                     else:
                         recons[i][j] = px_us[i][j].mean
 

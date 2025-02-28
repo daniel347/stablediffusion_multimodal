@@ -47,8 +47,7 @@ class MMCelebA(Dataset):
                                 "ear_r": 14,
                                 "neck_l": 15,
                                 "eye_g": 16,
-                                "hat": 17
-                                }
+                                "hat": 17}
 
         px_colours = px.colors.qualitative.Dark24
         self.semseg_display_colours = {num: self.hex_to_rgb(px_colours[i]) for i, num in enumerate(self.semseg_labels.values())}
@@ -100,6 +99,7 @@ class MMCelebA(Dataset):
             submask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
             mask_class = "_".join(os.path.basename(mask_file).split(".")[0].split("_")[1:])
             mask[self.semseg_labels[mask_class], :, :] = submask // 255
+
         return torch.from_numpy(mask)
 
     def read_colour(self, index):
@@ -114,9 +114,10 @@ class MMCelebA(Dataset):
 
     def semseg_display(self, mask):
         mask_rgb = torch.zeros(*(3, *mask.shape[1:]), dtype=torch.float32)
+        mask_norm = mask/mask.sum(dim=0, keepdim=True)  # Norm so that multiple classes mix colours
         for i in range(mask.shape[0]):
-            mask_rgb += self.semseg_display_colours[i][:, None, None] * mask[i, :, :].unsqueeze(0).expand(3, -1, -1).float()
-        return mask_rgb / 255.0
+            mask_rgb += self.semseg_display_colours[i][:, None, None] * mask_norm[i, :, :].unsqueeze(0).expand(3, -1, -1).float()
+        return mask_rgb
 
     def colour_display(self, mask):
         return mask
@@ -143,7 +144,11 @@ class MMCelebA(Dataset):
         outs = []
         for mod in self.modality:
             img = self.mode_readers[mod](index)
-            if self.transform is not None:
+            if isinstance(self.transform, dict) and mod in self.transform:
+                # modality specific transform
+                img = self.transform[mod](img)
+            elif self.transform is not None:
+                # Shared transform for all modalities
                 img = self.transform(img)
             outs.append(img)
 
