@@ -629,7 +629,7 @@ class Decoder(nn.Module):
                                         padding=1)
         self.is_semseg = kwargs.get("is_semseg", False)
         if self.is_semseg:
-            self.act_out = torch.nn.Softmax(dim=1)
+            self.act_out = torch.nn.Sigmoid()
 
 
     def forward(self, z):

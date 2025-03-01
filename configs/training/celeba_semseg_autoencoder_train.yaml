@@ -1,11 +1,11 @@
 seed: 1
-device: "cuda:1"  # ["cuda:0", "cuda:1"]
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM CelebA Autoencoder (Stable Diffusion)"
 print_freq: 50
 
 data:
   dataset_name: mm_celeba
-  datadir: ../mmvaeplus/data/CelebAMask-HQ
+  datadir: ../../datasets/CelebAMask-HQ
   input_size: 128
   modalities: ["colour", "semseg"]
 
@@ -16,7 +16,7 @@ training:
   use_mixed_precision: False
   objective: dreg
   lr: 1.0e-4  # 3.0e-4
-  batch_size: 16
+  batch_size: 32
   num_epochs: 5
 
   beta: 2.5

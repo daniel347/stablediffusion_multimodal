@@ -20,7 +20,7 @@ import wandb
 
 import torch
 from torch import optim
-from torchvision.transforms import v2
+from torchvision.transforms import v2, InterpolationMode
 from torchvision.utils import make_grid
 from torch.profiler import ProfilerActivity, profile, record_function
 from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR
@@ -38,7 +38,7 @@ from ldm.data import get_dataset
 
 import pyiqa
 
-enable_wandb = False
+enable_wandb = True
 
 def expand_sub_confs(conf):
     # Expand sub-configs
@@ -201,7 +201,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         # Load dataset
         modalities = conf.data.modalities
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
-        tx = v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])
+        tx = {"colour": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)]),
+              "semseg": v2.Compose([v2.Resize(conf.data.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
+                                    v2.CenterCrop(conf.data.input_size)])}
 
         train_dataset = get_dataset(conf.data.dataset_name,
                                     root_data_dir=conf.data.datadir,
@@ -287,6 +289,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 if i % scheduler_step_freq == 0:
                     scheduler.step()
 
+                if enable_wandb and i == 0:
+                    for m, (name, dbatch) in enumerate(zip(modalities, data)):
+                        dbatch = dbatch.detach().cpu()
+                        dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                        grid = make_grid(dbatch, nrow=8)
+                        wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
+
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
             if enable_wandb: wandb.log({"Loss/train": epoch_loss}, step=epoch)
@@ -340,7 +349,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                             if enable_wandb:
                                 wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=i)
-                                wandb.log({f'Reconstructions/m{j}': wandb.Image(reconstructions[j].mean)}, step=i)
+
+                                recon_avg = reconstructions[j].mode if isinstance(reconstructions[i], torch.distributions.Bernoulli) else reconstructions[j].mean
+                                recon_display = torch.stack([display_data_fs[j](d) for d in recon_avg.detach().cpu()], dim=0)
+                                wandb.log({f'Reconstructions/m{j}': wandb.Image(recon_display)}, step=i)
 
                         latent_img = latents[:, -latent_dim_z:].detach().cpu()
                         latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
@@ -348,9 +360,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                         if enable_wandb:
                             wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
-
-                    if i > 3:
-                        break
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -405,8 +414,7 @@ def main(conf: DictConfig) -> None:
             run_training,
             args=(conf, True, len(conf.device)),
             nprocs=len(conf.device),
-            join=True
-        )
+            join=True)
 
 
 if __name__ == '__main__':

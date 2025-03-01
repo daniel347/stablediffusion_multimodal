@@ -50,7 +50,8 @@ class AutoencoderKL(pl.LightningModule):
         if is_semseg:
             ddconfig["is_semseg"] = True
 
-            assert likelihood_dist == dist.Categorical, "Semantic segmentation requires a Categorical likelihood distribution"
+            assert likelihood_dist == dist.Categorical or likelihood_dist == dist.Bernoulli, \
+                "Semantic segmentation requires a Categorical (one class per pixel) or Bernoilli (multiple classes per pixel) likelihood distribution"
 
         if conform_to_3_channel:
             assert (not is_semseg), "You can only conform to 3 channels if your input is less than 3 channels (i.e. no semantic segmentation)"
@@ -165,7 +166,7 @@ class AutoencoderKL(pl.LightningModule):
             dec = dec.view(*new_shape)
             if self.conform_to_3_channel:
                 dec = dec.mean(dim=2, keepdim=True)
-            if self.is_semseg:
+            if self.is_semseg and self.px_u == dist.Categorical:
                 # Categorical distribution requires the category probabilities at the last dimension
                 dec = dec.permute(0, 1, 3, 4, 2)
 
@@ -174,12 +175,12 @@ class AutoencoderKL(pl.LightningModule):
             dec = self.decoder(z)
             if self.conform_to_3_channel:
                 dec = dec.mean(dim=1, keepdim=True)
-            if self.is_semseg:
+            if self.is_semseg and self.px_u == dist.Categorical:
                 # Categorical distribution requires the category probabilities at the last dimension
                 dec = dec.permute(0, 2, 3, 1)
 
         if self.is_semseg:
-            # No scale for a Categorical distribution
+            # No scale for a Categorical or Bernoulli distribution
             dec_dist = self.px_u(dec)
         else:
             # Use a Fixed scale for the distribution as in MMVAE+ paper
