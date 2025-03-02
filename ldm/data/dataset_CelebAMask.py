@@ -114,7 +114,9 @@ class MMCelebA(Dataset):
 
     def semseg_display(self, mask):
         mask_rgb = torch.zeros(*(3, *mask.shape[1:]), dtype=torch.float32)
-        mask_norm = mask/mask.sum(dim=0, keepdim=True)  # Norm so that multiple classes mix colours
+        # Norm so that multiple classes mix colours - We clamp to allow background to be 0 everywhere.
+        mask_norm = mask/torch.clamp(mask.sum(dim=0, keepdim=True), 1.0)
+        mask_norm = torch.nan_to_num(mask_norm)
         for i in range(mask.shape[0]):
             mask_rgb += self.semseg_display_colours[i][:, None, None] * mask_norm[i, :, :].unsqueeze(0).expand(3, -1, -1).float()
         return mask_rgb

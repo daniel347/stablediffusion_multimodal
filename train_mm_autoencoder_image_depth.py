@@ -30,6 +30,7 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 import torchvision.utils as tvu
 from torch.amp import GradScaler, autocast
+from torch.nn.utils import clip_grad_norm_
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light
@@ -241,7 +242,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         objective = partial(m_dreg, beta=conf.training.beta)
         t_objective = objective
 
-        best_test_loss = 10000
+        best_test_loss = 1e9
         test_worsening_count = 0
         early_stop = False
 
@@ -270,6 +271,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                           lpips=lpips)
 
                     scaler.scale(loss).backward()
+                    if conf.training.clip_grad_norm > 0:
+                        scaler.unscale_(optimizer)
+                        clip_grad_norm_(model.parameters(), conf.training.clip_grad_norm)
+                    scaler.step(optimizer)
+
+
                 else:
                     loss = -objective(model, data,
                                       K=conf.training.K,
@@ -278,9 +285,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                       wadversary=conf.training.wadversary,
                                       train_adversary=None,
                                       lpips=lpips)
-                    loss.backward()
 
-                optimizer.step()
+                    loss.backward()
+                    # print(f"grad norm: {get_total_norm(model.parameters())}")
+                    # grad_norm_sum = (grad_norm_sum + get_total_norm(model.parameters()))/(count + 1)
+
+                    if conf.training.clip_grad_norm is not None:
+                        clip_grad_norm_(model.parameters(), conf.training.clip_grad_norm)
+                    optimizer.step()
+
                 b_loss += loss.detach().item()
                 if conf.print_freq > 0 and i % conf.print_freq == 0:
                     print("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))    
@@ -386,7 +399,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     test_worsening_count += 1
                     if test_worsening_count > conf.training.patience:
                         print(f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
-
                         break
 
 

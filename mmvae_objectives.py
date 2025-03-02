@@ -59,7 +59,7 @@ def m_elbo(model, x, K=1, test=False):
     return log_mean_exp(lw, dim=1).mean(0).sum()
 
 
-def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversary=0.0, train_adversary_f=None, **kwargs):
+def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversary=0.0, train_adversary_f=None, fail_on_nan=True, **kwargs):
     beta = kwargs.get("beta", 1.0)
 
     lpips = kwargs.get("lpips", None)
@@ -74,6 +74,10 @@ def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversa
     # for r, qu_x in enumerate(qu_xs_):
     for r, qu_x in enumerate(qu_xs_):
         qu_x_r_mean, qu_x_r_std = mod.vaes[r].qu_x_params.mean, mod.vaes[r].qu_x_params.std
+        if fail_on_nan:
+            assert not torch.isnan(qu_x_r_mean).any(), f"Model output is nan (qu_x_r_mean[{r}])"
+            assert not torch.isnan(qu_x_r_std).any(), f"Model output is nan (qu_x_r_std[{r}])"
+
         qw_x_mean, qz_x_mean = torch.split(qu_x_r_mean, [mod.w_channels, mod.z_channels], dim=1)
         qw_x_std, qz_x_std = torch.split(qu_x_r_std, [mod.w_channels, mod.z_channels], dim=1)
         qw_x = mod.vaes[r].qu_x(qw_x_mean, qw_x_std)
@@ -83,6 +87,15 @@ def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversa
     lws = []
     for r, qu_x in enumerate(qu_xs_):
         ws, zs = torch.split(uss[r], [mod.w_channels, mod.z_channels], dim=2)
+
+        if fail_on_nan:
+            assert not torch.isnan(uss[r]).any(), f"Model output is nan (uss[{r}])"
+
+            for param in mod.pz_params:
+                assert not torch.isnan(param).any(), f"Model output is nan (pz_params[{r}])"
+            for param in mod.pw_params:
+                assert not torch.isnan(param).any(), f"Model output is nan (pw_params[{r}])"
+
         lpz = mod.pz(*mod.pz_params).log_prob(zs).sum(dim=(-1, -2, -3))
         lpw = mod.pw(*mod.pw_params).log_prob(ws).sum(dim=(-1, -2, -3))
         lqz_x = log_mean_exp(torch.stack([qz_x.log_prob(zs).sum(dim=(-1, -2, -3)) for qz_x in qz_xs]))
@@ -98,9 +111,21 @@ def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversa
             else:
                 lpx_u_elem += px_u.log_prob(x[d]).view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
 
+            if fail_on_nan:
+                if isinstance(px_u, torch.distributions.Bernoulli) or isinstance(px_u, torch.distributions.Categorical):
+                    assert not torch.isnan(px_u.probs).any(), f"Model output is nan (px_u.probs[{r}][{d}])"
+                else:
+                    assert not torch.isnan(px_u.loc).any(), f"Model output is nan (px_u.mean[{r}][{d}])"
+                    assert not torch.isnan(px_u.scale).any(), f"Model output is nan (px_u.variance[{r}][{d}])"
+
+                assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpx_u_elem[{r}][{d}])"
+
             wlpips_d = wlpips[d] if hasattr(wlpips, "__getitem__") else wlpips
             if wlpips_d > 0.0:
                 lpx_u_elem += - wlpips_d * lpips(x[d].squeeze(0), px_u.mode.squeeze(0))
+
+            if fail_on_nan:
+                assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpips [{r}][{d}])"
 
             lpx_u.append(lpx_u_elem)
 
