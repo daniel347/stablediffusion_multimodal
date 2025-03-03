@@ -301,3 +301,39 @@ def remove_module_prefix(state_dict):
             new_state_dict[key] = value
 
     return new_state_dict
+
+
+# Borrowed and modified from https://github.com/pseeth/autoclip/blob/master/autoclip.py
+
+class GradAutoClipper():
+
+    def __init__(self, model, clip_percentile=95, clip_update_freq=10, keep_history_upto=5000, start_clip=1):
+        self.model = model
+        self.grad_history = []
+        self.clip_percentile = clip_percentile
+
+        self.clip_value = start_clip
+        self.clip_update_freq = clip_update_freq
+        self.steps_since_update = 0
+
+        self.keep_history_upto = keep_history_upto
+        self.enable_clip = True
+
+    def _get_grad_norm(self):
+        total_norm = 0
+        for p in self. model.parameters():
+            if p.grad is not None:
+                param_norm = p.grad.data.norm(2)
+                total_norm += param_norm.item() ** 2
+        total_norm = total_norm ** (1. / 2)
+        return total_norm
+
+    def autoclip_grad(self):
+        if self.steps_since_update > self.clip_update_freq or self.clip_value is None:
+            obs_grad_norm = self._get_grad_norm()
+            self.grad_history.append(obs_grad_norm)
+            if len(self.grad_history) > self.keep_history_upto:
+                self.grad_history.pop(0)  # Drop the oldest observation
+            self.clip_value = np.percentile(self.grad_history, self.clip_percentile)
+
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_value)

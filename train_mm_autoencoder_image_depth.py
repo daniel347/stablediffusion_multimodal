@@ -33,7 +33,7 @@ from torch.amp import GradScaler, autocast
 from torch.nn.utils import clip_grad_norm_
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
-from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light
+from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light, GradAutoClipper
 from mmvae_objectives import m_dreg, train_adversary
 from ldm.data import get_dataset
 
@@ -231,6 +231,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
                                                   sampler=test_sampler, **kwargs)
 
+        grad_clipper = None
+        if "grad_clipper" in conf.training:
+            grad_clipper = GradAutoClipper(model, **conf.training.grad_clipper)
+
         # Set the learning rate forward to continue training after pause
         if conf.training.start_epoch > 0:
             for _ in range(len(train_loader)//100):
@@ -271,9 +275,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                           lpips=lpips)
 
                     scaler.scale(loss).backward()
-                    if conf.training.clip_grad_norm > 0:
+                    if grad_clipper is not None:
                         scaler.unscale_(optimizer)
-                        clip_grad_norm_(model.parameters(), conf.training.clip_grad_norm)
+                        grad_clipper.autoclip_grad()
                     scaler.step(optimizer)
 
 
@@ -290,8 +294,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     # print(f"grad norm: {get_total_norm(model.parameters())}")
                     # grad_norm_sum = (grad_norm_sum + get_total_norm(model.parameters()))/(count + 1)
 
-                    if conf.training.clip_grad_norm is not None:
-                        clip_grad_norm_(model.parameters(), conf.training.clip_grad_norm)
+                    if grad_clipper is not None:
+                        grad_clipper.autoclip_grad()
                     optimizer.step()
 
                 b_loss += loss.detach().item()
