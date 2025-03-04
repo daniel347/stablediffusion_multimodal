@@ -335,6 +335,7 @@ class GradAutoClipper():
             if len(self.grad_history) > self.keep_history_upto:
                 self.grad_history.pop(0)  # Drop the oldest observation
             self.clip_value = np.percentile(self.grad_history, self.clip_percentile)
+            self.steps_since_update += 1
 
         print(f"Clipping gradients to {self.clip_value}")
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_value, error_if_nonfinite=True)

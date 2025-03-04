@@ -192,7 +192,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         lpips = pyiqa.create_metric("lpips", device=device, as_loss=True)
 
 
-        scheduler_step_freq = 100
+        scheduler_step_freq = 50
 
         use_mixed_precision = conf.training.use_mixed_precision
         if use_mixed_precision:
@@ -230,6 +230,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                                    shuffle=not data_parallel, sampler=train_sampler, **kwargs)
         test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
                                                   sampler=test_sampler, **kwargs)
+
+        if "weight_semseg_classes" in conf.training and conf.training.weight_semseg_classes is not None:
+            print("using inverse class frequency weighting for semantic segmentation loss")
+            class_freqs = torch.load(os.path.join(conf.data.datadir, conf.training.weight_semseg_classes))
+            class_weights = 1.0 / class_freqs
+            class_weights /= class_weights.sum()
+            class_weights = class_weights.to(device)
+
+            class_weights = [class_weights if m == "semseg" else None for m in modalities]
+        else:
+            class_weights = [None for _ in modalities]
+
 
         grad_clipper = None
         if "grad_clipper" in conf.training:
@@ -272,7 +284,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                           wlpips=conf.training.wlpips,
                                           wadversary=conf.training.wadversary,
                                           train_adversary=None,
-                                          lpips=lpips)
+                                          lpips=lpips,
+                                          channel_weighting=class_weights)
 
                     scaler.scale(loss).backward()
                     if grad_clipper is not None:
@@ -288,7 +301,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                       wlpips=conf.training.wlpips,
                                       wadversary=conf.training.wadversary,
                                       train_adversary=None,
-                                      lpips=lpips)
+                                      lpips=lpips,
+                                      channel_weighting=class_weights)
 
                     loss.backward()
                     # print(f"grad norm: {get_total_norm(model.parameters())}")
@@ -331,7 +345,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                         wlpips=conf.training.wlpips,
                                         wadversary=conf.training.wadversary,
                                         train_adversary=None,
-                                        lpips=lpips)
+                                        lpips=lpips,
+                                        channel_weighting=class_weights)
 
                     b_loss += loss.detach().item()
                     if i == 0  and epoch % 1 == 0:
@@ -387,7 +402,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
 
         with Timer('MMVAEplus') as t:
-            test(0)
+            # test(0)
 
             for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
                 train(epoch)

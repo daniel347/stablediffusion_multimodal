@@ -91,6 +91,16 @@ class MMCelebA(Dataset):
 
         print("Found the following labels: ", self.semseg_labels)
 
+    def compute_semseg_class_freqs(self, n_imgs=-1):
+        cropped_list = self.index_list[:n_imgs] if n_imgs > 0 else self.index_list
+        class_counts = torch.zeros(len(self.semseg_labels))
+        for index in tqdm.tqdm(cropped_list):
+            img = self.mode_readers["semseg"](index)
+            img_counts = img.sum(dim=[1,2])
+            class_counts += img_counts
+
+        return class_counts/class_counts.sum()
+
     def read_semseg(self, index):
         p = os.path.join(self.mask_dir, f"{index:05d}_*.png")
         mask_files = glob.glob(p)

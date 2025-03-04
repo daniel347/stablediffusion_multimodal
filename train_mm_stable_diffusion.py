@@ -198,18 +198,21 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         modalities = ['colour', 'depth']
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
         tx = v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])
+        return_class = conf.data.return_class
 
         train_dataset = get_dataset(conf.data.dataset_name,
                                     root_data_dir=conf.data.datadir,
                                     transform=tx,
                                     split="train",
                                     modality=modalities,
+                                    return_class=return_class,
                                     p_hor_flip=0.5,
                                     p_colour_jitter=0.1)
         test_dataset = get_dataset(conf.data.dataset_name,
                                    root_data_dir=conf.data.datadir,
                                    transform=tx,
                                    split="val",
+                                   return_class=return_class,
                                    modality=modalities)
 
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True) if data_parallel else None
@@ -223,8 +226,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             for _ in range(len(train_loader)//scheduler_step_freq):
                 scheduler.step()
 
-        def unpack_data_nyu(data, device="cuda"):
-            return [d.to(device) for d in data]
+        def unpack_data_nyu(data, device="cuda", has_class=False):
+            if has_class:
+                return unpack_data_nyu(data[0], device=device), data[1].to(device)
+            else:
+                return [d.to(device) for d in data]
 
         best_test_loss = 10000
         test_worseining_count = 0
@@ -243,20 +249,23 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 pbar = enumerate(train_loader)
 
             for i, dataT in pbar:
-                data = unpack_data_nyu(dataT, device=device)
+                if return_class:
+                    data, classes = unpack_data_nyu(dataT, device=device, has_class=True)
+                else:
+                    data = unpack_data_nyu(dataT, device=device)
                 # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                 optimizer.zero_grad()
 
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
                         latents = model_first_stage.encode(data)
-                        loss, loss_dict = model(latents)
+                        loss, loss_dict = model(latents, c=(classes if return_class else None))
 
                     scaler.scale(loss).backward()
                 else:
                     latents = model_first_stage.encode(data)
                     print(f"Latent shape: {latents.shape}")
-                    loss, loss_dict = model(latents)
+                    loss, loss_dict = model(latents, c=(classes if return_class else None))
                     loss.backward()
 
                 if torch.isnan(loss).item():
@@ -293,26 +302,41 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 pbar = enumerate(test_loader)
 
             b_loss = 0
-            with torch.no_grad(), model.ema_scope("Epoch test"):
+            with ((torch.no_grad(), model.ema_scope("Epoch test"))):
                 for i, dataT in pbar:
-                    data = unpack_data_nyu(dataT, device=device)
+                    if return_class:
+                        data, classes = unpack_data_nyu(dataT, device=device, has_class=True)
+                    else:
+                        data = unpack_data_nyu(dataT, device=device)
 
                     latents = model_first_stage.encode(data)
-                    loss, loss_dict = model(latents)
+                    loss, loss_dict = model(latents, c=(classes if return_class else None))
 
                     b_loss += loss.detach().item()
 
                     if i == 0 and epoch % 1 == 0:
                         # Perform test generations
+
                         N_gen = 16
-                        samples_zw = model.module.sample(None, batch_size=N_gen) if data_parallel else model.sample(
-                            None, batch_size=N_gen)
+                        if return_class:
+                            classes = torch.randint(low=0,
+                                                    high=conf.model_conf.model.params.unet_config.params.num_classes,
+                                                    size=(N_gen,),
+                                                    device=device)
+
+                        samples_zw = model.module.sample((classes if return_class else None), batch_size=N_gen) if data_parallel else \
+                                     model.sample((classes if return_class else None), batch_size=N_gen)
+
                         samples_x = model_first_stage.decode(samples_zw)
 
                         for m in range(NUM_VAES):
-                            samples_x_grid = make_grid(samples_x[m].mean, nrow=2)
+                            samples_x_grid = make_grid(samples_x[m].mean, nrow=4)
                             print(samples_x_grid.shape)
-                            if enable_wandb: wandb.log({f'Generation/m{m}': wandb.Image(samples_x_grid)}, step=epoch)
+                            if return_class:
+                                caption = "\n".join([f"{b}: {test_dataset.class_num_to_name(c)}" for b, c in enumerate(classes)])
+                            else: caption = None
+
+                            if enable_wandb: wandb.log({f'Generation/m{m}': wandb.Image(samples_x_grid, caption=caption)}, step=epoch)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -340,9 +364,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             with torch.no_grad():
                 for n in pbar:
                     if use_diffusion:
-                        latents = model.module.sample(None,
+                        if return_class:
+                            classes = torch.randint(low=0,
+                                                    high=conf.model_conf.model.params.unet_config.params.num_classes,
+                                                    size=(gen_batch_size,),
+                                                    device=device)
+
+                        latents = model.module.sample((classes if return_class else None),
                                                       batch_size=gen_batch_size) if data_parallel else model.sample(
-                            None, batch_size=gen_batch_size)
+                            (classes if return_class else None), batch_size=gen_batch_size)
                     else:
                         latent_dim = (
                         gen_batch_size, *(model.module.input_shape if data_parallel else model.input_shape))

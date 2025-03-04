@@ -63,6 +63,8 @@ def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversa
     beta = kwargs.get("beta", 1.0)
 
     lpips = kwargs.get("lpips", None)
+    # Use a channel weighting to weight classes in semantic segmentation
+    channel_weighting = kwargs.get("channel_weighting", None)
 
     if test:
         qu_xs, px_us, uss = model("self_and_cross_modal_generation_forward", x, K)
@@ -107,9 +109,13 @@ def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversa
 
             if isinstance(px_u, torch.distributions.Categorical):
                 x_num = MMCelebA.one_hot_semseg_to_index(x[d])
+                # Todo: implement channel weighting for Categorical
                 lpx_u_elem += px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
             else:
-                lpx_u_elem += px_u.log_prob(x[d]).view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
+                log_probs = px_u.log_prob(x[d])
+                if channel_weighting[d] is not None:
+                    log_probs = log_probs * channel_weighting[d][None, None, :, None, None]
+                lpx_u_elem += log_probs.view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
 
             if fail_on_nan:
                 if isinstance(px_u, torch.distributions.Bernoulli) or isinstance(px_u, torch.distributions.Categorical):
