@@ -840,9 +840,14 @@ class LatentDiffusion(DDPM):
             # hybrid case, cond is expected to be a dict
             pass
         else:
-            if not isinstance(cond, list):
+            if self.model.num_classes is not None:
+                # A class conditional model
+                key = "y"
+                cond = {key: cond}
+            elif not isinstance(cond, list):
                 cond = [cond]
-            key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
+            # key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
+
             cond = {key: cond}
 
         x_recon = self.model(x_noisy, t, **cond)

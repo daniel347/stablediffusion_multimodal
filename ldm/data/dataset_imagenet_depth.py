@@ -6,6 +6,7 @@ from torchvision import io
 from PIL import Image
 import cv2
 import numpy as np
+import json
 import torch
 from torchvision.transforms.v2.functional import horizontal_flip
 from torchvision.transforms.v2 import ColorJitter
@@ -17,7 +18,7 @@ from .register_datasets import register_dataset
 @register_dataset("imagenet")
 class ImagenetMultiModal(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0):
+    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_class=False):
 
         super().__init__()
         self.split = split
@@ -42,13 +43,26 @@ class ImagenetMultiModal(Dataset):
         self.mode_types = {"colour": cv2.IMREAD_COLOR, "depth": cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH}
         self.image_depths = {"colour": 255, "depth": 65535} if self.split == "train" else {"colour": 255, "depth": 65535}
 
-
         self.transform = transform
 
         self.p_hor_flip = p_hor_flip
         self.p_colour_jitter = p_colour_jitter
         if p_colour_jitter > 0:
             self.colour_jitter = ColorJitter(0.1, 0.1, 0.1, 0.02)
+
+        self.return_class = return_class
+        if self.return_classes:
+            classes = []
+            with open(os.path.join(root_data_dir, "imagenet_classes.txt")) as f:
+                json_classes = json.load(f)
+                for class_num, info in json_classes.items():
+                    classes.append({"num": class_num, "synset": info["id"].rstrip("-n"), "name": info["label"]})
+
+            self.classes = pd.DataFrame(classes)
+            self.classes.index = classes["synset"]
+
+    def class_num_to_name(self, class_num):
+        return self.classes[self.classes.num == class_num].iloc[0].name
 
     def __len__(self):
         return len(self.mode_image_paths[self.modality[0]])
@@ -79,4 +93,9 @@ class ImagenetMultiModal(Dataset):
             colour_ind = self.modality.index("colour")
             outs[colour_ind] = self.colour_jitter(outs[colour_ind])
 
-        return outs
+        if self.return_class:
+            synset = filepaths[self.modality[0]].split("/")[-2].lstrip("n")
+            class_num = self.classes.loc[synset, "num"]
+            return outs, class_num
+        else:
+            return outs
