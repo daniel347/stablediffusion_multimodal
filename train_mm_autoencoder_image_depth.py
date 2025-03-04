@@ -396,9 +396,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 if test_loss < best_test_loss:
                     best_test_loss = test_loss
                     test_worsening_count = 0
-                    if rank == 0 or not data_parallel:
-                        save_model_light(model.module if data_parallel else model,
-                                         runPath + '/model_' + str(epoch) + '.rar')
+
+                if rank == 0 or not data_parallel:
+                    save_model_light(model.module if data_parallel else model,
+                                    runPath + '/model_' + str(epoch) + '.rar')
+                
                 else:
                     test_worsening_count += 1
                     if test_worsening_count > conf.training.patience:
