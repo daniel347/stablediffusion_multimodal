@@ -18,7 +18,7 @@ from .register_datasets import register_dataset
 @register_dataset("imagenet")
 class ImagenetMultiModal(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_class=False):
+    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_class=False, **kwargs):
 
         super().__init__()
         self.split = split

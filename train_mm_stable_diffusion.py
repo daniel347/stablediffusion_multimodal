@@ -188,32 +188,34 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if start_epoch is None:
             start_epoch = conf.training.start_epoch
 
-        use_mixed_precision = conf.model_conf.model.params.unet_config.params.use_fp16
+        use_mixed_precision = conf.training.use_mixed_precision
+        conf["model_conf"]["model"]["params"]["unet_config"]["params"]["use_fp16"] = use_mixed_precision
         if use_mixed_precision:
             print("Using mixed precision training")
             scaler = GradScaler()
 
 
         # Load NYU dataset
-        modalities = ['colour', 'depth']
+        modalities = conf.data.modality
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
         tx = v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])
-        return_class = conf.data.return_class
+        return_class = "return_class" in conf.data and conf.data.return_class
+
+        train_opts = conf.data
+        test_opts = copy.deepcopy(OmegaConf.to_container(conf.data))
+        for key in ["p_hor_flip", "p_colour_jitter"]:
+            test_opts.pop(key, None)
 
         train_dataset = get_dataset(conf.data.dataset_name,
-                                    root_data_dir=conf.data.datadir,
                                     transform=tx,
                                     split="train",
-                                    modality=modalities,
-                                    return_class=return_class,
-                                    p_hor_flip=0.5,
-                                    p_colour_jitter=0.1)
+                                    **train_opts)
         test_dataset = get_dataset(conf.data.dataset_name,
-                                   root_data_dir=conf.data.datadir,
                                    transform=tx,
                                    split="val",
-                                   return_class=return_class,
-                                   modality=modalities)
+                                   **test_opts)
+
+        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in modalities]
 
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True) if data_parallel else None
         test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False) if data_parallel else None
@@ -285,8 +287,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     # print(f"Learning rate: {scheduler.get_last_lr()}")
 
                 if enable_wandb and i == 0:
-                    for name, d in zip(modalities, data):
-                        grid = make_grid(d, nrow=8)
+                    for m, (name, dbatch) in enumerate(zip(modalities, data)):
+                        dbatch = dbatch.detach().cpu()
+                        dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                        grid = make_grid(dbatch, nrow=8)
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
 
 
@@ -302,7 +306,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 pbar = enumerate(test_loader)
 
             b_loss = 0
-            with ((torch.no_grad(), model.ema_scope("Epoch test"))):
+            with (torch.no_grad(), model.ema_scope("Epoch test")):
                 for i, dataT in pbar:
                     if return_class:
                         data, classes = unpack_data_nyu(dataT, device=device, has_class=True)
@@ -330,7 +334,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         samples_x = model_first_stage.decode(samples_zw)
 
                         for m in range(NUM_VAES):
-                            samples_x_grid = make_grid(samples_x[m].mean, nrow=4)
+                            samples_x_grid = make_grid(torch.stack([display_data_fs[m](s) for s in samples_x[m].mean.detach().cpu()]), nrow=4)
                             print(samples_x_grid.shape)
                             if return_class:
                                 caption = "\n".join([f"{b}: {test_dataset.class_num_to_name(c)}" for b, c in enumerate(classes)])
@@ -379,35 +383,39 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         latents = torch.randn(latent_dim, device=device)
                     samples_x = model_first_stage.decode(latents)
 
-                    for name, samples in zip(modalities, samples_x):
+                    for m, (name, samples) in enumerate(zip(modalities, samples_x)):
                         for i, s in enumerate(samples.mean):
-                            tvu.save_image(s, os.path.join(tempdirs[name], f"sample_{name}_{n * gen_batch_size + i}.png"))
+                            s_disp = display_data_fs[m](s.detach().cpu())
+                            tvu.save_image(s_disp, os.path.join(tempdirs[name], f"sample_{name}_{n * gen_batch_size + i}.png"))
 
             fid = pyiqa.create_metric('fid', device=device)
 
             fid_scores = []
             for mod in modalities:
-                split = "test" if conf.data.dataset_name == "nyu_depth" else "val"
-                fid_score = fid(tempdirs[mod], dataset_name=f"{conf.data.dataset_name}_{mod}", dataset_res=299, dataset_split=split)
-                if enable_wandb:
-                    wandb.log({f"FID_{mod}": fid_score}, step=epoch)
+                if mod in ["colour", "depth"]:
+                    split = "test" if conf.data.dataset_name == "nyu_depth" else "val"
+                    fid_score = fid(tempdirs[mod], dataset_name=f"{conf.data.dataset_name}_{mod}", dataset_res=299, dataset_split=split)
+                    if enable_wandb:
+                        wandb.log({f"FID_{mod}": fid_score}, step=epoch)
 
-                fid_scores.append(fid_score)
+                    fid_scores.append(fid_score)
 
-                print(f'====>             FID {mod}: {fid_score:.2f}')
+                    print(f'====>             FID {mod}: {fid_score:.2f}')
+                else:
+                    fid_scores.append(None)
 
             return fid_scores
 
 
         with Timer('MMVAEplus') as t:
-            test_epoch(start_epoch)
-            fid_colour, fid_depth = test_fid(start_epoch)
-            print(f"FID colour: {fid_colour}   FID depth: {fid_depth}")
+            # test_epoch(start_epoch)
+            # fid_scores = test_fid(start_epoch)
+            # print("   ".join([f"{mod} FID: {fid}" for mod, fid in zip(modalities, fid_scores)]))
             for epoch in range(start_epoch + 1, conf.training.num_epochs + 1 + start_epoch):
                 train_epoch(epoch)
 
                 test_loss = test_epoch(epoch)
-                fid_colour, fid_depth = test_fid(epoch)
+                fids = test_fid(epoch)
 
                 if test_loss < best_test_loss:
                     best_test_loss = test_loss
@@ -434,7 +442,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             pickle.dump(checkpoint_data, fp)
 
                         checkpoint = Checkpoint.from_directory(checkpoint_dir)
-                        train.report({"loss": best_test_loss, "fid_colour": fid_colour, "fid_depth": fid_depth}, checkpoint=checkpoint)  # "fid_depth": fid_depth
+                        train.report({"loss": best_test_loss, **{f"fid_{mod}": fid for mod, fid in zip(modalities, fids)}}, checkpoint=checkpoint)
 
     finally:
         if data_parallel:
@@ -442,7 +450,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="imagenet_stable_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
