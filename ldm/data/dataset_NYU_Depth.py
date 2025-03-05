@@ -16,7 +16,7 @@ from .register_datasets import register_dataset
 @register_dataset("nyu_depth")
 class NYUDepth(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0):
+    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, **kwargs):
 
         super().__init__()
         self.split = split

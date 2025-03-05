@@ -846,7 +846,7 @@ class LatentDiffusion(DDPM):
                 cond = {key: cond}
             elif not isinstance(cond, list):
                 cond = [cond]
-            # key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
+                key = 'c_concat' if self.model.conditioning_key == 'concat' else 'c_crossattn'
 
             cond = {key: cond}
 
