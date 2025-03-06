@@ -26,12 +26,6 @@ training:
 
   start_epoch: 4
 
-  grad_clipper:
-    clip_percentile: 95
-    clip_update_freq: 10
-    keep_history_upto: 5000
-    start_clip: 2
-
   K: 1
 
   wlpips: [0.2, 0.0]
