@@ -42,7 +42,7 @@ from ldm.data import get_dataset
 
 import pyiqa
 
-enable_wandb = True
+enable_wandb = False
 
 def expand_sub_confs(conf):
     # Expand sub-configs
@@ -268,7 +268,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         def train(epoch):
             model.train()
             b_loss = 0
-            loss_series = pd.Series({"lpips": 0, "l2": 0, "prior": 0, "z_dist": 0})
+            loss_series = pd.Series({"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0})
 
             if data_parallel:
                 train_loader.sampler.set_epoch(epoch)
@@ -325,7 +325,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                 b_loss += loss.detach().item()
                 if conf.print_freq > 0 and i % conf.print_freq == 0:
-                    print("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))    
+                    print("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
+                    print(f"loss breakdown: {loss_dict}")
                 pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
 
                 if i % scheduler_step_freq == 0:
@@ -337,9 +338,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
                         grid = make_grid(dbatch, nrow=8)
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
-
-                if i > 3:
-                    break
 
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
@@ -418,8 +416,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         if enable_wandb:
                             wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
 
-                    if i > 3:
-                        break
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -433,7 +429,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
 
         with Timer('MMVAEplus') as t:
-            test(0)
+            # test(0)
 
             for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
                 train(epoch)

@@ -104,7 +104,7 @@ def _m_dreg(model,
         ws, zs = torch.split(uss[r], [mod.w_channels, mod.z_channels], dim=2)
         lz_dist = torch.linalg.vector_norm(zs - z_avg, dim=(-1, -2, -3))
 
-        loss_dict["z_dist"] += lz_dist.detach().cpu().sum().item()
+        loss_dict["z_dist"] -= lz_dist.detach().cpu().sum().item()
 
         if fail_on_nan:
             assert not torch.isnan(uss[r]).any(), f"Model output is nan (uss[{r}])"

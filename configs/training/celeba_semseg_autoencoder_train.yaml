@@ -1,5 +1,5 @@
 seed: 1
-device: "cuda:1"  # ["cuda:0", "cuda:1"]
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM CelebA Autoencoder (Stable Diffusion)"
 print_freq: 50
 
@@ -16,20 +16,20 @@ training:
   use_mixed_precision: False
   objective: dreg
   lr: 1.0e-4  # 3.0e-4
-  batch_size: 8
+  batch_size: 32
   num_epochs: 5
   patience: 3
 
   weight_semseg_classes: semseg_class_freqs.pt
 
   beta: 2.5
-  z_close_weight: 1000
+  z_close_weight: 100
 
   start_epoch: 0
 
   K: 1
 
-  wlpips: [1000, 0.0]
+  wlpips: [100.0, 0.0]
   wadversary: 0
 
   grad_clipper:
