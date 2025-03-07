@@ -1,5 +1,7 @@
 # Train MMVAEplus on CUB Image-Captions dataset
 import os
+
+import pandas as pd
 import psutil
 import shutil
 from pathlib import Path
@@ -31,6 +33,7 @@ import torch.multiprocessing as mp
 import torchvision.utils as tvu
 from torch.amp import GradScaler, autocast
 from torch.nn.utils import clip_grad_norm_
+import pandas as pd
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light, GradAutoClipper
@@ -265,6 +268,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         def train(epoch):
             model.train()
             b_loss = 0
+            loss_series = pd.Series({"lpips": 0, "l2": 0, "prior": 0, "z_dist": 0})
 
             if data_parallel:
                 train_loader.sampler.set_epoch(epoch)
@@ -278,14 +282,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
-                        loss = -objective(model, data,
+                        loss, loss_dict = objective(model, data,
                                           K=conf.training.K,
                                           data_parallel=data_parallel,
                                           wlpips=conf.training.wlpips,
                                           wadversary=conf.training.wadversary,
                                           train_adversary=None,
                                           lpips=lpips,
-                                          channel_weighting=class_weights)
+                                          channel_weighting=class_weights,
+                                          z_close_weight=conf.training.z_close_weight)
+                        loss = -loss
 
                     scaler.scale(loss).backward()
                     if grad_clipper is not None:
@@ -295,14 +301,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
 
                 else:
-                    loss = -objective(model, data,
+                    loss, loss_dict = objective(model, data,
                                       K=conf.training.K,
                                       data_parallel=data_parallel,
                                       wlpips=conf.training.wlpips,
                                       wadversary=conf.training.wadversary,
                                       train_adversary=None,
                                       lpips=lpips,
-                                      channel_weighting=class_weights)
+                                      channel_weighting=class_weights,
+                                      z_close_weight=conf.training.z_close_weight)
+
+                    loss = -loss
 
                     loss.backward()
                     # print(f"grad norm: {get_total_norm(model.parameters())}")
@@ -311,6 +320,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if grad_clipper is not None:
                         grad_clipper.autoclip_grad()
                     optimizer.step()
+
+                loss_series -= pd.Series(loss_dict)
 
                 b_loss += loss.detach().item()
                 if conf.print_freq > 0 and i % conf.print_freq == 0:
@@ -329,16 +340,21 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
-            if enable_wandb: wandb.log({"Loss/train": epoch_loss}, step=epoch)
+            loss_series = loss_series / len(train_loader.dataset)
+            if enable_wandb:
+                wandb.log({"Loss/train": epoch_loss}, step=epoch)
+                wandb.log({f"Loss/train/breakdown/{key}": val for key, val in loss_series.items()}, step=epoch)
             print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
 
 
         def test(epoch):
             b_loss = 0
+            loss_series = pd.Series({"lpips": 0, "l2": 0, "prior": 0, "z_dist": 0})
+
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = unpack_data_nyu(dataT, device=device)
-                    loss = -t_objective(model, data,
+                    loss, loss_dict = t_objective(model, data,
                                         K=conf.training.K,
                                         test=True,
                                         data_parallel=data_parallel,
@@ -346,13 +362,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                         wadversary=conf.training.wadversary,
                                         train_adversary=None,
                                         lpips=lpips,
-                                        channel_weighting=class_weights)
+                                        channel_weighting=class_weights,
+                                        z_close_weight=conf.training.z_close_weight)
+
+                    loss = -loss
 
                     b_loss += loss.detach().item()
-                    if i == 0  and epoch % 1 == 0:
+                    loss_series -= pd.Series(loss_dict)
+
+                    if i == 0 and epoch % 1 == 0:
                         # Compute cross-generations
                         N_gen = 3
-                        n_samples = 2
+                        n_samples = conf.training.batch_size // N_gen
                         limited_data = [d[:n_samples] for d in data]
 
                         cg_imgs = []
@@ -380,11 +401,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
 
                             if enable_wandb:
-                                wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=i)
+                                wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=epoch)
 
                                 recon_avg = reconstructions[j].mode if isinstance(reconstructions[i], torch.distributions.Bernoulli) else reconstructions[j].mean
                                 recon_display = torch.stack([display_data_fs[j](d) for d in recon_avg.detach().cpu()], dim=0)
-                                wandb.log({f'Reconstructions/m{j}': wandb.Image(recon_display)}, step=i)
+                                wandb.log({f'Reconstructions/m{j}': wandb.Image(recon_display)}, step=epoch)
 
                         latent_img = latents[:, -latent_dim_z:].detach().cpu()
                         latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
@@ -395,7 +416,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
-            if enable_wandb: wandb.log({"Loss/test": epoch_loss}, step=epoch)
+            if enable_wandb:
+                wandb.log({"Loss/test": epoch_loss}, step=epoch)
+                wandb.log({f"Loss/test/breakdown/{key}": val for key, val in loss_series.items()}, step=epoch)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
 
             return epoch_loss
@@ -421,7 +444,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if test_worsening_count > conf.training.patience:
                         print(f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
                         break
-
 
     finally:
         if data_parallel:

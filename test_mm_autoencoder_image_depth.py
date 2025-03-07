@@ -1,5 +1,7 @@
 # Train MMVAEplus on CUB Image-Captions dataset
 import os
+
+import pandas as pd
 import psutil
 import shutil
 from pathlib import Path
@@ -16,11 +18,12 @@ import numpy as np
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import seaborn as sns
 import wandb
 
 import torch
 from torch import optim
-from torchvision.transforms import v2
+from torchvision.transforms import v2, InterpolationMode
 from torchvision.utils import make_grid
 from torch.profiler import ProfilerActivity, profile, record_function
 from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR
@@ -33,7 +36,9 @@ import torchvision.utils as tvu
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light
 from mmvae_objectives import m_dreg
-from ldm.data.dataset_NYU_Depth import NYUDepth
+from ldm.data import get_dataset
+
+import random
 
 enable_wandb = False
 
@@ -156,18 +161,32 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
                 # Run name
                 name=f"{runId}_{str(rank)}",
                 group=f"DDP_{runId}",
+                notes=exp_notes,
             )
 
-        # Load NYU dataset
+        modalities = conf.data.modalities
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
-        tx = v2.Compose([v2.Resize([256, 256])])
+        tx = {"colour": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)]),
+              "depth": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)]),
+              "semseg": v2.Compose([v2.Resize(conf.data.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
+                                    v2.CenterCrop(conf.data.input_size)])}
 
-        test_dataset = NYUDepth(conf.data.datadir, transform=tx, train=False, modality=['colour', 'depth'])
-        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False) if data_parallel else None
-        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.batch_size, shuffle=False, sampler=test_sampler, **kwargs)
+        test_dataset = get_dataset(conf.data.dataset_name,
+                                   root_data_dir=conf.data.datadir,
+                                   transform=tx,
+                                   split="val",
+                                   modality=modalities)
+
+        display_data_fs = [getattr(test_dataset, f"{mode}_display") for mode in modalities]
+
+        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,
+                                          shuffle=False) if data_parallel else None
+
+        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
+                                                  sampler=test_sampler, **kwargs)
 
         def unpack_data_nyu(data, device="cuda"):
-            return [data[0].to(device), data[1].to(device)]
+            return [d.to(device) for d in data]
 
         objective = partial(m_dreg, beta=conf.training.beta)
         t_objective = objective
@@ -205,16 +224,30 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
 
 
-        def visualise_latents(n_samples):
+        def visualise_latents(n_samples, avg_z=True):
+            vaes = model.module.module.vaes if data_parallel else model.module.vaes
+
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = unpack_data_nyu(dataT, device=device)
 
-                    tvu.save_image(data[0], os.path.join(runPath, f"batch_{i}_colour.png"), nrow=conf.training.batch_size)
-                    tvu.save_image(data[1], os.path.join(runPath, f"batch_{i}_depth.png"), nrow=conf.training.batch_size)
+                    for m, name in enumerate(modalities):
+                        dbatch = torch.stack([display_data_fs[m](d) for d in data[m].detach().cpu()], dim=0)
+                        tvu.save_image(dbatch, os.path.join(runPath, f"batch_{i}_{name}.png"), nrow=conf.training.batch_size)
+                        if enable_wandb:
+                            wandb.log({f'input_data/m{m}': wandb.Image(dbatch)}, step=i)
 
-                    latents = model.module("encode", data) if data_parallel else model("encode", data)
-                    print(latents.shape)
+                    if avg_z:
+                        latents = model.module("encode", data) if data_parallel else model("encode", data)
+                        print(latents.shape)
+                    else:
+                        latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
+                        # Take a random z
+                        latents_z = latents[NUM_VAES:]
+                        latent_z_sample = latents[NUM_VAES + i % 2]
+                        latents_w = latents[:NUM_VAES]
+                        latents = torch.cat(latents_w + [latent_z_sample], dim=1)
+
                     reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
 
                     latent_dim_w = model.module.module.w_channels if data_parallel else model.module.w_channels
@@ -228,29 +261,162 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
                         latent_img_path = os.path.join(runPath, f"batch_{i}_latents_wm{j}.png")
                         tvu.save_image(latent_img, latent_img_path, normalize=True)
 
+                        if not avg_z:
+                            latent_img_z = latents_z[j].detach().cpu()
+                            latent_img_z = torch.transpose(latent_img_z, 0, 1).reshape(-1, *latent_img_z.shape[2:]).unsqueeze(1)
+                            latent_img_z = make_grid(latent_img_z, nrow=conf.training.batch_size)
+
+                            if enable_wandb:
+                                wandb.log({f'Latents/z_enc{j}': wandb.Image(latent_img_z)}, step=i)
+
+                        if isinstance(reconstructions[j], torch.distributions.Bernoulli):
+                            recon_avg = reconstructions[j].mode
+                        else:
+                            recon_avg = reconstructions[j].mean
+                        recon_display = torch.stack([display_data_fs[j](d) for d in recon_avg.detach().cpu()], dim=0)
+
                         recon_img_path = os.path.join(runPath, f"batch_{i}_recon_m{j}.png")
-                        tvu.save_image(reconstructions[j].mean, recon_img_path)
+                        tvu.save_image(recon_display, recon_img_path)
 
                         if enable_wandb:
                             wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=i)
-                            wandb.log({f'Reconstructions/m{j}': wandb.Image(reconstructions[j].mean)}, step=i)
+                            wandb.log({f'Reconstructions/m{j}': wandb.Image(recon_display)}, step=i)
 
-                    latent_img = latents[:, -latent_dim_z:].detach().cpu()
-                    latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
-                    latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
+                        if not avg_z:
+                            W_random = []
+                            for k in range(NUM_VAES):
+                                pw = vaes[k].pw(*model.module.pw_params)
+                                latents_w = pw.rsample([latents_z[j].shape[0]]).squeeze(1).to(device)
+                                print(latents_w.shape)
+                                print(latents_z[j].shape)
+                                W_random.append(latents_w)
+                            latents_random_w = torch.cat([*W_random, latents_z[j]], dim=1)
+                            recon_random_w = model.module("decode", latents_random_w) if data_parallel else model("decode", latents_random_w)
 
-                    latent_img_path = os.path.join(runPath, f"batch_{i}_latents_z.png")
-                    tvu.save_image(latent_img, latent_img_path, normalize=True)
+                            for k in range(NUM_VAES):
+                                if isinstance(recon_random_w[k], torch.distributions.Bernoulli):
+                                    recon_avg = recon_random_w[k].mode
+                                else:
+                                    recon_avg = recon_random_w[k].mean
+                                recon_display = torch.stack([display_data_fs[k](d) for d in recon_avg.detach().cpu()],
+                                                            dim=0)
 
-                    if enable_wandb:
-                        wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
+                                recon_img_path = os.path.join(runPath, f"batch_{i}_recon_m{j}.png")
+                                tvu.save_image(recon_display, recon_img_path)
+
+                                if enable_wandb:
+                                    wandb.log({f'Random_W_Reconstructions/z_enc{j}/m{k}': wandb.Image(recon_display)}, step=i)
+
+                    if avg_z:
+                        latent_img = latents[:, -latent_dim_z:].detach().cpu()
+                        latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
+                        latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
+
+                        latent_img_path = os.path.join(runPath, f"batch_{i}_latents_z.png")
+                        tvu.save_image(latent_img, latent_img_path, normalize=True)
+
+                        if enable_wandb:
+                            wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
 
                     if (i + 1) * conf.training.batch_size >= n_samples:
                         break
 
+        def check_z_closeness(n_samples=10):
+            with torch.no_grad():
+
+                z_mses = []
+                z_mags = [[] for _ in range(NUM_VAES)]
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
+                    data = unpack_data_nyu(dataT, device=device)
+
+                    latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
+                    latents_z = latents[NUM_VAES:]
+
+                    if enable_wandb:
+                        for m, lat_z in enumerate(latents_z):
+                            wandb.log({f'Latents/z_enc_{m}': wandb.Image(lat_z)}, step=i)
+
+                    z_mse = torch.linalg.vector_norm(latents_z[0] - latents_z[1], dim=(1, 2, 3))
+                    z_mses.append(z_mse.detach().cpu())
+
+                    for j in range(NUM_VAES):
+                        z_mags[j].append(torch.linalg.vector_norm(latents_z[j], dim=(1,2,3)).detach().cpu())
+
+                    if (i + 1) * conf.training.batch_size >= n_samples:
+                        break
+
+                z_mses = torch.cat(z_mses)
+                z_mags = [torch.cat(m) for m in z_mags]
+
+                data = pd.DataFrame({"z_mse": z_mses, **{f"z{j}_mag": z_mags[j] for j in range(NUM_VAES)}})
+
+                plot = sns.histplot(data=data, kde=True)
+                plot_save_path = os.path.join(runPath, f"z_mse_dists.png")
+
+                plt.savefig(plot_save_path, dpi=300)
+
+                if enable_wandb:
+                    wandb.log({'z_mse': wandb.Histogram(z_mses, num_bins=20)}, step=i+1)
+
+        def check_learned_prior_params():
+            vaes = model.module.module.vaes if data_parallel else model.module.vaes
+            for m, vae in enumerate(vaes):
+                pw_params = vae.pw_params_aux
+
+                mean_path = os.path.join(runPath, f"vae{m}_pw_mean_aux.png")
+                var_path = os.path.join(runPath, f"vae{m}_pw_var_aux.png")
+
+                mean = pw_params[0].detach().cpu().transpose(0, 1)
+                var = pw_params[1].detach().cpu().transpose(0, 1)
+
+                print(f"VAE {m} pz average variance {var.mean()}, min: {var.min()}, max: {var.max()}")
+
+                tvu.save_image(mean, mean_path, normalize=True)
+                tvu.save_image(var, var_path, normalize=True)
+                if enable_wandb:
+                    wandb.log({f'pw_params/vae{m}/mean': wandb.Image(mean)}, step=0)
+                    wandb.log({f'pw_params/vae{m}/var': wandb.Image(var)}, step=0)
+
+            pw_params_global = model.module.pw_params
+
+            mean_path = os.path.join(runPath, f"global_pw_mean_aux.png")
+            var_path = os.path.join(runPath, f"global_pw_var_aux.png")
+
+            mean = pw_params_global[0].detach().cpu().transpose(0, 1)
+            var = pw_params_global[1].detach().cpu().transpose(0, 1)
+
+            print(f"global pw average variance {var.mean()}, min: {var.min()}, max: {var.max()}")
+
+            tvu.save_image(mean, mean_path)
+            tvu.save_image(var, var_path)
+            if enable_wandb:
+                wandb.log({f'pw_params/global/mean': wandb.Image(mean)}, step=0)
+                wandb.log({f'pw_params/global/var': wandb.Image(var)}, step=0)
+
+            pz_params_global = model.module.pz_params
+
+            mean_path = os.path.join(runPath, f"global_pz_mean_aux.png")
+            var_path = os.path.join(runPath, f"global_pz_var_aux.png")
+
+            mean = pz_params_global[0].detach().cpu().transpose(0, 1)
+            var = pz_params_global[1].detach().cpu().transpose(0, 1)
+
+            print(f"global pz average variance {var.mean()}, min: {var.min()}, max: {var.max()}")
+
+            tvu.save_image(mean, mean_path)
+            tvu.save_image(var, var_path)
+            if enable_wandb:
+                wandb.log({f'pz_params/global/mean': wandb.Image(mean)}, step=0)
+                wandb.log({f'pz_params/global/var': wandb.Image(var)}, step=0)
+
+
+
 
         with Timer('MMVAEplus') as t:
-            visualise_latents(10)
+            # check_z_closeness(16)
+            # visualise_latents(64, avg_z=False)
+            check_learned_prior_params()
+
 
     finally:
         if data_parallel:
@@ -258,7 +424,16 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/testing/", config_name="nyu_depth_autoencoder_test.yaml")
+exp_notes = "Show the auxilliary (learned for each VAE) and global priors on w and z"
+
+"""
+("Test the cross generation capabilities particularly using the individual z encodings. "
+         "Test self and cross generation with either z and using sampled (random w reconstrunction) or encoded w values (reconstruction)."
+         "For encoded values the z encoding used is the batch size modulo 2. For the random w generation we use the global pw parameters not"
+         " the local ones learned by the VAE, though I dont understand why there are two versions")
+         """
+
+@hydra.main(version_base=None, config_path="configs/testing/", config_name="celeba_semseg_autoencoder_test.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

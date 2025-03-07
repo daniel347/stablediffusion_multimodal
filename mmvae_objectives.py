@@ -59,36 +59,52 @@ def m_elbo(model, x, K=1, test=False):
     return log_mean_exp(lw, dim=1).mean(0).sum()
 
 
-def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversary=0.0, train_adversary_f=None, fail_on_nan=True, **kwargs):
-    beta = kwargs.get("beta", 1.0)
-
-    lpips = kwargs.get("lpips", None)
-    # Use a channel weighting to weight classes in semantic segmentation
-    channel_weighting = kwargs.get("channel_weighting", None)
+def _m_dreg(model,
+            x,
+            K=1,
+            test=False,
+            data_parallel=False,
+            wlpips=0.0,
+            wadversary=0.0,
+            train_adversary_f=None,
+            fail_on_nan=True,
+            beta=1.0,
+            lpips=None,
+            channel_weighting=None,
+            z_close_weight=0.1,
+            **kwargs):
 
     if test:
         qu_xs, px_us, uss = model("self_and_cross_modal_generation_forward", x, K)
     else:
         qu_xs, px_us, uss = model("forward", x, K)
     mod = model.module.module if data_parallel else model.module
-    qu_xs_ = [vae.qu_x_params.detach() for vae in mod.vaes]
+
     qz_xs, qw_xs = [], []
     # for r, qu_x in enumerate(qu_xs_):
-    for r, qu_x in enumerate(qu_xs_):
-        qu_x_r_mean, qu_x_r_std = mod.vaes[r].qu_x_params.mean, mod.vaes[r].qu_x_params.std
+    for r, qu_x in enumerate(qu_xs):
+        qu_x_r_mean, qu_x_r_std = qu_x.mean, qu_x.std  # mod.vaes[r].qu_x_params.mean, mod.vaes[r].qu_x_params.std
         if fail_on_nan:
             assert not torch.isnan(qu_x_r_mean).any(), f"Model output is nan (qu_x_r_mean[{r}])"
             assert not torch.isnan(qu_x_r_std).any(), f"Model output is nan (qu_x_r_std[{r}])"
 
         qw_x_mean, qz_x_mean = torch.split(qu_x_r_mean, [mod.w_channels, mod.z_channels], dim=1)
         qw_x_std, qz_x_std = torch.split(qu_x_r_std, [mod.w_channels, mod.z_channels], dim=1)
-        qw_x = mod.vaes[r].qu_x(qw_x_mean, qw_x_std)
-        qz_x = mod.vaes[r].qu_x(qz_x_mean, qz_x_std)
+        qw_x = mod.vaes[r].qu_x(qw_x_mean.detach(), qw_x_std.detach())
+        qz_x = mod.vaes[r].qu_x(qz_x_mean.detach(), qz_x_std.detach())
         qz_xs.append(qz_x)
         qw_xs.append(qw_x)
     lws = []
-    for r, qu_x in enumerate(qu_xs_):
+
+    zs = [torch.split(us, [mod.w_channels, mod.z_channels], dim=2)[1] for us in uss]
+    z_avg = torch.stack(zs, dim=0).mean(dim=0)
+
+    loss_dict = {"lpips": 0, "l2": 0, "prior": 0, "z_dist": 0}
+    for r, qu_x in enumerate(qu_xs):
         ws, zs = torch.split(uss[r], [mod.w_channels, mod.z_channels], dim=2)
+        lz_dist = torch.linalg.vector_norm(zs - z_avg, dim=(-1, -2, -3))
+
+        loss_dict["z_dist"] += lz_dist.detach().cpu().sum()
 
         if fail_on_nan:
             assert not torch.isnan(uss[r]).any(), f"Model output is nan (uss[{r}])"
@@ -110,12 +126,15 @@ def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversa
             if isinstance(px_u, torch.distributions.Categorical):
                 x_num = MMCelebA.one_hot_semseg_to_index(x[d])
                 # Todo: implement channel weighting for Categorical
-                lpx_u_elem += px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
+                recon_log_prob = px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
             else:
                 log_probs = px_u.log_prob(x[d])
                 if channel_weighting[d] is not None:
                     log_probs = log_probs * channel_weighting[d][None, None, :, None, None]
-                lpx_u_elem += log_probs.view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
+                recon_log_prob = log_probs.view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
+
+            loss_dict["l2"] += recon_log_prob.detach().cpu().sum()
+            lpx_u_elem += recon_log_prob
 
             if fail_on_nan:
                 if isinstance(px_u, torch.distributions.Bernoulli) or isinstance(px_u, torch.distributions.Categorical):
@@ -128,25 +147,28 @@ def _m_dreg(model, x, K=1, test=False, data_parallel=False, wlpips=0.0, wadversa
 
             wlpips_d = wlpips[d] if hasattr(wlpips, "__getitem__") else wlpips
             if wlpips_d > 0.0:
-                lpx_u_elem += - wlpips_d * lpips(x[d].squeeze(0), px_u.mode.squeeze(0))
+                lpips_lpx_u_loss = lpips(x[d].squeeze(0), px_u.mode.squeeze(0))
+                loss_dict["lpips"] += lpips_lpx_u_loss.detach().cpu().sum()
+                lpx_u_elem += - wlpips_d * lpips_lpx_u_loss
 
             if fail_on_nan:
                 assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpips [{r}][{d}])"
 
             lpx_u.append(lpx_u_elem)
 
-
         lpx_u = torch.stack(lpx_u).sum(0)
-        lw = lpx_u + beta * (lpz + lpw - lqz_x - lqw_x)
+        lw = lpx_u + beta * (lpz + lpw - lqz_x - lqw_x) + z_close_weight * lz_dist
+
+        loss_dict["prior"] += beta * (lpz + lpw - lqz_x - lqw_x).detach().cpu().sum()
 
         lws.append(lw)
 
     if train_adversary_f is not None:
-        disc_loss, autoencoder_loss = train_adversary_f(x, px_us[r])
-        lws = torch.stack(lws) - wadversary * autoencoder_loss / len(qu_xs_)
+        disc_loss, autoencoder_loss = train_adversary_f(x, px_us)
+        lws = torch.stack(lws) - wadversary * autoencoder_loss / len(qu_xs)
         return lws, torch.stack(uss)
 
-    return torch.stack(lws), torch.stack(uss)
+    return torch.stack(lws), torch.stack(uss), loss_dict
 
 
 def train_adversary(real_data, px_us, discriminator, optimiser, device):
@@ -184,13 +206,16 @@ def m_dreg(model, x, K=1, test=False, **kwargs):
     """
     S = compute_microbatch_split(x, K)
     x_split = zip(*[_x.split(S) for _x in x])
-    lw, uss = zip(*[_m_dreg(model, _x, K, test, **kwargs) for _x in x_split])
+
+    lw, uss, loss_dicts = zip(*[_m_dreg(model, _x, K, test, **kwargs) for _x in x_split])
+    combined_loss_dict = {key: sum([loss_dict[key] for loss_dict in loss_dicts]) for key in loss_dicts[0].keys()}
+
     lw = torch.cat(lw, 2)  # concat on batch
     uss = torch.cat(uss, 2)  # concat on batch
     with torch.no_grad():
         grad_wt = (lw - torch.logsumexp(lw, 1, keepdim=True)).exp()
         if uss.requires_grad:
             uss.register_hook(lambda grad: grad_wt.unsqueeze(-1) * grad)
-    return (grad_wt * lw).mean(0).sum()
+    return (grad_wt * lw).mean(0).sum(), combined_loss_dict
 
 

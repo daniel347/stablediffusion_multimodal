@@ -16,15 +16,16 @@ training:
   use_mixed_precision: False
   objective: dreg
   lr: 1.0e-4  # 3.0e-4
-  batch_size: 32
+  batch_size: 3
   num_epochs: 5
   patience: 3
 
   weight_semseg_classes: semseg_class_freqs.pt
 
   beta: 2.5
+  z_close_weight: 1.0
 
-  start_epoch: 4
+  start_epoch: 0
 
   K: 1
 
@@ -49,5 +50,5 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg.yaml
-model_initialisation: "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_04__12_41_08/model_4.rar"
-init_from_stable_diffusion: False
+model_initialisation: # "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_04__12_41_08/model_4.rar"
+init_from_stable_diffusion: True
