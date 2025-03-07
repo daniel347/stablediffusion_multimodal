@@ -16,8 +16,8 @@ training:
   use_mixed_precision: False
   objective: dreg
   lr: 1.0e-4  # 3.0e-4
-  batch_size: 3
-  num_epochs: 5
+  batch_size: 32
+  num_epochs: 10
   patience: 3
 
   weight_semseg_classes: semseg_class_freqs.pt
