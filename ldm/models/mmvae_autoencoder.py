@@ -101,6 +101,7 @@ class MMVAEplus(nn.Module):
 
         zs = [torch.split(us, [self.latent_channel_w, self.latent_channel_z], dim=2)[1] for us in uss]
         if self.avg_z:
+            print("Averaging z")
             z_avg = torch.stack(zs, dim=0).mean(dim=0)
 
         # Loop over unimodal vaes and compute cross-modal reconstructions

@@ -99,12 +99,12 @@ def _m_dreg(model,
     zs = [torch.split(us, [mod.w_channels, mod.z_channels], dim=2)[1] for us in uss]
     z_avg = torch.stack(zs, dim=0).mean(dim=0)
 
-    loss_dict = {"lpips": 0, "l2": 0, "prior": 0, "z_dist": 0}
+    loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0}
     for r, qu_x in enumerate(qu_xs):
         ws, zs = torch.split(uss[r], [mod.w_channels, mod.z_channels], dim=2)
         lz_dist = torch.linalg.vector_norm(zs - z_avg, dim=(-1, -2, -3))
 
-        loss_dict["z_dist"] += lz_dist.detach().cpu().sum()
+        loss_dict["z_dist"] += lz_dist.detach().cpu().sum().item()
 
         if fail_on_nan:
             assert not torch.isnan(uss[r]).any(), f"Model output is nan (uss[{r}])"
@@ -133,7 +133,7 @@ def _m_dreg(model,
                     log_probs = log_probs * channel_weighting[d][None, None, :, None, None]
                 recon_log_prob = log_probs.view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
 
-            loss_dict["l2"] += recon_log_prob.detach().cpu().sum()
+            loss_dict["recon_logprob"] += recon_log_prob.detach().cpu().sum().item()
             lpx_u_elem += recon_log_prob
 
             if fail_on_nan:
@@ -148,7 +148,7 @@ def _m_dreg(model,
             wlpips_d = wlpips[d] if hasattr(wlpips, "__getitem__") else wlpips
             if wlpips_d > 0.0:
                 lpips_lpx_u_loss = lpips(x[d].squeeze(0), px_u.mode.squeeze(0))
-                loss_dict["lpips"] += lpips_lpx_u_loss.detach().cpu().sum()
+                loss_dict["lpips"] -= lpips_lpx_u_loss.detach().cpu().sum().item()
                 lpx_u_elem += - wlpips_d * lpips_lpx_u_loss
 
             if fail_on_nan:
@@ -157,9 +157,9 @@ def _m_dreg(model,
             lpx_u.append(lpx_u_elem)
 
         lpx_u = torch.stack(lpx_u).sum(0)
-        lw = lpx_u + beta * (lpz + lpw - lqz_x - lqw_x) + z_close_weight * lz_dist
+        lw = lpx_u + beta * (lpz + lpw - lqz_x - lqw_x) - z_close_weight * lz_dist
 
-        loss_dict["prior"] += beta * (lpz + lpw - lqz_x - lqw_x).detach().cpu().sum()
+        loss_dict["prior"] += beta * (lpz + lpw - lqz_x - lqw_x).detach().cpu().sum().item()
 
         lws.append(lw)
 

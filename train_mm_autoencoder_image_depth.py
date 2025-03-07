@@ -338,6 +338,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         grid = make_grid(dbatch, nrow=8)
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
 
+                if i > 3:
+                    break
+
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
             loss_series = loss_series / len(train_loader.dataset)
@@ -345,11 +348,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 wandb.log({"Loss/train": epoch_loss}, step=epoch)
                 wandb.log({f"Loss/train/breakdown/{key}": val for key, val in loss_series.items()}, step=epoch)
             print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
+            print(loss_series)
 
 
         def test(epoch):
             b_loss = 0
-            loss_series = pd.Series({"lpips": 0, "l2": 0, "prior": 0, "z_dist": 0})
+            loss_series = pd.Series({"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0})
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
@@ -414,12 +418,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         if enable_wandb:
                             wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
 
+                    if i > 3:
+                        break
+
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
             if enable_wandb:
                 wandb.log({"Loss/test": epoch_loss}, step=epoch)
                 wandb.log({f"Loss/test/breakdown/{key}": val for key, val in loss_series.items()}, step=epoch)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
+            print(loss_series)
 
             return epoch_loss
 
