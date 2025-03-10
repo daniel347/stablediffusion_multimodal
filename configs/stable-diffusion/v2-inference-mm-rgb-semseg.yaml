@@ -81,7 +81,7 @@ model:
                             # convert 1 channel to 3 channels and back, so we may start from pretrained encoder
               is_semseg: true
               likelihood_dist: Bernoulli  # torch.distribution.Bernoulli
-              llik_scaling: 4.0
+              llik_scaling: 10.0
 
               ddconfig:
                 #attn_type: "vanilla-xformers"
