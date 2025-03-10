@@ -19,7 +19,7 @@ import tqdm
 @register_dataset("mm_celeba")
 class MMCelebA(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, **kwargs):
+    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_index=False, **kwargs):
 
         super().__init__()
         self.split = split
@@ -78,6 +78,8 @@ class MMCelebA(Dataset):
         self.p_colour_jitter = p_colour_jitter
         if p_colour_jitter > 0:
             self.colour_jitter = ColorJitter(0.1, 0.1, 0.1, 0.02)
+
+        self.return_index = return_index
 
     def make_semseg_class_list(self, index_list):
         self.semseg_labels = {}
@@ -173,5 +175,8 @@ class MMCelebA(Dataset):
         if colour_jitter and "colour" in self.modality:
             colour_ind = self.modality.index("colour")
             outs[colour_ind] = self.colour_jitter(outs[colour_ind])
+
+        if self.return_index:
+            return outs, idx
 
         return outs

@@ -18,7 +18,7 @@ from .register_datasets import register_dataset
 @register_dataset("imagenet")
 class ImagenetMultiModal(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_class=False, **kwargs):
+    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_class=False, return_index=False, **kwargs):
 
         super().__init__()
         self.split = split
@@ -61,6 +61,8 @@ class ImagenetMultiModal(Dataset):
             self.classes = pd.DataFrame(classes)
             self.classes.index = classes["synset"]
 
+        self.return_index = return_index
+
     def class_num_to_name(self, class_num):
         return self.classes[self.classes.num == class_num].iloc[0].name
 
@@ -93,9 +95,15 @@ class ImagenetMultiModal(Dataset):
             colour_ind = self.modality.index("colour")
             outs[colour_ind] = self.colour_jitter(outs[colour_ind])
 
-        if self.return_class:
-            synset = filepaths[self.modality[0]].split("/")[-2].lstrip("n")
-            class_num = self.classes.loc[synset, "num"]
-            return outs, class_num
-        else:
+        if not self.return_class and not self.return_index:
             return outs
+        else:
+            rets = [outs]
+            if self.return_class:
+                synset = filepaths[self.modality[0]].split("/")[-2].lstrip("n")
+                class_num = self.classes.loc[synset, "num"]
+                rets.append(class_num)
+            if self.return_index:
+                rets.append(idx)
+
+            return rets
