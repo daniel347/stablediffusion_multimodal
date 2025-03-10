@@ -32,7 +32,8 @@ class AutoencoderKL(pl.LightningModule):
                  likelihood_dist=dist.Laplace,
                  post_dist=dist.Normal,
                  conform_to_3_channel=False,
-                 is_semseg=False
+                 is_semseg=False,
+                 llik_scaling=1.0
                  ):
         super().__init__()
         self.learn_logvar = learn_logvar
@@ -76,7 +77,7 @@ class AutoencoderKL(pl.LightningModule):
         self.px_u = likelihood_dist
         self.pw = prior_dist
 
-        self.llik_scaling = 1
+        self.llik_scaling = llik_scaling
 
         self._qu_x_params = None
         self._pw_params_aux = None

@@ -42,7 +42,7 @@ from ldm.data import get_dataset
 
 import pyiqa
 
-enable_wandb = False
+enable_wandb = True
 
 def expand_sub_confs(conf):
     # Expand sub-configs
@@ -338,6 +338,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
                         grid = make_grid(dbatch, nrow=8)
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
+
+                if i > 100:
+                    break
 
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)

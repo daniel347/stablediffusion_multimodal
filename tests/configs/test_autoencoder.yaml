@@ -1,0 +1,24 @@
+target: ldm.models.autoencoder.AutoencoderKL  # RGB images
+params:
+  embed_dim: 6  #  = latent_channel_z + latent_channel_w
+  monitor: val/rec_loss
+  embed_spatial_dim: 32
+  ddconfig:
+    #attn_type: "vanilla-xformers"
+    double_z: true
+    z_channels: 6  # This is really z + w channels
+    w_channels: 2
+    resolution: 256
+    in_channels: 3
+    out_ch: 3
+    ch: 128
+    ch_mult:
+    - 1
+    - 2
+    - 4
+    - 4
+    num_res_blocks: 2
+    attn_resolutions: []
+    dropout: 0.0
+  lossconfig:
+    target: torch.nn.Identity
