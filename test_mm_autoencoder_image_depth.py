@@ -38,6 +38,8 @@ from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_di
 from mmvae_objectives import m_dreg
 from ldm.data import get_dataset
 
+from utils import save_and_log_latents, save_and_log_img
+
 import random
 
 enable_wandb = False
@@ -223,100 +225,64 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
                 wandb.log({"Loss/test": epoch_loss}, step=epoch)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
 
-
         def visualise_latents(n_samples, avg_z=True):
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
+
+            latent_dim_w = model.module.module.w_channels if data_parallel else model.module.w_channels
+            latent_dim_z = model.module.module.params.z_channels if data_parallel else model.module.z_channels
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = unpack_data_nyu(dataT, device=device)
 
                     for m, name in enumerate(modalities):
-                        dbatch = torch.stack([display_data_fs[m](d) for d in data[m].detach().cpu()], dim=0)
-                        tvu.save_image(dbatch, os.path.join(runPath, f"batch_{i}_{name}.png"), nrow=conf.training.batch_size)
-                        if enable_wandb:
-                            wandb.log({f'input_data/m{m}': wandb.Image(dbatch)}, step=i)
+                        save_and_log_img(data[m], f'Input/m{m}', runPath, display_data_fs[m], i, enable_wandb)
+
+                    latents = model.module("encode", data, avg_z=avg_z) if data_parallel else model("encode", data,
+                                                                                                    avg_z=avg_z)
 
                     if avg_z:
-                        latents = model.module("encode", data) if data_parallel else model("encode", data)
-                        print(latents.shape)
+                        reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
+
+                        for j in range(NUM_VAES):
+                            latent_img = latents[:, j:j + latent_dim_w]
+
+                            save_and_log_latents(latent_img, f'Latents/wm{j}', runPath, i, enable_wandb)
+                            save_and_log_img(reconstructions[j], f'Reconstructions/m{j}',
+                                             runPath, display_data_fs[j], i, enable_wandb)
+
+                        latent_img = latents[:, -latent_dim_z:]
+                        save_and_log_latents(latent_img, 'Latents/z', runPath, i, enable_wandb)
                     else:
-                        latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
-                        # Take a random z
-                        latents_z = latents[NUM_VAES:]
-                        latent_z_sample = latents[NUM_VAES + i % 2]
-                        latents_w = latents[:NUM_VAES]
-                        latents = torch.cat(latents_w + [latent_z_sample], dim=1)
+                        for j in range(NUM_VAES):  # Choice of z
+                            latent_w_img = latents[j]
+                            latent_z_img = latents[j + NUM_VAES]
 
-                    reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
+                            save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, i, enable_wandb)
+                            save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, i, enable_wandb)
 
-                    latent_dim_w = model.module.module.w_channels if data_parallel else model.module.w_channels
-                    latent_dim_z = model.module.module.params.z_channels if data_parallel else model.module.z_channels
+                            # Reconstructions with known w
+                            ws = latents[:NUM_VAES]
+                            u = torch.cat([*ws, latent_z_img], dim=1)
+                            reconstructions = model.module("decode", u) if data_parallel else model("decode", u)
 
-                    for j in range(NUM_VAES):
-                        latent_img = latents[:, j:j+latent_dim_w].detach().cpu()
-                        latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
-                        latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
+                            for k in range(NUM_VAES):
+                                save_and_log_img(reconstructions[k], f'Reconstructions/z{j}/m{k}',
+                                                 runPath, display_data_fs[k], i, enable_wandb)
 
-                        latent_img_path = os.path.join(runPath, f"batch_{i}_latents_wm{j}.png")
-                        tvu.save_image(latent_img, latent_img_path, normalize=True)
-
-                        if not avg_z:
-                            latent_img_z = latents_z[j].detach().cpu()
-                            latent_img_z = torch.transpose(latent_img_z, 0, 1).reshape(-1, *latent_img_z.shape[2:]).unsqueeze(1)
-                            latent_img_z = make_grid(latent_img_z, nrow=conf.training.batch_size)
-
-                            if enable_wandb:
-                                wandb.log({f'Latents/z_enc{j}': wandb.Image(latent_img_z)}, step=i)
-
-                        if isinstance(reconstructions[j], torch.distributions.Bernoulli):
-                            recon_avg = reconstructions[j].mode
-                        else:
-                            recon_avg = reconstructions[j].mean
-                        recon_display = torch.stack([display_data_fs[j](d) for d in recon_avg.detach().cpu()], dim=0)
-
-                        recon_img_path = os.path.join(runPath, f"batch_{i}_recon_m{j}.png")
-                        tvu.save_image(recon_display, recon_img_path)
-
-                        if enable_wandb:
-                            wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=i)
-                            wandb.log({f'Reconstructions/m{j}': wandb.Image(recon_display)}, step=i)
-
-                        if not avg_z:
+                            # Reconstructions with random w
                             W_random = []
                             for k in range(NUM_VAES):
                                 pw = vaes[k].pw(*model.module.pw_params)
-                                latents_w = pw.rsample([latents_z[j].shape[0]]).squeeze(1).to(device)
-                                print(latents_w.shape)
-                                print(latents_z[j].shape)
+                                latents_w = pw.rsample([latent_z_img.shape[0]]).squeeze(1).to(device)
                                 W_random.append(latents_w)
-                            latents_random_w = torch.cat([*W_random, latents_z[j]], dim=1)
-                            recon_random_w = model.module("decode", latents_random_w) if data_parallel else model("decode", latents_random_w)
+                            latents_random_w = torch.cat([*W_random, latent_z_img], dim=1)
+                            recon_random_w = model.module("decode", latents_random_w) if data_parallel else model(
+                                "decode", latents_random_w)
 
                             for k in range(NUM_VAES):
-                                if isinstance(recon_random_w[k], torch.distributions.Bernoulli):
-                                    recon_avg = recon_random_w[k].mode
-                                else:
-                                    recon_avg = recon_random_w[k].mean
-                                recon_display = torch.stack([display_data_fs[k](d) for d in recon_avg.detach().cpu()],
-                                                            dim=0)
-
-                                recon_img_path = os.path.join(runPath, f"batch_{i}_recon_m{j}.png")
-                                tvu.save_image(recon_display, recon_img_path)
-
-                                if enable_wandb:
-                                    wandb.log({f'Random_W_Reconstructions/z_enc{j}/m{k}': wandb.Image(recon_display)}, step=i)
-
-                    if avg_z:
-                        latent_img = latents[:, -latent_dim_z:].detach().cpu()
-                        latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
-                        latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
-
-                        latent_img_path = os.path.join(runPath, f"batch_{i}_latents_z.png")
-                        tvu.save_image(latent_img, latent_img_path, normalize=True)
-
-                        if enable_wandb:
-                            wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
+                                save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
+                                                 runPath, display_data_fs[k], i, enable_wandb)
 
                     if (i + 1) * conf.training.batch_size >= n_samples:
                         break

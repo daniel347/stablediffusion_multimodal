@@ -40,9 +40,13 @@ from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_di
 from mmvae_objectives import m_dreg, train_adversary
 from ldm.data import get_dataset
 
+from utils import save_and_log_latents, save_and_log_img
+
 import pyiqa
 
 enable_wandb = True
+
+from torchvision.utils import save_image
 
 def expand_sub_confs(conf):
     # Expand sub-configs
@@ -164,7 +168,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         # WandB
         if enable_wandb:
             wandb.login()
-            wandb.init(
+            run = wandb.init(
                 # Set the project where this run will be logged
                 project=conf.experiment,
                 # Track hyperparameters and run metadata
@@ -175,6 +179,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             )
 
             wandb.alert(title="Starting Run", text="Started training stable diffusion autoencoder")
+        else:
+            run = None
 
         # preparation for training
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
@@ -351,10 +357,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
             print(loss_series)
 
-
         def test(epoch):
             b_loss = 0
             loss_series = pd.Series({"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0})
+
+            vaes = model.module.module.vaes if data_parallel else model.module.vaes
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
@@ -393,32 +400,38 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                     wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=epoch)
                         del cg_imgs
 
-                        # Also save some example latent vectors
-                        latents = model.module("encode", data) if data_parallel else model("encode", data)
-                        reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
+                        # Also save some example latent vectors and example reconstructions (without averaging z)
+                        latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
 
-                        latent_dim_w = model.module.module.w_channels if data_parallel else model.module.w_channels
-                        latent_dim_z = model.module.module.params.z_channels if data_parallel else model.module.z_channels
+                        for j in range(NUM_VAES):  # Choice of z
+                            latent_w_img = latents[j]
+                            latent_z_img = latents[j + NUM_VAES]
 
-                        for j in range(NUM_VAES):
-                            latent_img = latents[:, j:j + latent_dim_w].detach().cpu()
-                            latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
-                            latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
+                            save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, epoch, run)
+                            save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, epoch, run)
 
-                            if enable_wandb:
-                                wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=epoch)
+                            # Reconstructions with known w
+                            ws = latents[:NUM_VAES]
+                            u = torch.cat([*ws, latent_z_img], dim=1)
+                            reconstructions = model.module("decode", u) if data_parallel else model("decode", u)
 
-                                recon_avg = reconstructions[j].mode if isinstance(reconstructions[i], torch.distributions.Bernoulli) else reconstructions[j].mean
-                                recon_display = torch.stack([display_data_fs[j](d) for d in recon_avg.detach().cpu()], dim=0)
-                                wandb.log({f'Reconstructions/m{j}': wandb.Image(recon_display)}, step=epoch)
+                            for k in range(NUM_VAES):
+                                save_and_log_img(reconstructions[k], f'Reconstructions/z{j}/m{k}',
+                                                 runPath, display_data_fs[k], epoch, run)
 
-                        latent_img = latents[:, -latent_dim_z:].detach().cpu()
-                        latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
-                        latent_img = make_grid(latent_img, nrow=conf.training.batch_size)
+                            # Reconstructions with random w
+                            W_random = []
+                            for k in range(NUM_VAES):
+                                pw = vaes[k].pw(*model.module.pw_params)
+                                latents_w = pw.rsample([latent_z_img.shape[0]]).squeeze(1).to(device)
+                                W_random.append(latents_w)
+                            latents_random_w = torch.cat([*W_random, latent_z_img], dim=1)
+                            recon_random_w = model.module("decode", latents_random_w) if data_parallel else model(
+                                "decode", latents_random_w)
 
-                        if enable_wandb:
-                            wandb.log({'Latents/z': wandb.Image(latent_img)}, step=i)
-
+                            for k in range(NUM_VAES):
+                                save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
+                                                 runPath, display_data_fs[k], epoch, run)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -430,9 +443,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             return epoch_loss
 
-
         with Timer('MMVAEplus') as t:
-            # test(0)
+            test(0)
 
             for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
                 train(epoch)

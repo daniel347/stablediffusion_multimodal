@@ -11,7 +11,9 @@ import torch.nn.functional as F
 import random
 import matplotlib.pyplot as plt
 from scipy.optimize import linear_sum_assignment as linear_assignment
-
+from torchvision.utils import make_grid, save_image
+from pathlib import Path
+import wandb
 
 # Constants
 class Constants(object):
@@ -208,6 +210,41 @@ def plot_text_as_image_tensor(sentences_lists_of_words, pixel_width=64, pixel_he
         # Clean up the figure
         plt.close(fig)
     return torch.stack(imgs, dim=0)
+
+
+def save_and_log_latents(latents, name, basepath, step=0, wandb_run=None):
+    latents = latents.detach().cpu()
+    latents = torch.transpose(latents, 0, 1).reshape(-1, *latents.shape[2:]).unsqueeze(1)
+    latents = make_grid(latents, nrow=latents.shape[0])
+
+    save_and_log_processed(latents, name, basepath, step, wandb_run, save_kwargs={"normalize": True})
+
+
+def save_and_log_img(img, name, basepath, display_data_f=None,  step=0, wandb_run=None):
+    if isinstance(img, torch.distributions.distribution.Distribution):
+        img = distribution_to_tensor(img).detach().cpu()
+    if display_data_f is not None:
+        img = torch.stack([display_data_f(d) for d in img], dim=0)
+
+    save_and_log_processed(img, name, basepath, step, wandb_run)
+
+
+def save_and_log_processed(img, name, basepath, step=0, wandb_run=None, save_kwargs={}, wandb_kwargs={}):
+    save_path = Path(basepath).joinpath(f"step_{step}_"+name+".png")
+    if not save_path.parent.exists():
+        save_path.parent.mkdir(parents=True)
+    save_image(img, save_path, **save_kwargs)
+
+    if wandb_run is not None:
+        wandb_run.log({name: wandb.Image(img)}, step=step, **wandb_kwargs)
+
+
+def distribution_to_tensor(dist):
+    if isinstance(dist, torch.distributions.Bernoulli):
+        tens = dist.mode
+    else:
+        tens = dist.mean
+    return tens
 
 
 
