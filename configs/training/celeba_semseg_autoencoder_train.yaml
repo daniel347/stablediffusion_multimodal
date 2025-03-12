@@ -17,13 +17,13 @@ training:
   objective: dreg
   lr: 1.0e-4  # 3.0e-4
   batch_size: 32
-  num_epochs: 5
+  num_epochs: 10
   patience: 3
 
   weight_semseg_classes: # semseg_class_freqs.pt
 
   beta: 2.5
-  z_close_weight: 200000
+  z_close_weight: 500000
 
   start_epoch: 0
 

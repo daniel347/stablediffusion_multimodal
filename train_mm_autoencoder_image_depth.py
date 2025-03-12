@@ -390,7 +390,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                         cg_imgs = []
                         for n in range(N_gen):
-                            cg_imgs.append(model("self_and_cross_modal_generation", limited_data))
+                            cg_imgs.append(model("self_and_cross_modal_generation", limited_data, all_combinations=False))
 
                         cg_imgs = stack_generation_matrices(cg_imgs, limited_data, display_data_fs)
 
@@ -444,7 +444,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             return epoch_loss
 
         with Timer('MMVAEplus') as t:
-            test(0)
+            # test(0)
 
             for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
                 train(epoch)

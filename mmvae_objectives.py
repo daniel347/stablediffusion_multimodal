@@ -72,6 +72,7 @@ def _m_dreg(model,
             lpips=None,
             channel_weighting=None,
             z_close_weight=0.1,
+            off_combination_weight=0.2,
             **kwargs):
 
     if test:
@@ -79,6 +80,7 @@ def _m_dreg(model,
     else:
         qu_xs, px_us, uss = model("forward", x, K)
     mod = model.module.module if data_parallel else model.module
+    all_combinations = mod.all_combinations
 
     qz_xs, qw_xs = [], []
     # for r, qu_x in enumerate(qu_xs_):
@@ -121,39 +123,12 @@ def _m_dreg(model,
 
         lpx_u = []
         for d, px_u in enumerate(px_us[r]):
-            lpx_u_elem = 0
-
-            if isinstance(px_u, torch.distributions.Categorical):
-                x_num = MMCelebA.one_hot_semseg_to_index(x[d])
-                # Todo: implement channel weighting for Categorical
-                recon_log_prob = px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
-            else:
-                log_probs = px_u.log_prob(x[d])
-                if channel_weighting[d] is not None:
-                    log_probs = log_probs * channel_weighting[d][None, None, :, None, None]
-                recon_log_prob = log_probs.view(*px_u.batch_shape[:2], -1).mul(mod.vaes[d].llik_scaling).sum(dim=(-1, -2, -3))
-
-            loss_dict["recon_logprob"] += recon_log_prob.detach().cpu().sum().item()
-            lpx_u_elem += recon_log_prob
-
-            if fail_on_nan:
-                if isinstance(px_u, torch.distributions.Bernoulli) or isinstance(px_u, torch.distributions.Categorical):
-                    assert not torch.isnan(px_u.probs).any(), f"Model output is nan (px_u.probs[{r}][{d}])"
-                else:
-                    assert not torch.isnan(px_u.loc).any(), f"Model output is nan (px_u.mean[{r}][{d}])"
-                    assert not torch.isnan(px_u.scale).any(), f"Model output is nan (px_u.variance[{r}][{d}])"
-
-                assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpx_u_elem[{r}][{d}])"
-
             wlpips_d = wlpips[d] if hasattr(wlpips, "__getitem__") else wlpips
-            if wlpips_d > 0.0:
-                lpips_lpx_u_loss = lpips(x[d].squeeze(0), px_u.mode.squeeze(0))
-                loss_dict["lpips"] -= lpips_lpx_u_loss.detach().cpu().sum().item()
-                lpx_u_elem += - wlpips_d * lpips_lpx_u_loss
-
-            if fail_on_nan:
-                assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpips [{r}][{d}])"
-
+            if all_combinations:
+                lpx_u_elem = reconstruction_loss(px_u[0], x[d], mod.vaes[d], loss_dict, wlpips_d, lpips, channel_weighting[d], fail_on_nan=True)
+                lpx_u_elem += reconstruction_loss(px_u[1], x[d], mod.vaes[d], loss_dict, wlpips_d, lpips, channel_weighting[d], fail_on_nan=True) * off_combination_weight
+            else:
+                lpx_u_elem = reconstruction_loss(px_u, x[d], mod.vaes[d], loss_dict, wlpips_d, lpips, channel_weighting[d], fail_on_nan=True)
             lpx_u.append(lpx_u_elem)
 
         lpx_u = torch.stack(lpx_u).sum(0)
@@ -169,6 +144,42 @@ def _m_dreg(model,
         return lws, torch.stack(uss)
 
     return torch.stack(lws), torch.stack(uss), loss_dict
+
+
+def reconstruction_loss(px_u, x_d, mod_vae, loss_dict, wlpips_d, lpips, channel_weighting_d, fail_on_nan=True):
+    lpx_u_elem = 0
+
+    if isinstance(px_u, torch.distributions.Categorical):
+        x_num = MMCelebA.one_hot_semseg_to_index(x_d)
+        # Todo: implement channel weighting for Categorical
+        recon_log_prob = px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(mod_vae.llik_scaling).sum(dim=(-1, -2, -3))
+    else:
+        log_probs = px_u.log_prob(x_d)
+        if channel_weighting_d is not None:
+            log_probs = log_probs * channel_weighting_d[None, None, :, None, None]
+        recon_log_prob = log_probs.view(*px_u.batch_shape[:2], -1).mul(mod_vae.llik_scaling).sum(dim=(-1, -2, -3))
+
+    loss_dict["recon_logprob"] += recon_log_prob.detach().cpu().sum().item()
+    lpx_u_elem += recon_log_prob
+
+    if fail_on_nan:
+        if isinstance(px_u, torch.distributions.Bernoulli) or isinstance(px_u, torch.distributions.Categorical):
+            assert not torch.isnan(px_u.probs).any(), f"Model output is nan (px_u.probs[{r}][{d}])"
+        else:
+            assert not torch.isnan(px_u.loc).any(), f"Model output is nan (px_u.mean[{r}][{d}])"
+            assert not torch.isnan(px_u.scale).any(), f"Model output is nan (px_u.variance[{r}][{d}])"
+
+        assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpx_u_elem[{r}][{d}])"
+
+    if wlpips_d > 0.0:
+        lpips_lpx_u_loss = lpips(x_d.squeeze(0), px_u.mode.squeeze(0))
+        loss_dict["lpips"] -= lpips_lpx_u_loss.detach().cpu().sum().item()
+        lpx_u_elem += - wlpips_d * lpips_lpx_u_loss
+
+    if fail_on_nan:
+        assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpips [{r}][{d}])"
+
+    return lpx_u_elem
 
 
 def train_adversary(real_data, px_us, discriminator, optimiser, device):

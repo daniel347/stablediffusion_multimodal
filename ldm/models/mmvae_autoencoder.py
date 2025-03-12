@@ -10,7 +10,7 @@ class MMVAEplus(nn.Module):
     """
     MMVAEplus class definition.
     """
-    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False):
+    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False):
         super(MMVAEplus, self).__init__()
         if isinstance(prior_dist, str):
             if prior_dist == 'normal':
@@ -44,6 +44,8 @@ class MMVAEplus(nn.Module):
 
         self.cross_w_mode = cross_w_mode  # Options are "sample" (original MMVAE+), "constant", "zero"
         self.avg_z = avg_z
+
+        self.all_combinations = all_combinations
 
         self.latent_channel_z = latent_channel_z
         self.latent_channel_w = latent_channel_w
@@ -79,7 +81,7 @@ class MMVAEplus(nn.Module):
         else:
             return self._pz_params[0], F.softmax(self._pz_params[1], dim=(1, 2, 3)) * self._pz_params[1].size(-1) + 1e-20
 
-    def self_and_cross_generation_choose_latent_dist(self, x, latent_dist_params, K=1):
+    def self_and_cross_generation_choose_latent_dist(self, x, latent_dist_params, K=1, all_combinations=None):
         """
         Choose the latent distribution for self- and cross-generation.
         Args:
@@ -87,6 +89,9 @@ class MMVAEplus(nn.Module):
             K: Number of samples for reparameterization in latent space
             latent_dist_params: Parameters of latent distribution. One of pw_params or pw_params_aux
         """
+
+        if all_combinations is None: all_combinations = self.all_combinations
+
         qu_xs, uss = [], []
         px_us = [[None for _ in range(len(self.vaes))] for _ in range(len(self.vaes))]
         # Loop over unimodal vaes
@@ -104,6 +109,8 @@ class MMVAEplus(nn.Module):
             print("Averaging z")
             z_avg = torch.stack(zs, dim=0).mean(dim=0)
 
+
+
         # Loop over unimodal vaes and compute cross-modal reconstructions
         for e, us in enumerate(uss):
             for d, vae in enumerate(self.vaes):
@@ -113,26 +120,16 @@ class MMVAEplus(nn.Module):
                         us_combined = torch.cat([w_e, z_avg], dim=2)
                         px_us[e][d] = vae.decode(us_combined)
                     else:
-                        px_us[e][d] = vae.decode(us)
+                        if all_combinations:
+                            latent_w_sample = self.sample_w(d, latent_dist_params, us.size(), x[0].device)
+                            us_unkown_self_w = torch.cat([latent_w_sample, zs[e]], dim=2)
+                            px_us[e][d] = [vae.decode(us), vae.decode(us_unkown_self_w)]
+                        else:
+                            px_us[e][d] = vae.decode(us)
 
                 else:  # fill-in off-diagonal with cross-modal reconstructions
-                    if latent_dist_params == "pw_params":
-                        pw_params = self.pw_params
-                    elif latent_dist_params == "pw_params_aux":
-                        pw_params = vae.pw_params_aux
-                    else:
-                        raise ValueError(f"Latent dist parameters {latent_dist_params} not supported")
-
                     # Get shared latents from encoding modality e
-
-                    # Resample modality-specific encoding from modality-specific auxiliary distribution for decoding modality m
-                    if self.cross_w_mode == "sample":
-                        pw = vae.pw(*pw_params)
-                        latents_w = pw.rsample([us.size()[1]]).transpose(0, 1).to(x[0].device)
-                    elif self.cross_w_mode == "constant":
-                        latents_w = pw_params[0].unsqueeze(0).expand(*us.shape[:2], -1, -1, -1).to(x[0].device)
-                    elif self.cross_w_mode == "zero":
-                        latents_w = torch.zeros(*us.shape[:2], pw_params[1].shape[1:]).to(x[0].device)
+                    latents_w = self.sample_w(d, latent_dist_params, us.size(), x[0].device)
 
                     # Combine shared and resampled private latents
                     if self.avg_z:
@@ -141,10 +138,39 @@ class MMVAEplus(nn.Module):
                         us_combined = torch.cat([latents_w, zs[e]], dim=2)
 
                     # Get cross-reconstruction likelihood
-                    px_us[e][d] = vae.decode(us_combined)
+                    if all_combinations:
+                        target_w_known = torch.split(uss[d], [self.latent_channel_w, self.latent_channel_z], dim=2)[0]
+                        us_known_cross_w = torch.cat([target_w_known, zs[e]], dim=2)
+                        px_us[e][d] = [vae.decode(us_combined), vae.decode(us_known_cross_w)]
+                    else:
+                        px_us[e][d] = vae.decode(us_combined)
+
         return qu_xs, px_us, uss
 
-    def forward(self, x, K=1):
+    def sample_w(self, vae_ind, latent_dist_params, us_shape, dev):
+        vae = self.vaes[vae_ind]
+
+        if latent_dist_params == "pw_params":
+            pw_params = self.pw_params
+        elif latent_dist_params == "pw_params_aux":
+            pw_params = vae.pw_params_aux
+        else:
+            raise ValueError(f"Latent dist parameters {latent_dist_params} not supported")
+
+        # Get shared latents from encoding modality e
+
+        # Resample modality-specific encoding from modality-specific auxiliary distribution for decoding modality m
+        if self.cross_w_mode == "sample":
+            pw = vae.pw(*pw_params)
+            latents_w = pw.rsample([us_shape[1]]).transpose(0, 1).to(dev)
+        elif self.cross_w_mode == "constant":
+            latents_w = pw_params[0].unsqueeze(0).expand(*us_shape[:2], -1, -1, -1).to(dev)
+        elif self.cross_w_mode == "zero":
+            latents_w = torch.zeros(*us_shape[:2], pw_params[1].shape[1:]).to(dev)
+
+        return latents_w
+
+    def forward(self, x, K=1, all_combinations=None):
         # print(f"model forward received x: {[xi.shape for xi in x]} on device {[xi.device for xi in x]}")
         """
         Forward function.
@@ -159,9 +185,9 @@ class MMVAEplus(nn.Module):
             - uss: List of latent codes, one for each modality. uss[m] contains latents inferred
                    from modality m. Note there latents are the concatenation of private and shared latents.
         """
-        return self.self_and_cross_generation_choose_latent_dist(x, "pw_params_aux", K=K)
+        return self.self_and_cross_generation_choose_latent_dist(x, "pw_params_aux", K=K, all_combinations=all_combinations)
 
-    def self_and_cross_modal_generation_forward(self, data, K=1):
+    def self_and_cross_modal_generation_forward(self, data, K=1, all_combinations=None):
         """
         Test-time self- and cross-model generation forward function.
         Args:
@@ -171,10 +197,10 @@ class MMVAEplus(nn.Module):
             Unimodal encoding distribution, Matrix of self- and cross-modal reconstruction distrubutions, Latent embeddings
 
         """
-        return self.self_and_cross_generation_choose_latent_dist(data, "pw_params", K=K)
+        return self.self_and_cross_generation_choose_latent_dist(data, "pw_params", K=K, all_combinations=all_combinations)
 
 
-    def self_and_cross_modal_generation(self, data):
+    def self_and_cross_modal_generation(self, data, all_combinations=None):
         """
         Test-time self- and cross-reconstruction.
         Args:
@@ -185,7 +211,7 @@ class MMVAEplus(nn.Module):
 
         """
         with torch.no_grad():
-            _, px_us, _ = self.self_and_cross_modal_generation_forward(data)
+            _, px_us, _ = self.self_and_cross_modal_generation_forward(data, all_combinations=all_combinations)
             # ------------------------------------------------
             # cross-modal matrix of reconstructions
             recons = [[None for _ in range(len(self.vaes))] for _ in range(len(self.vaes))]

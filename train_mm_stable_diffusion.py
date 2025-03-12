@@ -69,6 +69,54 @@ def cleanup():
     dist.destroy_process_group()
 
 
+def load_precomputed_datasets(conf):
+    train_dataset = get_dataset("latents", split="train", **conf.data)
+    test_dataset = get_dataset("latents", split="val", **conf.data)
+
+    return train_dataset, test_dataset
+
+
+def load_image_datasets(conf):
+    tx = v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])
+    return_class = "return_class" in conf.data and conf.data.return_class
+    return_index = conf.training.precompute_latents
+
+    train_opts = conf.data
+    test_opts = copy.deepcopy(OmegaConf.to_container(conf.data))
+    for key in ["p_hor_flip", "p_colour_jitter"]:
+        test_opts.pop(key, None)
+
+    train_dataset = get_dataset(conf.data.dataset_name,
+                                transform=tx,
+                                split="train",
+                                return_index=return_index,
+                                return_class=return_class,
+                                **train_opts)
+    test_dataset = get_dataset(conf.data.dataset_name,
+                               transform=tx,
+                               split="val",
+                               return_index=return_index,
+                               return_class=return_class,
+                               **test_opts)
+
+    return train_dataset, test_dataset
+
+
+def create_dataloaders(train_dataset, test_dataset, conf, world_size=1, rank=0, data_parallel=False):
+    kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
+    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
+                                       shuffle=True) if data_parallel else None
+    test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,
+                                      shuffle=False) if data_parallel else None
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=conf.training.batch_size,
+                                               shuffle=not data_parallel, sampler=train_sampler, **kwargs)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
+                                              sampler=test_sampler, **kwargs)
+
+    return train_loader, test_loader
+
+
 def initialise_model(conf):
     model = instantiate_from_config(conf["model_conf"]["model"])
 
@@ -194,49 +242,89 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             print("Using mixed precision training")
             scaler = GradScaler()
 
+        already_precomputed = False
+        if conf.training.precompute_latents:
+            latents_path = Path(conf.data.root_data_dir) / Path(conf.training.precompute_latents_path)
+            if latents_path.exists():
+                # We have already computed the latents
+                train_dataset, test_dataset = load_precomputed_datasets(conf)
+                already_precomputed = True
 
-        # Load NYU dataset
-        modalities = conf.data.modality
-        kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
-        tx = v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])
+        if not already_precomputed or not conf.training.precompute_latents:
+            # we need to load the image datasets, either for precomputation or for training
+            train_dataset, test_dataset = load_image_datasets(conf)
+
+        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
+
         return_class = "return_class" in conf.data and conf.data.return_class
-
-        train_opts = conf.data
-        test_opts = copy.deepcopy(OmegaConf.to_container(conf.data))
-        for key in ["p_hor_flip", "p_colour_jitter"]:
-            test_opts.pop(key, None)
-
-        train_dataset = get_dataset(conf.data.dataset_name,
-                                    transform=tx,
-                                    split="train",
-                                    **train_opts)
-        test_dataset = get_dataset(conf.data.dataset_name,
-                                   transform=tx,
-                                   split="val",
-                                   **test_opts)
-
-        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in modalities]
-
-        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True) if data_parallel else None
-        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False) if data_parallel else None
-
-        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=conf.training.batch_size, shuffle=not data_parallel, sampler=train_sampler, **kwargs)
-        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False, sampler=test_sampler, **kwargs)
+        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in conf.data.modality]
+        return_index = conf.training.precompute_latents
+        modalities = conf.data.modality
 
         # Set the learning rate forward to continue training after pause
         if conf.training.start_epoch > 0:
             for _ in range(len(train_loader)//scheduler_step_freq):
                 scheduler.step()
 
-        def unpack_data_nyu(data, device="cuda", has_class=False):
+        def unpack_data_nyu(data, device="cuda", has_class=False, is_latent=False):
             if has_class:
-                return unpack_data_nyu(data[0], device=device), data[1].to(device)
+                return unpack_data_nyu(data[0], device=device, is_latent=is_latent), data[1].to(device)
+            elif is_latent:
+                return data.to(device)
             else:
                 return [d.to(device) for d in data]
+
+        def move_data_to_device(data, device="cuda"):
+            if isinstance(data, torch.Tensor):
+                return data.to(device)
+            elif isinstance(data, tuple) or isinstance(data, list):
+                return [move_data_to_device(d, device) for d in data]
 
         best_test_loss = 10000
         test_worseining_count = 0
         early_stop = False
+
+        def precompute_latents(split="train", save_folder="latents"):
+            dataloader = train_loader if split == "train" else test_loader
+            model.eval()
+
+            if data_parallel:
+                dataloader.sampler.set_epoch(epoch)
+
+            if enable_pbars:
+                pbar = tqdm.tqdm(enumerate(dataloader), total=len(dataloader),
+                                 position=rank if data_parallel else 0)
+            else:
+                pbar = enumerate(dataloader)
+
+            save_dir = Path(conf.data.root_data_dir) / Path(f"{save_folder}/{split}")
+
+            with torch.no_grad():
+                for i, dataT in pbar:
+                    if return_class:
+                        data, classes, ind = move_data_to_device(dataT, device=device)
+                    else:
+                        data, ind = move_data_to_device(dataT, device=device)
+                    # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
+                    optimizer.zero_grad()
+
+                    if use_mixed_precision:
+                        with autocast(dtype=torch.float16, device_type="cuda"):
+                            latents = model_first_stage.encode(data)
+                    else:
+                        latents = model_first_stage.encode(data)
+
+                    for j, latent in enumerate(latents):
+                        if return_class:
+                            save_dir_class = save_dir / Path(str(classes[j].item()))
+                        else:
+                            save_dir_class = save_dir / Path("all")
+
+                        if not save_dir_class.exists():
+                            save_dir_class.mkdir(parents=True)
+
+                        save_name = save_dir_class / Path(f"latent_{ind}.pt")
+                        torch.save(latent, save_name)
 
         def train_epoch(epoch):
             model.train()
@@ -252,20 +340,22 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             for i, dataT in pbar:
                 if return_class:
-                    data, classes = unpack_data_nyu(dataT, device=device, has_class=True)
+                    data, classes = move_data_to_device(dataT, device=device)
                 else:
-                    data = unpack_data_nyu(dataT, device=device)
+                    data = move_data_to_device(dataT, device=device)
                 # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                 optimizer.zero_grad()
 
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
-                        latents = model_first_stage.encode(data)
+                        if conf.data.precompute_latents: latents = data
+                        else: latents = model_first_stage.encode(data)
                         loss, loss_dict = model(latents, c=(classes if return_class else None))
 
                     scaler.scale(loss).backward()
                 else:
-                    latents = model_first_stage.encode(data)
+                    if conf.data.precompute_latents: latents = data
+                    else: latents = model_first_stage.encode(data)
                     print(f"Latent shape: {latents.shape}")
                     loss, loss_dict = model(latents, c=(classes if return_class else None))
                     loss.backward()
@@ -309,11 +399,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             with (torch.no_grad(), model.ema_scope("Epoch test")):
                 for i, dataT in pbar:
                     if return_class:
-                        data, classes = unpack_data_nyu(dataT, device=device, has_class=True)
+                        data, classes = move_data_to_device(dataT, device=device)
                     else:
-                        data = unpack_data_nyu(dataT, device=device)
+                        data = move_data_to_device(dataT, device=device)
 
-                    latents = model_first_stage.encode(data)
+                    if conf.data.precompute_latents:
+                        latents = data
+                    else:
+                        latents = model_first_stage.encode(data)
                     loss, loss_dict = model(latents, c=(classes if return_class else None))
 
                     b_loss += loss.detach().item()
@@ -408,6 +501,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
 
         with Timer('MMVAEplus') as t:
+            if conf.training.precompute_latents and not already_precomputed:
+                # Compute the latents and reload the latent dataloader
+                print("Beginning latent computation and saving")
+                precompute_latents("train")
+                precompute_latents("val")
+
+                train_dataset, test_dataset = load_precomputed_datasets(conf)
+                train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
+
             # test_epoch(start_epoch)
             # fid_scores = test_fid(start_epoch)
             # print("   ".join([f"{mod} FID: {fid}" for mod, fid in zip(modalities, fid_scores)]))
