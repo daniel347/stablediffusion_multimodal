@@ -231,7 +231,7 @@ class AutoencoderOrigWrapper(AutoencoderKL):
     def __init__(self, *args, **kwargs):
         super(AutoencoderOrigWrapper, self).__init__(*args, **kwargs)
 
-        self.w_channels = kwargs.get("dd_config", {"z_channels": 0})["z_channels"]
+        self.w_channels = kwargs.get("ddconfig", {"z_channels": 0})["z_channels"]
         self.z_channels = 0
 
         self.vaes = [self]  # I hate it
