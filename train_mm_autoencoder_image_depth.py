@@ -345,9 +345,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         grid = make_grid(dbatch, nrow=8)
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
 
-                if i > 100:
-                    break
-
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
             loss_series = loss_series / len(train_loader.dataset)
