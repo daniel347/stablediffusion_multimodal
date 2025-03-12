@@ -1,28 +1,23 @@
 # Train MMVAEplus on CUB Image-Captions dataset
 import os
-import psutil
 import shutil
 from pathlib import Path
 import hydra
 from omegaconf import OmegaConf, DictConfig
 import tqdm
-import time
 from collections.abc import Iterable
 import copy
 from datetime import datetime
-from functools import partial
 
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import wandb
 
 import torch
 from torch import optim
 from torchvision.transforms import v2
 from torchvision.utils import make_grid
-from torch.profiler import ProfilerActivity, profile, record_function
 from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -31,21 +26,23 @@ import torch.multiprocessing as mp
 import torchvision.utils as tvu
 from torch.amp import GradScaler, autocast
 
-from ray import tune
 from ray import train
 from ray.train import Checkpoint, get_checkpoint
-from ray.tune.schedulers import ASHAScheduler, HyperBandForBOHB
-from ray.tune.search.bohb import TuneBOHB
 import ray.cloudpickle as pickle
 import tempfile
 
-from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
-from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light, save_model_ema
-from mmvae_objectives import m_dreg
+from ldm.util import instantiate_from_config, Timer, save_model_light
 from ldm.data import get_dataset
 import pyiqa
+from utils import save_and_log_latents, save_and_log_img
+
+import random
 
 enable_wandb = True
+
+notes = ("Training a unimodal model using the pretrained stable diffusion autoencoder. This should highlight if the "
+         "autoencoder is my problem or if my diffusion training is not producing good samples.")
+name = "unimodal_rgb_sd_ae"
 
 
 def expand_sub_confs(conf):
@@ -70,8 +67,8 @@ def cleanup():
 
 
 def load_precomputed_datasets(conf):
-    train_dataset = get_dataset("latents", split="train", **conf.data)
-    test_dataset = get_dataset("latents", split="val", **conf.data)
+    train_dataset = get_dataset("latents", latent_folder_name=conf.training.precompute_latents_path, split="train", **conf.data)
+    test_dataset = get_dataset("latents", latent_folder_name=conf.training.precompute_latents_path, split="val", **conf.data)
 
     return train_dataset, test_dataset
 
@@ -151,6 +148,36 @@ def stack_generation_matrices(mats, data):
     return out_mat
 
 
+def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode):
+    avg_z = z_mode == "avg"
+    random_z = z_mode == "random"
+    print("model_w_channels: ", model_first_stage.w_channels)
+    print("model z channels: ", model_first_stage.z_channels)
+
+    if conf.training.precompute_latents:
+        latents = data
+        print(f"latent shape: {latents.shape}")
+    else:
+        latents = model_first_stage.encode(data, avg_z=avg_z)
+
+    if random_z or (avg_z and latents.shape[1] > model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) or isinstance(z_mode, int):
+        latents_split = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [
+            model_first_stage.z_channels for _ in range(NUM_VAES)], dim=1)
+        latents_w = latents_split[:NUM_VAES]
+        if random_z:
+            latent_z = random.choice(latents_split[NUM_VAES:])
+            latents = torch.cat([*latents_w, latent_z], dim=1)
+        elif avg_z:
+            latent_z = torch.mean(torch.stack(latents_split[NUM_VAES:]), dim=0)
+            latents = torch.cat([*latents_w, latent_z], dim=1)
+        elif isinstance(z_mode, int):
+            latents = torch.cat([*latents_w, latents_split[NUM_VAES + z_mode]], dim=1)
+        else:
+            raise ValueError("Unrecognised z_mode")
+
+    return latents
+
+
 def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=False, enable_pbars=True):
     try:
         if data_parallel:
@@ -182,6 +209,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if ray_tune:
             runId += f"_rank{train.get_context().get_world_rank()}"
 
+        if name is not None:
+            runId += f"_{name}"
+
         if rank == 0 or not data_parallel:
             experiment_dir = Path(os.path.join(conf.data.outputdir, conf.experiment, "checkpoints"))
             experiment_dir.mkdir(parents=True, exist_ok=True)
@@ -199,7 +229,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         # WandB
         if enable_wandb:
             wandb.login()
-            wandb.init(
+            run = wandb.init(
                 # Set the project where this run will be logged
                 project=conf.experiment,
                 # Track hyperparameters and run metadata
@@ -207,6 +237,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 # Run name
                 name=f"{runId}_{str(rank)}",
                 group=f"DDP_{runId}",
+                notes=notes,
             )
 
             wandb.alert(title=f"Experiment {conf.experiment} has started", text=f"Run id: {runId}")
@@ -242,24 +273,26 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             print("Using mixed precision training")
             scaler = GradScaler()
 
+        train_dataset, test_dataset = load_image_datasets(conf)
+        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
+
+        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in conf.data.modality]
+
         already_precomputed = False
         if conf.training.precompute_latents:
             latents_path = Path(conf.data.root_data_dir) / Path(conf.training.precompute_latents_path)
-            if latents_path.exists():
+            if latents_path.exists() and not conf.training.force_recompute:
                 # We have already computed the latents
                 train_dataset, test_dataset = load_precomputed_datasets(conf)
+                train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
+                                                               data_parallel)
                 already_precomputed = True
 
-        if not already_precomputed or not conf.training.precompute_latents:
-            # we need to load the image datasets, either for precomputation or for training
-            train_dataset, test_dataset = load_image_datasets(conf)
-
-        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
-
         return_class = "return_class" in conf.data and conf.data.return_class
-        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in conf.data.modality]
         return_index = conf.training.precompute_latents
         modalities = conf.data.modality
+        avg_z = conf.training.z_mode == "avg"
+        random_z = conf.training.z_mode == "random"
 
         # Set the learning rate forward to continue training after pause
         if conf.training.start_epoch > 0:
@@ -310,11 +343,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     if use_mixed_precision:
                         with autocast(dtype=torch.float16, device_type="cuda"):
-                            latents = model_first_stage.encode(data)
+                            latents = model_first_stage.encode(data, avg_z=avg_z)
                     else:
-                        latents = model_first_stage.encode(data)
+                        latents = model_first_stage.encode(data, avg_z=avg_z)
+
+                    if not avg_z:
+                        latents = torch.cat(latents, dim=1)
+
+                    print(latents.shape)
 
                     for j, latent in enumerate(latents):
+                        print("latent shape: ", latent.shape)
                         if return_class:
                             save_dir_class = save_dir / Path(str(classes[j].item()))
                         else:
@@ -323,8 +362,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         if not save_dir_class.exists():
                             save_dir_class.mkdir(parents=True)
 
-                        save_name = save_dir_class / Path(f"latent_{ind}.pt")
-                        torch.save(latent, save_name)
+                        save_name = save_dir_class / Path(f"latent_{ind[j].item()}.pt")
+                        torch.save(latent.cpu(), save_name)
 
         def train_epoch(epoch):
             model.train()
@@ -346,17 +385,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                 optimizer.zero_grad()
 
+                latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
-                        if conf.data.precompute_latents: latents = data
-                        else: latents = model_first_stage.encode(data)
                         loss, loss_dict = model(latents, c=(classes if return_class else None))
 
                     scaler.scale(loss).backward()
                 else:
-                    if conf.data.precompute_latents: latents = data
-                    else: latents = model_first_stage.encode(data)
-                    print(f"Latent shape: {latents.shape}")
                     loss, loss_dict = model(latents, c=(classes if return_class else None))
                     loss.backward()
 
@@ -377,12 +413,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     # print(f"Learning rate: {scheduler.get_last_lr()}")
 
                 if enable_wandb and i == 0:
-                    for m, (name, dbatch) in enumerate(zip(modalities, data)):
-                        dbatch = dbatch.detach().cpu()
-                        dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
-                        grid = make_grid(dbatch, nrow=8)
-                        wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
-
+                    if conf.training.precompute_latents:
+                        *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
+                        for j, latent in enumerate(latents_w):
+                            save_and_log_latents(latent, f'Latents/wm{j}', runPath, epoch, run)
+                        if latents_z.shape[1] > 0:
+                            save_and_log_latents(latents_z, f'Latents/z', runPath, epoch, run)
+                    else:
+                        for m, (name, dbatch) in enumerate(zip(modalities, data)):
+                            save_and_log_img(dbatch, f"Data/{name}", runPath,
+                                             display_data_fs[m], step=epoch, wandb_run=run)
 
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
@@ -403,12 +443,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         data = move_data_to_device(dataT, device=device)
 
-                    if conf.data.precompute_latents:
-                        latents = data
-                    else:
-                        latents = model_first_stage.encode(data)
-                    loss, loss_dict = model(latents, c=(classes if return_class else None))
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
 
+                    loss, loss_dict = model(latents, c=(classes if return_class else None))
                     b_loss += loss.detach().item()
 
                     if i == 0 and epoch % 1 == 0:
@@ -427,13 +464,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         samples_x = model_first_stage.decode(samples_zw)
 
                         for m in range(NUM_VAES):
-                            samples_x_grid = make_grid(torch.stack([display_data_fs[m](s) for s in samples_x[m].mean.detach().cpu()]), nrow=4)
-                            print(samples_x_grid.shape)
                             if return_class:
-                                caption = "\n".join([f"{b}: {test_dataset.class_num_to_name(c)}" for b, c in enumerate(classes)])
-                            else: caption = None
+                                wandb_kwargs = {"caption" : "\n".join([f"{b}: {test_dataset.class_num_to_name(c)}" for b, c in enumerate(classes)])}
+                            else:
+                                wandb_kwargs = {}
+                            save_and_log_img(samples_x[m], f'Generation/m{m}',
+                                             runPath, display_data_fs[m], epoch, run, wandb_kwargs=wandb_kwargs, save_kwargs={}, nrow=4)
 
-                            if enable_wandb: wandb.log({f'Generation/m{m}': wandb.Image(samples_x_grid, caption=caption)}, step=epoch)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -499,19 +536,19 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return fid_scores
 
-
         with Timer('MMVAEplus') as t:
             if conf.training.precompute_latents and not already_precomputed:
                 # Compute the latents and reload the latent dataloader
                 print("Beginning latent computation and saving")
-                precompute_latents("train")
-                precompute_latents("val")
+                precompute_latents("train", conf.training.precompute_latents_path)
+                precompute_latents("val", conf.training.precompute_latents_path)
 
+                # Replace the dataloaders with the precomputed latent loaders
                 train_dataset, test_dataset = load_precomputed_datasets(conf)
                 train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
 
-            # test_epoch(start_epoch)
-            # fid_scores = test_fid(start_epoch)
+            test_epoch(start_epoch)
+            fid_scores = test_fid(start_epoch)
             # print("   ".join([f"{mod} FID: {fid}" for mod, fid in zip(modalities, fid_scores)]))
             for epoch in range(start_epoch + 1, conf.training.num_epochs + 1 + start_epoch):
                 train_epoch(epoch)
@@ -552,7 +589,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train_rgb_pretrained_ae.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

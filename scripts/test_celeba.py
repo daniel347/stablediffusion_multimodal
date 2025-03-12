@@ -6,7 +6,7 @@ import torch
 
 dataset_opts = {"mm_celeba": {"transform": v2.Compose([v2.Resize([256, 256])]),
                               "modality": ["colour", "semseg"],
-                              "root_data_dir": "../mmvaeplus/data/CelebAMask-HQ"}}
+                              "root_data_dir": "../../datasets/CelebAMask-HQ"}}
 
 
 def image_load(split="train", dataset_name="mm_celeba"):
@@ -40,5 +40,11 @@ def compute_class_weights(split="train", dataset_name="mm_celeba"):
     print(freqs)
     torch.save(freqs, "../mmvaeplus/data/CelebAMask-HQ/semseg_class_freqs.pt")
 
+
+def draw_semseg_legend(split="train", dataset_name="mm_celeba"):
+    train_dataset = get_dataset(dataset_name, **dataset_opts[dataset_name], split=split)
+    fig, ax = train_dataset.create_semseg_colour_index()
+    fig.savefig("semseg_legend.png")
+
 if __name__ == "__main__":
-    compute_class_weights()
+    draw_semseg_legend()

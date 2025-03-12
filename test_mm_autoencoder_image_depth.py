@@ -2,13 +2,11 @@
 import os
 
 import pandas as pd
-import psutil
 import shutil
 from pathlib import Path
 import hydra
 from omegaconf import OmegaConf, DictConfig
 import tqdm
-import time
 from collections.abc import Iterable
 import copy
 from datetime import datetime
@@ -22,11 +20,8 @@ import seaborn as sns
 import wandb
 
 import torch
-from torch import optim
 from torchvision.transforms import v2, InterpolationMode
 from torchvision.utils import make_grid
-from torch.profiler import ProfilerActivity, profile, record_function
-from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -34,13 +29,11 @@ import torch.multiprocessing as mp
 import torchvision.utils as tvu
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
-from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light
-from mmvae_objectives import m_dreg
+from ldm.util import instantiate_from_config, Timer
+from stablediffusion.objectives.mmvae_objectives import m_dreg
 from ldm.data import get_dataset
 
 from utils import save_and_log_latents, save_and_log_img
-
-import random
 
 enable_wandb = False
 

@@ -1,14 +1,11 @@
 # Train MMVAEplus on CUB Image-Captions dataset
 import os
 
-import pandas as pd
-import psutil
 import shutil
 from pathlib import Path
 import hydra
 from omegaconf import OmegaConf, DictConfig
 import tqdm
-import time
 from collections.abc import Iterable
 import copy
 from datetime import datetime
@@ -17,27 +14,23 @@ from functools import partial
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import wandb
 
 import torch
 from torch import optim
 from torchvision.transforms import v2, InterpolationMode
 from torchvision.utils import make_grid
-from torch.profiler import ProfilerActivity, profile, record_function
 from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
-import torchvision.utils as tvu
 from torch.amp import GradScaler, autocast
-from torch.nn.utils import clip_grad_norm_
 import pandas as pd
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
-from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light, GradAutoClipper
-from mmvae_objectives import m_dreg, train_adversary
+from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
+from stablediffusion.objectives.mmvae_objectives import m_dreg, train_adversary
 from ldm.data import get_dataset
 
 from utils import save_and_log_latents, save_and_log_img
@@ -46,7 +39,6 @@ import pyiqa
 
 enable_wandb = True
 
-from torchvision.utils import save_image
 
 def expand_sub_confs(conf):
     # Expand sub-configs

@@ -18,10 +18,10 @@ from pathlib import Path
 @register_dataset("latents")
 class LatentDataset(Dataset):
 
-    def __init__(self, root_data_dir, split, modality, return_class=False, return_index=False, **kwargs):
+    def __init__(self, root_data_dir, split, modality, return_class=False, return_index=False, latent_folder_name="latents", **kwargs):
         super().__init__()
 
-        latent_dir = Path(root_data_dir) / Path(f"latents/{split}")
+        latent_dir = Path(root_data_dir) / Path(f"{latent_folder_name}/{split}")
         self.latents = list(latent_dir.glob("**/*.pt"))
 
         self.modality = modality
@@ -35,7 +35,7 @@ class LatentDataset(Dataset):
         return len(self.latents)
 
     def __getitem__(self, idx):
-        latent = torch.load(self.latents[idx])
+        latent = torch.load(self.latents[idx]).to("cpu")
         if not self.return_class and not self.return_index:
             return latent
         else:

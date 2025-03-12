@@ -1,8 +1,8 @@
 # Objectives
 import torch
 from numpy import prod
-from utils import log_mean_exp, is_multidata
-from ldm.data.dataset_CelebAMask import MMCelebA
+from ..utils import log_mean_exp, is_multidata
+from ..ldm.data.dataset_CelebAMask import MMCelebA
 
 eta = 1e-20
 
