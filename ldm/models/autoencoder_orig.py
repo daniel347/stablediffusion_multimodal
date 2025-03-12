@@ -2,6 +2,7 @@ import torch
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from contextlib import contextmanager
+from torch.dristributions.laplace import Laplace
 
 from ldm.modules.diffusionmodules.model import Encoder, Decoder
 from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
@@ -231,7 +232,7 @@ class AutoencoderOrigWrapper(AutoencoderKL):
     def __init__(self, *args, **kwargs):
         super(AutoencoderOrigWrapper, self).__init__(*args, **kwargs)
 
-        self.w_channels = kwargs.get("dd_config", {"z_channels": 0})["z_channels"]
+        self.w_channels = kwargs.get("ddconfig", {"z_channels": 0})["z_channels"]
         self.z_channels = 0
 
         self.vaes = [self]  # I hate it
@@ -241,4 +242,5 @@ class AutoencoderOrigWrapper(AutoencoderKL):
         return enc_dist.mean
 
     def decode(self, z, **kwargs):
-        return super(AutoencoderOrigWrapper, self).decode(z)
+        mean = super(AutoencoderOrigWrapper, self).decode(z)
+        return Laplace(loc=mean, scale=torch.ones_like(mean))
