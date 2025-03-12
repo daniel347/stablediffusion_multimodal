@@ -1,47 +1,30 @@
 # Train MMVAEplus on CUB Image-Captions dataset
 import os
-import psutil
 import shutil
 from pathlib import Path
 import hydra
 from omegaconf import OmegaConf, DictConfig
 import tqdm
-import time
 from collections.abc import Iterable
-import copy
 from datetime import datetime
-from functools import partial
 
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 import wandb
 
 import torch
-from torch import optim
 from torchvision.transforms import v2
 from torchvision.utils import make_grid
-from torch.profiler import ProfilerActivity, profile, record_function
-from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 import torchvision.utils as tvu
-from torch.amp import GradScaler, autocast
 
-from ray import tune
 from ray import train
-from ray.train import Checkpoint, get_checkpoint
-from ray.tune.schedulers import ASHAScheduler, HyperBandForBOHB
-from ray.tune.search.bohb import TuneBOHB
-import ray.cloudpickle as pickle
-import tempfile
 
-from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
-from ldm.util import instantiate_from_config, dict_to_namespace, namespace_to_dict, Timer, save_model_light
-from mmvae_objectives import m_dreg
+from ldm.util import instantiate_from_config, Timer
 from ldm.data.dataset_NYU_Depth import NYUDepth
 import pyiqa
 

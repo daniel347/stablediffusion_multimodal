@@ -50,6 +50,9 @@ class MMVAEplus(nn.Module):
         self.latent_channel_z = latent_channel_z
         self.latent_channel_w = latent_channel_w
 
+        self.can_cross_generate = True
+        self.can_sample = False
+
         if ckpt_path is not None:
             print("Loading MMVAE checkpoint from {params.ckpt_path}")
             ckpt = torch.load(ckpt_path)

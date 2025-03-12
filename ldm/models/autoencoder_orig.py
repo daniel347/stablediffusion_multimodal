@@ -16,6 +16,7 @@ class AutoencoderKL(pl.LightningModule):
                  lossconfig,
                  embed_dim,
                  ckpt_path=None,
+                 ckpt_is_full_sd=False,
                  ignore_keys=[],
                  image_key="image",
                  colorize_nlabels=None,
@@ -47,10 +48,18 @@ class AutoencoderKL(pl.LightningModule):
             print(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
 
         if ckpt_path is not None:
-            self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys)
+            self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys, full_sd=ckpt_is_full_sd)
 
-    def init_from_ckpt(self, path, ignore_keys=list()):
+    def init_from_ckpt(self, path, ignore_keys=list(), full_sd=False):
         sd = torch.load(path, map_location="cpu")["state_dict"]
+        if full_sd:
+            first_stage_dict = {}
+            for name, param in sd.items():
+                if "first_stage_model" in name:
+                    new_name = name.split("first_stage_model.")[1]
+                    first_stage_dict[new_name] = param
+            sd = first_stage_dict
+
         keys = list(sd.keys())
         for k in keys:
             for ik in ignore_keys:
@@ -216,3 +225,20 @@ class IdentityFirstStage(torch.nn.Module):
 
     def forward(self, x, *args, **kwargs):
         return x
+
+
+class AutoencoderOrigWrapper(AutoencoderKL):
+    def __init__(self, *args, **kwargs):
+        super(AutoencoderOrigWrapper, self).__init__(*args, **kwargs)
+
+        self.w_channels = kwargs.get("dd_config", {"z_channels": 0})["z_channels"]
+        self.z_channels = 0
+
+        self.vaes = [self]  # I hate it
+
+    def encode(self, x, **kwargs):
+        enc_dist = super(AutoencoderOrigWrapper, self).encode(x[0])
+        return enc_dist.mean
+
+    def decode(self, z, **kwargs):
+        return super(AutoencoderOrigWrapper, self).decode(z)

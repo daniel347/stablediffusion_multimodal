@@ -8,8 +8,8 @@ data:
   root_data_dir:  ../../datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
   input_size: 128
   modality: ["colour", "semseg"]
-  p_hor_flip: 0.5
-  p_color_jitter: 0.1
+  p_hor_flip: 0
+  p_color_jitter: 0
   outputdir: ../outputs
 
 
@@ -18,14 +18,17 @@ training:
 
   lr: 8.0e-5
   gamma: 0.99
-  batch_size: 4
+  batch_size: 32
   num_epochs: 10
   start_epoch: 0
   patience: 4
   test_only: False
 
   precompute_latents: True
+  force_recompute: False
   precompute_latents_path: "latents"
+
+  z_mode: "random"  # one of ["random", "avg"]
 
   # grad_clipper:
   #   clip_percentile: 95

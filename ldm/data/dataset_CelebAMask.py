@@ -14,6 +14,8 @@ from .register_datasets import register_dataset
 import glob
 import plotly.express as px
 import tqdm
+import matplotlib.pyplot as plt
+import math
 
 
 @register_dataset("mm_celeba")
@@ -135,6 +137,37 @@ class MMCelebA(Dataset):
 
     def colour_display(self, mask):
         return mask
+
+    def create_semseg_colour_index(self):
+        colour_dict = self.semseg_display_colours
+        class_labels = self.semseg_labels
+
+        num_classes = len(class_labels)
+        num_cols = 4
+
+        half_gap = 0.1
+
+        fig, ax = plt.subplots(figsize=(2 * num_cols, math.ceil(num_classes/num_cols)))
+
+        for i, (class_name, class_num) in enumerate(class_labels.items()):
+            colour = colour_dict.get(class_num, torch.tensor([1, 1, 1])).numpy()  # Default to white if not found
+            colour = tuple([c for c in colour])
+
+            rect_pos = ((i % num_cols) * 2 + half_gap, - (i // num_cols) - half_gap)
+
+            ax.add_patch(plt.Rectangle(rect_pos, 1 - 2*half_gap, 1 - 2*half_gap, color=colour))
+            ax.text(rect_pos[0] + 1, rect_pos[1] + 0.5 - half_gap, f"{class_name}",
+                    ha='left', va='center', fontsize=10)
+
+        ax.set_xlim(0, 2 * num_cols)
+        ax.set_ylim(1, -math.ceil(num_classes/num_cols))
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_frame_on(False)
+
+        ax.set_title("Semantic Segmentation Class Legend")
+
+        return fig, ax
 
     @staticmethod
     def one_hot_semseg_to_index(one_hot):

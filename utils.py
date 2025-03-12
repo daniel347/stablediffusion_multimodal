@@ -212,21 +212,24 @@ def plot_text_as_image_tensor(sentences_lists_of_words, pixel_width=64, pixel_he
     return torch.stack(imgs, dim=0)
 
 
-def save_and_log_latents(latents, name, basepath, step=0, wandb_run=None):
+def save_and_log_latents(latents, name, basepath, step=0, wandb_run=None, save_kwargs={"normalize": True}, wandb_kwargs={}):
+    batch_size = latents.shape[0]
     latents = latents.detach().cpu()
     latents = torch.transpose(latents, 0, 1).reshape(-1, *latents.shape[2:]).unsqueeze(1)
-    latents = make_grid(latents, nrow=latents.shape[0])
+    latents = make_grid(latents, nrow=batch_size)
 
-    save_and_log_processed(latents, name, basepath, step, wandb_run, save_kwargs={"normalize": True})
+    save_and_log_processed(latents, name, basepath, step, wandb_run, save_kwargs=save_kwargs, wandb_kwargs=wandb_kwargs)
 
 
-def save_and_log_img(img, name, basepath, display_data_f=None,  step=0, wandb_run=None):
+def save_and_log_img(img, name, basepath, display_data_f=None,  step=0, wandb_run=None, save_kwargs={}, wandb_kwargs={}, nrow=8):
     if isinstance(img, torch.distributions.distribution.Distribution):
         img = distribution_to_tensor(img).detach().cpu()
     if display_data_f is not None:
         img = torch.stack([display_data_f(d) for d in img], dim=0)
 
-    save_and_log_processed(img, name, basepath, step, wandb_run)
+    img_grid = make_grid(img, nrow=nrow)
+
+    save_and_log_processed(img_grid, name, basepath, step, wandb_run, save_kwargs=save_kwargs, wandb_kwargs=wandb_kwargs)
 
 
 def save_and_log_processed(img, name, basepath, step=0, wandb_run=None, save_kwargs={}, wandb_kwargs={}):
