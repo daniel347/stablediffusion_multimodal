@@ -151,12 +151,9 @@ def stack_generation_matrices(mats, data):
 def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode):
     avg_z = z_mode == "avg"
     random_z = z_mode == "random"
-    print("model_w_channels: ", model_first_stage.w_channels)
-    print("model z channels: ", model_first_stage.z_channels)
 
     if conf.training.precompute_latents:
         latents = data
-        print(f"latent shape: {latents.shape}")
     else:
         latents = model_first_stage.encode(data, avg_z=avg_z)
 
@@ -387,7 +384,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     print(latents.shape)
 
                     for j, latent in enumerate(latents):
-                        print("latent shape: ", latent.shape)
                         if return_class:
                             save_dir_class = save_dir / Path(str(classes[j].item()))
                         else:
@@ -420,7 +416,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 optimizer.zero_grad()
 
                 latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
-                latents = (latents - latent_mean[None, :]) / latent_scale[None, :]
+                latents = (latents - latent_mean[None, :, None, None]) / latent_scale[None, :, None, None]
 
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
@@ -479,7 +475,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         data = move_data_to_device(dataT, device=device)
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
-                    latents = (latents - latent_mean[None, :]) / latent_scale[None, :]
+                    latents = (latents - latent_mean[None, :, None, None]) / latent_scale[None, :, None, None]
 
                     loss, loss_dict = model(latents, c=(classes if return_class else None))
                     b_loss += loss.detach().item()
@@ -497,7 +493,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         samples_zw = model.module.sample((classes if return_class else None), batch_size=N_gen) if data_parallel else \
                                      model.sample((classes if return_class else None), batch_size=N_gen)
 
-                        samples_zw = (samples_zw + latent_mean[None, :]) * latent_scale[None, :]
+                        samples_zw = samples_zw * latent_scale[None, :, None, None] + latent_mean[None, :, None, None]
                         samples_x = model_first_stage.decode(samples_zw)
 
                         for m in range(NUM_VAES):
