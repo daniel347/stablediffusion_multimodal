@@ -18,7 +18,7 @@ training:
 
   lr: 8.0e-5
   gamma: 0.99
-  batch_size: 32
+  batch_size: 8
   num_epochs: 10
   start_epoch: 0
   patience: 4

@@ -591,8 +591,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 latent_mean, latent_scale = get_latent_scale_factor(train_loader, n_batches=10)
                 print(f"Computed a latent mean of {latent_mean} and latent scale of {latent_scale}")
 
-            raise ValueError
-
             test_epoch(start_epoch)
             fid_scores = test_fid(start_epoch)
             # print("   ".join([f"{mod} FID: {fid}" for mod, fid in zip(modalities, fid_scores)]))
