@@ -183,6 +183,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if data_parallel:
             setup(rank, world_size)
 
+        use_mixed_precision = conf.training.use_mixed_precision
+        conf["model_conf"]["model"]["params"]["unet_config"]["params"]["use_fp16"] = use_mixed_precision
+        if use_mixed_precision:
+            print("Using mixed precision training")
+            scaler = GradScaler()
+
         # Initialise with SD model?
         model = initialise_model(conf)
         device = rank
@@ -267,12 +273,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if start_epoch is None:
             start_epoch = conf.training.start_epoch
 
-        use_mixed_precision = conf.training.use_mixed_precision
-        conf["model_conf"]["model"]["params"]["unet_config"]["params"]["use_fp16"] = use_mixed_precision
-        if use_mixed_precision:
-            print("Using mixed precision training")
-            scaler = GradScaler()
-
         train_dataset, test_dataset = load_image_datasets(conf)
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
 
@@ -317,31 +317,39 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         test_worseining_count = 0
         early_stop = False
 
-        """
-        def get_latent_scale_factor(latent_loader, n_batches=1):
+        total_latent_channels = model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels
+        latent_mean = torch.zeros(total_latent_channels)
+        latent_scale = torch.ones(total_latent_channels)
+
+        def get_latent_scale_factor(data_loader, n_batches=1):
             if enable_pbars:
-                pbar = tqdm.tqdm(enumerate(latent_loader), total=len(latent_loader),
+                pbar = tqdm.tqdm(enumerate(data_loader), total=len(data_loader),
                                  position=rank if data_parallel else 0)
             else:
-                pbar = enumerate(latent_loader)
+                pbar = enumerate(data_loader)
 
-            means = []
-            stds = []
+            channel_means = 0
+            channel_vars = 0
 
             with torch.no_grad():
                 for i, dataT in pbar:
                     if return_class:
-                        data, classes, ind = move_data_to_device(dataT, device=device)
+                        data, classes = move_data_to_device(dataT, device=device)
                     else:
-                        data, ind = move_data_to_device(dataT, device=device)
+                        data = move_data_to_device(dataT, device=device)
 
-                    stds.append(data.std(dim=(2, 3)))
-                    means.append(data.mean(dim=(2, 3)))
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+
+                    channel_means += latents.mean(dim=(0, 2, 3))
+                    channel_vars += latents.var(dim=(0, 2, 3))
 
                     if i >= n_batches:
                         break
-        """
 
+            channel_means = channel_means / n_batches
+            channel_stds = torch.sqrt(channel_vars / n_batches)
+
+            return channel_means, channel_stds
 
         def precompute_latents(split="train", save_folder="latents"):
             dataloader = train_loader if split == "train" else test_loader
@@ -411,7 +419,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                 optimizer.zero_grad()
 
-                latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode) * 0.18215  # The magic number
+                latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                latents = (latents - latent_mean[None, :]) / latent_scale[None, :]
 
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
@@ -469,7 +478,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         data = move_data_to_device(dataT, device=device)
 
-                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode) * 0.18215  # The magic number
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                    latents = (latents - latent_mean[None, :]) / latent_scale[None, :]
 
                     loss, loss_dict = model(latents, c=(classes if return_class else None))
                     b_loss += loss.detach().item()
@@ -487,8 +497,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         samples_zw = model.module.sample((classes if return_class else None), batch_size=N_gen) if data_parallel else \
                                      model.sample((classes if return_class else None), batch_size=N_gen)
 
-
-                        samples_zw *= 1.0/0.18215  # The magic number
+                        samples_zw = (samples_zw + latent_mean[None, :]) * latent_scale[None, :]
                         samples_x = model_first_stage.decode(samples_zw)
 
                         for m in range(NUM_VAES):
@@ -576,6 +585,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 # Replace the dataloaders with the precomputed latent loaders
                 train_dataset, test_dataset = load_precomputed_datasets(conf)
                 train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
+
+
+            if conf.training.compute_latent_scale:
+                latent_mean, latent_scale = get_latent_scale_factor(train_loader, n_batches=10)
+                print(f"Computed a latent mean of {latent_mean} and latent scale of {latent_scale}")
+
+            raise ValueError
 
             test_epoch(start_epoch)
             fid_scores = test_fid(start_epoch)
