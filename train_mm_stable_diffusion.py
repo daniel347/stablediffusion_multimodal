@@ -317,6 +317,32 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         test_worseining_count = 0
         early_stop = False
 
+        """
+        def get_latent_scale_factor(latent_loader, n_batches=1):
+            if enable_pbars:
+                pbar = tqdm.tqdm(enumerate(latent_loader), total=len(latent_loader),
+                                 position=rank if data_parallel else 0)
+            else:
+                pbar = enumerate(latent_loader)
+
+            means = []
+            stds = []
+
+            with torch.no_grad():
+                for i, dataT in pbar:
+                    if return_class:
+                        data, classes, ind = move_data_to_device(dataT, device=device)
+                    else:
+                        data, ind = move_data_to_device(dataT, device=device)
+
+                    stds.append(data.std(dim=(2, 3)))
+                    means.append(data.mean(dim=(2, 3)))
+
+                    if i >= n_batches:
+                        break
+        """
+
+
         def precompute_latents(split="train", save_folder="latents"):
             dataloader = train_loader if split == "train" else test_loader
             model.eval()
@@ -385,7 +411,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                 optimizer.zero_grad()
 
-                latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode) * 0.18215  # The magic number
 
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
@@ -443,7 +469,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         data = move_data_to_device(dataT, device=device)
 
-                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode) * 0.18215  # The magic number
 
                     loss, loss_dict = model(latents, c=(classes if return_class else None))
                     b_loss += loss.detach().item()
@@ -461,6 +487,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         samples_zw = model.module.sample((classes if return_class else None), batch_size=N_gen) if data_parallel else \
                                      model.sample((classes if return_class else None), batch_size=N_gen)
 
+
+                        samples_zw *= 1.0/0.18215  # The magic number
                         samples_x = model_first_stage.decode(samples_zw)
 
                         for m in range(NUM_VAES):
@@ -507,6 +535,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         latents = model.module.sample((classes if return_class else None),
                                                       batch_size=gen_batch_size) if data_parallel else model.sample(
                             (classes if return_class else None), batch_size=gen_batch_size)
+
+                        latents *= 1.0 / 0.18215  # The magic number
                     else:
                         latent_dim = (
                         gen_batch_size, *(model.module.input_shape if data_parallel else model.input_shape))
