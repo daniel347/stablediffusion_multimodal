@@ -30,7 +30,7 @@ import pandas as pd
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
-from stablediffusion.objectives import get_objective, train_adversary
+from objectives import get_objective, train_adversary
 from ldm.data import get_dataset
 
 from utils import save_and_log_latents, save_and_log_img
