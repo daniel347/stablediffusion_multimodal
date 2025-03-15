@@ -37,7 +37,7 @@ from utils import save_and_log_latents, save_and_log_img
 
 import pyiqa
 
-enable_wandb = False
+enable_wandb = True
 
 notes = ("Training a single joint autoencoder with semantic segmentation and rgb images, and the usual VAE loss.")
 name = "single_ae_non_seperable"
@@ -149,7 +149,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             conf.experiment = model.modelName
 
         # Set up run path
-        runId = str(datetime.now().strftime("%Y_%m_%d__%H_%M_%S"))
+        runId = str(datetime.now().strftime("%Y_%m_%d__%H_%M_%S")) + "_" + name
         if rank == 0 or not data_parallel:
             experiment_dir = Path(os.path.join(conf.data.outputdir, conf.experiment, "checkpoints"))
             experiment_dir.mkdir(parents=True, exist_ok=True)
@@ -175,6 +175,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 # Run name
                 name=f"{runId}_{str(rank)}",
                 group=f"DDP_{runId}",
+                notes=notes
             )
 
             wandb.alert(title="Starting Run", text="Started training stable diffusion autoencoder")
