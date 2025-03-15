@@ -33,7 +33,8 @@ class AutoencoderKL(pl.LightningModule):
                  post_dist=dist.Normal,
                  conform_to_3_channel=False,
                  is_semseg=False,
-                 llik_scaling=1.0
+                 llik_scaling=1.0,
+                 return_lik_dist=True,
                  ):
         super().__init__()
         self.learn_logvar = learn_logvar
@@ -86,6 +87,8 @@ class AutoencoderKL(pl.LightningModule):
             nn.Parameter(torch.zeros(1, ddconfig["w_channels"], embed_spatial_dim, embed_spatial_dim), requires_grad=False),
             nn.Parameter(torch.zeros(1, ddconfig["w_channels"], embed_spatial_dim, embed_spatial_dim), requires_grad=True)  # It is important that this log-variance vector is learnable (see paper)
         ])
+
+        self.return_lik_dist = return_lik_dist
 
         self.use_ema = ema_decay is not None
         if self.use_ema:
@@ -180,6 +183,9 @@ class AutoencoderKL(pl.LightningModule):
             if self.is_semseg and self.px_u == dist.Categorical:
                 # Categorical distribution requires the category probabilities at the last dimension
                 dec = dec.permute(0, 2, 3, 1)
+
+        if not self.return_lik_dist:
+            return dec
 
         if self.is_semseg:
             # No scale for a Categorical or Bernoulli distribution

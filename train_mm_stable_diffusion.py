@@ -40,8 +40,8 @@ import random
 
 enable_wandb = True
 
-notes = ("Training a unimodal model using the pretrained stable diffusion autoencoder with the original normalisation constant and 32 bit precision. Hopefully this will produce better results.")
-name = "unimodal_rgb_sd_ae_orig_norm_32bit"
+notes = ("Training diffusion using our best autoencoder with computed normalisation constant and 32 bit precision. This should be the best result yet")
+name = "z_dist_ae_computed_norm_32_bit"
 
 
 def expand_sub_confs(conf):
@@ -114,6 +114,7 @@ def create_dataloaders(train_dataset, test_dataset, conf, world_size=1, rank=0, 
 
 
 def initialise_model(conf):
+    OmegaConf.to_container(conf["model_conf"]["model"])
     model = instantiate_from_config(conf["model_conf"]["model"])
 
     if conf.init_from_stable_diffusion:
@@ -241,8 +242,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 group=f"DDP_{runId}",
                 notes=notes,
             )
-
             wandb.alert(title=f"Experiment {conf.experiment} has started", text=f"Run id: {runId}")
+        else:
+            run = None
 
         # preparation for training
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
@@ -442,7 +444,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     scheduler.step()
                     # print(f"Learning rate: {scheduler.get_last_lr()}")
 
-                if enable_wandb and i == 0:
+                if i == 0:
                     if conf.training.precompute_latents:
                         *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
                         for j, latent in enumerate(latents_w):
@@ -540,7 +542,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                                       batch_size=gen_batch_size) if data_parallel else model.sample(
                             (classes if return_class else None), batch_size=gen_batch_size)
 
-                        latents *= 1.0 / 0.18215  # The magic number
+                        latents = latents * latent_scale[None, :, None, None] + latent_mean[None, :, None, None]
                     else:
                         latent_dim = (
                         gen_batch_size, *(model.module.input_shape if data_parallel else model.input_shape))
@@ -628,7 +630,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train_rgb_pretrained_ae.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

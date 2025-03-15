@@ -30,14 +30,17 @@ import pandas as pd
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
-from stablediffusion.objectives.mmvae_objectives import m_dreg, train_adversary
+from stablediffusion.objectives import get_objective, train_adversary
 from ldm.data import get_dataset
 
 from utils import save_and_log_latents, save_and_log_img
 
 import pyiqa
 
-enable_wandb = True
+enable_wandb = False
+
+notes = ("Training a single joint autoencoder with semantic segmentation and rgb images, and the usual VAE loss.")
+name = "single_ae_non_seperable"
 
 
 def expand_sub_confs(conf):
@@ -62,7 +65,8 @@ def cleanup():
 
 
 def initialise_model(conf):
-    model = instantiate_from_config(conf["model_conf"]["model"]["params"]["first_stage_config"])
+    first_stage_conf = conf.model_conf.model.params.first_stage_config
+    model = instantiate_from_config(first_stage_conf)
 
     if conf.init_from_stable_diffusion:
         print("Initialising autoencoders with stable diffusion weights")
@@ -75,6 +79,7 @@ def initialise_model(conf):
 
         for vae in model.vaes:
             ignore_keys = ["encoder.conv_in", "decoder.conv_out"] if vae.is_semseg else []
+            ignore_keys += ["encoder.conv_out", "quant_conv", "decoder.conv_in", "post_quant_conv"] if vae.decoder.z_shape[1] != 4 else []
             sd = copy.deepcopy(first_stage_dict)
             keys = list(sd.keys())
             for k in keys:
@@ -89,13 +94,15 @@ def initialise_model(conf):
             for u in U:
                 print(f"Unused key: {u}")
         model = MMVAEDataParallelWrapper(model)
+        return model
 
     elif conf.model_initialisation is not None:
         print("Initialising with custom weights")
         model = MMVAEDataParallelWrapper(model)
         model.load_state_dict(torch.load(conf.model_initialisation))
+        return model
 
-    return model
+    return MMVAEDataParallelWrapper(model)
 
 def stack_generation_matrices(mats, data, mode_display_fs=None):
     # Given a list of N_gen cross and self generation matrices, get them into a single matix
@@ -256,7 +263,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         def unpack_data_nyu(data, device="cuda"):
             return [d.to(device) for d in data]
 
-        objective = partial(m_dreg, beta=conf.training.beta)
+        objective = partial(get_objective(conf.training.objective),
+                            beta=conf.training.beta,
+                            data_parallel=data_parallel,
+                            wlpips=conf.training.wlpips,
+                            wadversary=conf.training.wadversary,
+                            train_adversary=None,
+                            lpips=lpips,
+                            channel_weighting=class_weights,
+                            z_close_weight=conf.training.z_close_weight)
+
         t_objective = objective
 
         best_test_loss = 1e9
@@ -281,14 +297,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
                         loss, loss_dict = objective(model, data,
-                                          K=conf.training.K,
-                                          data_parallel=data_parallel,
-                                          wlpips=conf.training.wlpips,
-                                          wadversary=conf.training.wadversary,
-                                          train_adversary=None,
-                                          lpips=lpips,
-                                          channel_weighting=class_weights,
-                                          z_close_weight=conf.training.z_close_weight)
+                                          K=conf.training.K)
                         loss = -loss
 
                     scaler.scale(loss).backward()
@@ -300,14 +309,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                 else:
                     loss, loss_dict = objective(model, data,
-                                      K=conf.training.K,
-                                      data_parallel=data_parallel,
-                                      wlpips=conf.training.wlpips,
-                                      wadversary=conf.training.wadversary,
-                                      train_adversary=None,
-                                      lpips=lpips,
-                                      channel_weighting=class_weights,
-                                      z_close_weight=conf.training.z_close_weight)
+                                      K=conf.training.K)
 
                     loss = -loss
 
@@ -357,14 +359,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     data = unpack_data_nyu(dataT, device=device)
                     loss, loss_dict = t_objective(model, data,
                                         K=conf.training.K,
-                                        test=True,
-                                        data_parallel=data_parallel,
-                                        wlpips=conf.training.wlpips,
-                                        wadversary=conf.training.wadversary,
-                                        train_adversary=None,
-                                        lpips=lpips,
-                                        channel_weighting=class_weights,
-                                        z_close_weight=conf.training.z_close_weight)
+                                        test=True)
 
                     loss = -loss
 
@@ -373,54 +368,66 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if i == 0 and epoch % 1 == 0:
                         # Compute cross-generations
-                        N_gen = 3
-                        n_samples = conf.training.batch_size // N_gen
-                        limited_data = [d[:n_samples] for d in data]
+                        if model.can_cross_generate:
+                            N_gen = 3
+                            n_samples = conf.training.batch_size // N_gen
+                            limited_data = [d[:n_samples] for d in data]
 
-                        cg_imgs = []
-                        for n in range(N_gen):
-                            cg_imgs.append(model("self_and_cross_modal_generation", limited_data, all_combinations=False))
+                            cg_imgs = []
+                            for n in range(N_gen):
+                                cg_imgs.append(model("self_and_cross_modal_generation", limited_data, all_combinations=False))
 
-                        cg_imgs = stack_generation_matrices(cg_imgs, limited_data, display_data_fs)
+                            cg_imgs = stack_generation_matrices(cg_imgs, limited_data, display_data_fs)
 
-                        for i in range(NUM_VAES):
-                            for j in range(NUM_VAES):
-                                if enable_wandb:
-                                    wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=epoch)
-                        del cg_imgs
+                            for i in range(NUM_VAES):
+                                for j in range(NUM_VAES):
+                                    if enable_wandb:
+                                        wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=epoch)
+                            del cg_imgs
 
                         # Also save some example latent vectors and example reconstructions (without averaging z)
                         latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
 
-                        for j in range(NUM_VAES):  # Choice of z
-                            latent_w_img = latents[j]
-                            latent_z_img = latents[j + NUM_VAES]
+                        if model.factorised_latent_space:
+                            for j in range(NUM_VAES):  # Choice of z
+                                latent_w_img = latents[j]
+                                latent_z_img = latents[j + NUM_VAES]
 
-                            save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, epoch, run)
-                            save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, epoch, run)
+                                save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, epoch, run)
+                                save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, epoch, run)
 
-                            # Reconstructions with known w
-                            ws = latents[:NUM_VAES]
-                            u = torch.cat([*ws, latent_z_img], dim=1)
+                                # Reconstructions with known w
+                                ws = latents[:NUM_VAES]
+                                u = torch.cat([*ws, latent_z_img], dim=1)
+                                reconstructions = model.module("decode", u) if data_parallel else model("decode", u)
+
+                                for k in range(NUM_VAES):
+                                    save_and_log_img(reconstructions[k], f'Reconstructions/z{j}/m{k}',
+                                                     runPath, display_data_fs[k], epoch, run)
+
+                                # Reconstructions with random w
+                                W_random = []
+                                for k in range(NUM_VAES):
+                                    pw = vaes[k].pw(*model.module.pw_params)
+                                    latents_w = pw.rsample([latent_z_img.shape[0]]).squeeze(1).to(device)
+                                    W_random.append(latents_w)
+                                latents_random_w = torch.cat([*W_random, latent_z_img], dim=1)
+                                recon_random_w = model.module("decode", latents_random_w) if data_parallel else model(
+                                    "decode", latents_random_w)
+
+                                for k in range(NUM_VAES):
+                                    save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
+                                                     runPath, display_data_fs[k], epoch, run)
+                        else:
                             reconstructions = model.module("decode", u) if data_parallel else model("decode", u)
 
-                            for k in range(NUM_VAES):
-                                save_and_log_img(reconstructions[k], f'Reconstructions/z{j}/m{k}',
-                                                 runPath, display_data_fs[k], epoch, run)
-
-                            # Reconstructions with random w
-                            W_random = []
-                            for k in range(NUM_VAES):
-                                pw = vaes[k].pw(*model.module.pw_params)
-                                latents_w = pw.rsample([latent_z_img.shape[0]]).squeeze(1).to(device)
-                                W_random.append(latents_w)
-                            latents_random_w = torch.cat([*W_random, latent_z_img], dim=1)
-                            recon_random_w = model.module("decode", latents_random_w) if data_parallel else model(
-                                "decode", latents_random_w)
+                            if not model.seperable:
+                                reconstructions = torch.split(reconstructions[0].mean, conf.data.channel)
 
                             for k in range(NUM_VAES):
-                                save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
+                                save_and_log_img(reconstructions[k], f'Reconstructions/m{k}',
                                                  runPath, display_data_fs[k], epoch, run)
+
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -459,7 +466,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_single_autoencoder_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

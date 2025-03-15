@@ -21,7 +21,7 @@ import math
 @register_dataset("mm_celeba")
 class MMCelebA(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_index=False, **kwargs):
+    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_index=False, force_reload=False, **kwargs):
 
         super().__init__()
         self.split = split
@@ -83,6 +83,8 @@ class MMCelebA(Dataset):
 
         self.return_index = return_index
 
+        self.force_reload = force_reload
+
     def make_semseg_class_list(self, index_list):
         self.semseg_labels = {}
         for idx in tqdm.tqdm(index_list[:500]):
@@ -106,15 +108,23 @@ class MMCelebA(Dataset):
         return class_counts/class_counts.sum()
 
     def read_semseg(self, index):
-        p = os.path.join(self.mask_dir, f"{index:05d}_*.png")
-        mask_files = glob.glob(p)
-        mask = np.zeros((len(self.semseg_labels), 512, 512), dtype=np.float32)
-        for mask_file in mask_files:
-            submask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
-            mask_class = "_".join(os.path.basename(mask_file).split(".")[0].split("_")[1:])
-            mask[self.semseg_labels[mask_class], :, :] = submask // 255
+        combined_path = os.path.join(self.mask_dir, f"{index:05d}_combined.pt")
+        if os.path.exists(combined_path) and not self.force_reload:
+            print("Loading precomputed mask")
+            return torch.load(combined_path)
+        else:
+            p = os.path.join(self.mask_dir, f"{index:05d}_*.png")
+            mask_files = glob.glob(p)
+            mask = np.zeros((len(self.semseg_labels), 512, 512), dtype=np.float32)
+            for mask_file in mask_files:
+                submask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
+                mask_class = "_".join(os.path.basename(mask_file).split(".")[0].split("_")[1:])
+                mask[self.semseg_labels[mask_class], :, :] = submask // 255
 
-        return torch.from_numpy(mask)
+            torch_mask = torch.from_numpy(mask)
+            torch.save(torch_mask, combined_path)
+
+        return torch_mask
 
     def read_colour(self, index):
         img = cv2.imread(os.path.join(self.img_dir, f"{index}.jpg"), cv2.IMREAD_COLOR)

@@ -4,6 +4,24 @@ from numpy import prod
 from ..utils import log_mean_exp, is_multidata
 from ..ldm.data.dataset_CelebAMask import MMCelebA
 
+__OBJECTIVES__ = {}
+
+
+def register_objective(name: str):
+    def wrapper(fn):
+        if __OBJECTIVES__.get(name, None):
+            raise NameError(f"Name {name} is already registered!")
+        __OBJECTIVES__[name] = fn
+        return fn
+    return wrapper
+
+
+def get_objective(name: str):
+    if __OBJECTIVES__.get(name, None) is None:
+        raise NameError(f"Name {name} is not defined.")
+    return __OBJECTIVES__[name]
+
+
 # Helper to vectorise computation
 def compute_microbatch_split(x, K):
     """ Checks if batch needs to be broken down further to fit in memory. """
@@ -15,18 +33,18 @@ def compute_microbatch_split(x, K):
     return min(B, S)
 
 
-def reconstruction_loss(px_u, x_d, mod_vae, loss_dict, wlpips_d, lpips, channel_weighting_d, fail_on_nan=True):
+def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, lpips, channel_weighting_d, fail_on_nan=True):
     lpx_u_elem = 0
 
     if isinstance(px_u, torch.distributions.Categorical):
         x_num = MMCelebA.one_hot_semseg_to_index(x_d)
         # Todo: implement channel weighting for Categorical
-        recon_log_prob = px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(mod_vae.llik_scaling).sum(dim=(-1, -2, -3))
+        recon_log_prob = px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
     else:
         log_probs = px_u.log_prob(x_d)
         if channel_weighting_d is not None:
             log_probs = log_probs * channel_weighting_d[None, None, :, None, None]
-        recon_log_prob = log_probs.view(*px_u.batch_shape[:2], -1).mul(mod_vae.llik_scaling).sum(dim=(-1, -2, -3))
+        recon_log_prob = log_probs.view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
 
     loss_dict["recon_logprob"] += recon_log_prob.detach().cpu().sum().item()
     lpx_u_elem += recon_log_prob
@@ -41,7 +59,7 @@ def reconstruction_loss(px_u, x_d, mod_vae, loss_dict, wlpips_d, lpips, channel_
         assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpx_u_elem[{r}][{d}])"
 
     if wlpips_d > 0.0:
-        lpips_lpx_u_loss = lpips(x_d.squeeze(0), px_u.mode.squeeze(0))
+        lpips_lpx_u_loss = torch.tensor([lpips(x_di, px_ui) for x_di, px_ui in zip(x_d.view(-1, *x_d.shape[1:]), px_u.mode.view(-1, *x_d.shape[1:]))], device=x_d.device).reshape(*px_u.batch_shape[:2])
         loss_dict["lpips"] -= lpips_lpx_u_loss.detach().cpu().sum().item()
         lpx_u_elem += - wlpips_d * lpips_lpx_u_loss
 
@@ -49,3 +67,40 @@ def reconstruction_loss(px_u, x_d, mod_vae, loss_dict, wlpips_d, lpips, channel_
         assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpips [{r}][{d}])"
 
     return lpx_u_elem
+
+
+def train_adversary(real_data, px_us, discriminator, optimiser, device):
+    optimiser.zero_grad()
+
+    real_output = torch.stack(discriminator(real_data), dim=1)
+    fake_outputs_detach = [torch.stack(discriminator([t.detach() for t in px_u]), dim=1) for px_u in px_us]
+
+    real_labels = torch.ones(real_output.shape).to(device)
+    fake_labels = torch.zeros(fake_outputs_detach[0].shape).to(device)
+
+    weight_real = 1.0
+    weight_fake = 1.0
+
+    real_loss = torch.nn.functional.binary_cross_entropy(real_output, real_labels) * weight_real
+    fake_loss = 0
+    for out in fake_outputs_detach:
+        fake_loss += torch.nn.functional.binary_cross_entropy(out, fake_labels) * weight_fake
+
+    disc_loss = real_loss + fake_loss
+    disc_loss.backward()
+    optimiser.step()
+
+    fake_outputs = [torch.stack(discriminator(px_u), dim=1) for px_u in px_us]
+    autoencoder_loss = 0
+    for out in fake_outputs:
+        autoencoder_loss += torch.nn.functional.binary_cross_entropy(out, real_labels) * weight_fake
+
+    return disc_loss, autoencoder_loss
+
+
+def gauss_kl_div_loss(mu, sigma):
+    pu = torch.distributions.Normal(torch.zeros_like(mu), torch.ones_like(sigma))
+    qv = torch.distributions.Normal(mu, sigma)
+    kl_div = torch.distributions.kl.kl_divergence(qv, pu).sum(dim=(-1, -2, -3))
+
+    return kl_div
