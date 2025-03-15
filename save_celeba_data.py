@@ -19,16 +19,19 @@ def check_celeba_loading_speeds(train_loader, device="cuda:1"):
 
 def preload_dataset(split="test", dataset_name="mm_celeba", modality=["colour", "semseg"]):
     dataset_opts["modality"] = modality
+    dataset_opts["force_reload"] = True
     train_dataset = get_dataset(dataset_name, **dataset_opts[dataset_name], split=split)
-    kwargs = {'num_workers': 0, 'pin_memory': False}
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=True, **kwargs)
+    kwargs = {'num_workers': 8, 'pin_memory': False}
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=32, shuffle=False, **kwargs)
 
     return train_loader
 
 
 if __name__ == "__main__":
+    test_loader = preload_dataset("test")
+    check_celeba_loading_speeds(test_loader)
+
     train_loader = preload_dataset("train")
     check_celeba_loading_speeds(train_loader)
 
-    test_loader = preload_dataset("test")
-    check_celeba_loading_speeds(test_loader)
+

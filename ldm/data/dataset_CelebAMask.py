@@ -111,7 +111,7 @@ class MMCelebA(Dataset):
         combined_path = os.path.join(self.mask_dir, f"{index:05d}_combined.pt")
         if os.path.exists(combined_path) and not self.force_reload:
             print("Loading precomputed mask")
-            return torch.load(combined_path)
+            return torch.load(combined_path).type(torch.float32)
         else:
             p = os.path.join(self.mask_dir, f"{index:05d}_*.png")
             mask_files = glob.glob(p)
@@ -122,7 +122,7 @@ class MMCelebA(Dataset):
                 mask[self.semseg_labels[mask_class], :, :] = submask // 255
 
             torch_mask = torch.from_numpy(mask)
-            torch.save(torch_mask, combined_path)
+            torch.save(torch_mask.type(torch.uint8), combined_path)
 
         return torch_mask
 
