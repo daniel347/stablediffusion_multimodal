@@ -40,9 +40,8 @@ import random
 
 enable_wandb = True
 
-notes = ("Training a unimodal model using the pretrained stable diffusion autoencoder. This should highlight if the "
-         "autoencoder is my problem or if my diffusion training is not producing good samples.")
-name = "unimodal_rgb_sd_ae"
+notes = ("Training a unimodal model using the pretrained stable diffusion autoencoder with the original normalisation constant and 32 bit precision. Hopefully this will produce better results.")
+name = "unimodal_rgb_sd_ae_orig_norm_32bit"
 
 
 def expand_sub_confs(conf):
@@ -315,8 +314,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         early_stop = False
 
         total_latent_channels = model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels
-        latent_mean = torch.zeros(total_latent_channels)
-        latent_scale = torch.ones(total_latent_channels)
+        latent_mean = torch.zeros(total_latent_channels, device=device)
+        latent_scale = torch.ones(total_latent_channels, device=device) * 1.0/0.18215
 
         def get_latent_scale_factor(data_loader, n_batches=1):
             if enable_pbars:
@@ -585,7 +584,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             if conf.training.compute_latent_scale:
                 latent_mean, latent_scale = get_latent_scale_factor(train_loader, n_batches=10)
-                print(f"Computed a latent mean of {latent_mean} and latent scale of {latent_scale}")
+            print(f"Using a latent mean of {latent_mean} and latent scale of {latent_scale}")
 
             test_epoch(start_epoch)
             fid_scores = test_fid(start_epoch)
