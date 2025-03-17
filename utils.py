@@ -20,10 +20,6 @@ class Constants(object):
     eta = 1e-20
 
 
-def is_multidata(dataB):
-    return isinstance(dataB, list) or isinstance(dataB, tuple)
-
-
 # https://stackoverflow.com/questions/14906764/how-to-redirect-stdout-to-both-file-and-console-with-scripting
 class Logger(object):
     def __init__(self, filename, mode="a"):
@@ -103,10 +99,6 @@ def get_mean(d, K=100):
         samples = d.rsample(torch.Size([K]))
         mean = samples.mean(0)
     return mean
-
-
-def log_mean_exp(value, dim=0, keepdim=False):
-    return torch.logsumexp(value, dim, keepdim=keepdim) - math.log(value.size(dim))
 
 
 class NonLinearLatent_Classifier(nn.Module):
@@ -248,6 +240,41 @@ def distribution_to_tensor(dist):
     else:
         tens = dist.mean
     return tens
+
+
+def duplicate_stable_diff_weights(sd_weights, vae):
+    # If we have single multimodal VAE, we double the channel dimensions and duplicate convolutional weights across the layers.
+
+    target_dict = vae.state_dict()
+    for source_key, source_value in sd_weights.items():
+        if source_key not in target_dict:
+            del sd_weights[source_key]
+            print(f"Deleting key: {source_key}")
+
+        if target_dict[source_key].shape != source_value.shape:
+            if (len(target_dict[source_key].shape) == len(source_value.shape) == 4):
+                # Conv weights
+                out_mult = float(target_dict[source_key].shape[0]) / source_value.shape[0]
+                in_mult = float(target_dict[source_key].shape[1]) / source_value.shape[1]
+                # Pretty sure everthing goes wrong if out_mult and in_mult are not equal
+
+                source_value = source_value.repeat(math.ceil(out_mult), math.ceil(in_mult), 1, 1) / math.sqrt(out_mult)
+                source_value = source_value[:target_dict[source_key].shape[0], :target_dict[source_key].shape[1], :, :]
+                print(f"Dupicated conv weights: {source_key} by input factor {in_mult} and output factor {out_mult}")
+
+            elif (len(target_dict[source_key].shape) == len(source_value.shape) == 1):
+                # Conv bias
+                out_mult = float(target_dict[source_key].shape[0]) / source_value.shape[0]
+                source_value = source_value.repeat(math.ceil(out_mult)) / out_mult
+                source_value = source_value[:target_dict[source_key].shape[0]]
+                print(f"Dupicated bias: {source_key} by output factor {out_mult}")
+
+            else:
+                print(f"Could not duplicate weights for layer: {source_key}")
+
+            sd_weights[source_key] = source_value
+
+    return sd_weights
 
 
 

@@ -1,5 +1,5 @@
 seed: 1
-device: "cuda:0"  # ["cuda:0", "cuda:1"]
+device: "cuda:1"  # ["cuda:0", "cuda:1"]
 experiment: "MM CelebA Autoencoder (Stable Diffusion)"
 print_freq: 50
 
@@ -16,14 +16,14 @@ data:
 training:
   use_mixed_precision: False
   objective: non_disentangled_objective
-  lr: 1.0e-4  # 3.0e-4
+  lr: 1e-4  # 3.0e-4
   batch_size: 32
   num_epochs: 10
   patience: 3
 
   weight_semseg_classes: # semseg_class_freqs.pt
 
-  beta: 2.5
+  beta: 1e-5
   z_close_weight: 500000
 
   start_epoch: 0
@@ -51,5 +51,5 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg-non-disentangled-non-seperable.yaml
-model_initialisation: # "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_04__12_41_08/model_4.rar"
-init_from_stable_diffusion: False
+model_initialisation: # "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_16__00_51_20_single_ae_non_seperable/model_10.rar"
+init_from_stable_diffusion: True

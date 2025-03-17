@@ -30,16 +30,16 @@ import pandas as pd
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
-from stablediffusion.objectives import get_objective, train_adversary
+from objectives import get_objective, train_adversary
 from ldm.data import get_dataset
 
-from utils import save_and_log_latents, save_and_log_img
+from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights
 
 import pyiqa
 
-enable_wandb = True
+enable_wandb = False
 
-notes = ("Training a single joint autoencoder with semantic segmentation and rgb images, and the usual VAE loss.")
+notes = ("Training a single joint autoencoder with semantic segmentation and rgb images, and the usual VAE loss. Restarting training from ")
 name = "single_ae_non_seperable"
 
 
@@ -59,6 +59,7 @@ def setup(rank, world_size):
     torch.cuda.set_device(rank)
     # initialize the process group
     dist.init_process_group("gloo", rank=rank, world_size=world_size)
+
 
 def cleanup():
     dist.destroy_process_group()
@@ -88,12 +89,20 @@ def initialise_model(conf):
                         print("Deleting key {} from state_dict.".format(k))
                         del sd[k]
 
+            # If we have doubled the number of channels we must go though and double all the initialisation weight shapes
+            sd = duplicate_stable_diff_weights(sd, vae)
+
             M, U = vae.load_state_dict(sd, strict=False)
             for m in M:
                 print(f"Missing key: {m}")
             for u in U:
                 print(f"Unused key: {u}")
         model = MMVAEDataParallelWrapper(model)
+
+        model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+        params = sum([np.prod(p.size()) for p in model_parameters])
+        print(f"Trainable parameter count: {params}")
+
         return model
 
     elif conf.model_initialisation is not None:
@@ -103,6 +112,7 @@ def initialise_model(conf):
         return model
 
     return MMVAEDataParallelWrapper(model)
+
 
 def stack_generation_matrices(mats, data, mode_display_fs=None):
     # Given a list of N_gen cross and self generation matrices, get them into a single matix
@@ -258,7 +268,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         # Set the learning rate forward to continue training after pause
         if conf.training.start_epoch > 0:
-            for _ in range(len(train_loader)//100):
+            for _ in range(len(train_loader)//scheduler_step_freq):
                 scheduler.step()
 
         def unpack_data_nyu(data, device="cuda"):
@@ -276,8 +286,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         t_objective = objective
 
-        best_test_loss = 1e9
+        best_test_loss = 1e20
         test_worsening_count = 0
+
         early_stop = False
 
         def train(epoch):
@@ -354,6 +365,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             loss_series = pd.Series({"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0})
 
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
+            mod = model.module.module if data_parallel else model.module
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
@@ -369,7 +381,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if i == 0 and epoch % 1 == 0:
                         # Compute cross-generations
-                        if model.can_cross_generate:
+                        if mod.can_cross_generate:
                             N_gen = 3
                             n_samples = conf.training.batch_size // N_gen
                             limited_data = [d[:n_samples] for d in data]
@@ -389,7 +401,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         # Also save some example latent vectors and example reconstructions (without averaging z)
                         latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
 
-                        if model.factorised_latent_space:
+                        if mod.factorised_latent_space:
                             for j in range(NUM_VAES):  # Choice of z
                                 latent_w_img = latents[j]
                                 latent_z_img = latents[j + NUM_VAES]
@@ -420,13 +432,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                     save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
                                                      runPath, display_data_fs[k], epoch, run)
                         else:
-                            reconstructions = model.module("decode", u) if data_parallel else model("decode", u)
+                            reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
 
-                            if not model.seperable:
-                                reconstructions = torch.split(reconstructions[0].mean, conf.data.channel)
-
-                            for k in range(NUM_VAES):
-                                save_and_log_img(reconstructions[k], f'Reconstructions/m{k}',
+                            for k, rec in enumerate(reconstructions):
+                                save_and_log_img(rec, f'Reconstructions/m{k}',
                                                  runPath, display_data_fs[k], epoch, run)
 
 

@@ -41,7 +41,7 @@ model:
       params:
         prior_dist: normal
         latent_channel_u: 6
-        ckpt_path: # "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_10__22_58_54/model_10.rar"  # "../trained_models/celeba_autoencoder_2025_03_04/model_4.rar"
+        ckpt_path: # "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_16__09_24_30_single_ae_non_seperable/model_19.rar"
         seperable: False
         lik_dist_splits: [3, 18]
         lik_dists: [Laplace, Bernoulli]
@@ -63,7 +63,7 @@ model:
                 resolution: 256
                 in_channels: 21  # 3 + 18
                 out_ch: 21
-                ch: 256  # Maybe I want to set an equal number of parameters?
+                ch: 192  # approx equal parameter numbers
                 ch_mult:
                 - 1
                 - 2

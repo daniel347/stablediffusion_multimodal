@@ -41,5 +41,5 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg.yaml
-model_initialisation: # "../trained_models/model_4.rar"
+model_initialisation: "../outputs/MM CelebA Stable Diffusion/checkpoints/2025_03_15__11_11_49_z_dist_ae_computed_norm_32_bit/model_5.rar"
 init_from_stable_diffusion: False

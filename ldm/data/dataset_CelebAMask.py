@@ -110,19 +110,22 @@ class MMCelebA(Dataset):
     def read_semseg(self, index):
         combined_path = os.path.join(self.mask_dir, f"{index:05d}_combined.pt")
         if os.path.exists(combined_path) and not self.force_reload:
-            print("Loading precomputed mask")
-            return torch.load(combined_path).type(torch.float32)
-        else:
-            p = os.path.join(self.mask_dir, f"{index:05d}_*.png")
-            mask_files = glob.glob(p)
-            mask = np.zeros((len(self.semseg_labels), 512, 512), dtype=np.float32)
-            for mask_file in mask_files:
-                submask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
-                mask_class = "_".join(os.path.basename(mask_file).split(".")[0].split("_")[1:])
-                mask[self.semseg_labels[mask_class], :, :] = submask // 255
+            # print("Loading precomputed mask")
+            try:
+                return torch.load(combined_path).type(torch.float32)
+            except Exception:
+                print(f"Failed to load mask {combined_path}, reloading")
 
-            torch_mask = torch.from_numpy(mask)
-            torch.save(torch_mask.type(torch.uint8), combined_path)
+        p = os.path.join(self.mask_dir, f"{index:05d}_*.png")
+        mask_files = glob.glob(p)
+        mask = np.zeros((len(self.semseg_labels), 512, 512), dtype=np.float32)
+        for mask_file in mask_files:
+            submask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
+            mask_class = "_".join(os.path.basename(mask_file).split(".")[0].split("_")[1:])
+            mask[self.semseg_labels[mask_class], :, :] = submask // 255
+
+        torch_mask = torch.from_numpy(mask)
+        # torch.save(torch_mask.type(torch.uint8), combined_path)
 
         return torch_mask
 

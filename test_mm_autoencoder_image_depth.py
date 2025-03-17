@@ -148,7 +148,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
         # WandB
         if enable_wandb:
             wandb.login()
-            wandb.init(
+            run = wandb.init(
                 # Set the project where this run will be logged
                 project=conf.experiment,
                 # Track hyperparameters and run metadata
@@ -158,6 +158,8 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
                 group=f"DDP_{runId}",
                 notes=exp_notes,
             )
+        else:
+            run = None
 
         modalities = conf.data.modalities
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
@@ -229,7 +231,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
                     data = unpack_data_nyu(dataT, device=device)
 
                     for m, name in enumerate(modalities):
-                        save_and_log_img(data[m], f'Input/m{m}', runPath, display_data_fs[m], i, enable_wandb)
+                        save_and_log_img(data[m].detach().cpu(), f'Input/m{m}', runPath, display_data_fs[m], i, run)
 
                     latents = model.module("encode", data, avg_z=avg_z) if data_parallel else model("encode", data,
                                                                                                     avg_z=avg_z)
@@ -240,19 +242,19 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
                         for j in range(NUM_VAES):
                             latent_img = latents[:, j:j + latent_dim_w]
 
-                            save_and_log_latents(latent_img, f'Latents/wm{j}', runPath, i, enable_wandb)
+                            save_and_log_latents(latent_img.detach().cpu(), f'Latents/wm{j}', runPath, i, run)
                             save_and_log_img(reconstructions[j], f'Reconstructions/m{j}',
-                                             runPath, display_data_fs[j], i, enable_wandb)
+                                             runPath, display_data_fs[j], i, run)
 
                         latent_img = latents[:, -latent_dim_z:]
-                        save_and_log_latents(latent_img, 'Latents/z', runPath, i, enable_wandb)
+                        save_and_log_latents(latent_img, 'Latents/z', runPath, i, run)
                     else:
                         for j in range(NUM_VAES):  # Choice of z
                             latent_w_img = latents[j]
                             latent_z_img = latents[j + NUM_VAES]
 
-                            save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, i, enable_wandb)
-                            save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, i, enable_wandb)
+                            save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, i, run)
+                            save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, i, run)
 
                             # Reconstructions with known w
                             ws = latents[:NUM_VAES]
@@ -261,7 +263,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
 
                             for k in range(NUM_VAES):
                                 save_and_log_img(reconstructions[k], f'Reconstructions/z{j}/m{k}',
-                                                 runPath, display_data_fs[k], i, enable_wandb)
+                                                 runPath, display_data_fs[k], i, run)
 
                             # Reconstructions with random w
                             W_random = []
@@ -275,7 +277,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
 
                             for k in range(NUM_VAES):
                                 save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
-                                                 runPath, display_data_fs[k], i, enable_wandb)
+                                                 runPath, display_data_fs[k], i, run)
 
                     if (i + 1) * conf.training.batch_size >= n_samples:
                         break
@@ -373,8 +375,8 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
 
         with Timer('MMVAEplus') as t:
             # check_z_closeness(16)
-            # visualise_latents(64, avg_z=False)
-            check_learned_prior_params()
+            visualise_latents(64, avg_z=False)
+            # check_learned_prior_params()
 
 
     finally:

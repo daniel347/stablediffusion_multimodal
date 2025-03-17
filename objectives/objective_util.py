@@ -1,8 +1,8 @@
 # Objectives
 import torch
 from numpy import prod
-from ..utils import log_mean_exp, is_multidata
-from ..ldm.data.dataset_CelebAMask import MMCelebA
+from ldm.data.dataset_CelebAMask import MMCelebA
+import math
 
 __OBJECTIVES__ = {}
 
@@ -51,12 +51,12 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, lpips, chann
 
     if fail_on_nan:
         if isinstance(px_u, torch.distributions.Bernoulli) or isinstance(px_u, torch.distributions.Categorical):
-            assert not torch.isnan(px_u.probs).any(), f"Model output is nan (px_u.probs[{r}][{d}])"
+            assert not torch.isnan(px_u.probs).any(), f"Model output is nan (px_u.probs)"
         else:
-            assert not torch.isnan(px_u.loc).any(), f"Model output is nan (px_u.mean[{r}][{d}])"
-            assert not torch.isnan(px_u.scale).any(), f"Model output is nan (px_u.variance[{r}][{d}])"
+            assert not torch.isnan(px_u.loc).any(), f"Model output is nan (px_u.mean)"
+            assert not torch.isnan(px_u.scale).any(), f"Model output is nan (px_u.variance)"
 
-        assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpx_u_elem[{r}][{d}])"
+        assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpx_u_elem)"
 
     if wlpips_d > 0.0:
         lpips_lpx_u_loss = torch.tensor([lpips(x_di, px_ui) for x_di, px_ui in zip(x_d.view(-1, *x_d.shape[1:]), px_u.mode.view(-1, *x_d.shape[1:]))], device=x_d.device).reshape(*px_u.batch_shape[:2])
@@ -64,7 +64,7 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, lpips, chann
         lpx_u_elem += - wlpips_d * lpips_lpx_u_loss
 
     if fail_on_nan:
-        assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpips [{r}][{d}])"
+        assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpips)"
 
     return lpx_u_elem
 
@@ -104,3 +104,11 @@ def gauss_kl_div_loss(mu, sigma):
     kl_div = torch.distributions.kl.kl_divergence(qv, pu).sum(dim=(-1, -2, -3))
 
     return kl_div
+
+
+def log_mean_exp(value, dim=0, keepdim=False):
+    return torch.logsumexp(value, dim, keepdim=keepdim) - math.log(value.size(dim))
+
+
+def is_multidata(dataB):
+    return isinstance(dataB, list) or isinstance(dataB, tuple)

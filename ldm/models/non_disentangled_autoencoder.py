@@ -139,13 +139,13 @@ class NonDisentanglingAE(nn.Module):
             recons.append(vae.decode(u))
 
         if not self.seperable:
-            recons_split = torch.split(recons[0], self.lik_dist_splits, dim=2)
-            recons = [ld(act(split)) for ld, act, split in zip(self.lik_dists, self.final_acts, recons_split)]
+            recons = self.create_likelihood_dists(recons[0])
 
         return recons
 
     def create_likelihood_dists(self, px_us):
-        recons_split = torch.split(px_us, self.lik_dist_splits, dim=2)
+        ch_dim = 2 if len(px_us.shape) == 5 else 1
+        recons_split = torch.split(px_us, self.lik_dist_splits, dim=ch_dim)
         scale = torch.tensor(0.01).to(px_us.device)
 
         px_us_dists = []

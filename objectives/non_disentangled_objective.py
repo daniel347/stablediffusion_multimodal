@@ -1,9 +1,7 @@
 # Objectives
 import torch
 from numpy import prod
-from ..utils import log_mean_exp, is_multidata
-from ..ldm.data.dataset_CelebAMask import MMCelebA
-from .objective_util import compute_microbatch_split, reconstruction_loss, gauss_kl_div_loss, get_objective, register_objective
+from .objective_util import compute_microbatch_split, reconstruction_loss, gauss_kl_div_loss, get_objective, register_objective, log_mean_exp, is_multidata
 
 eta = 1e-20
 
@@ -36,7 +34,7 @@ def _m_dreg_non_disentangled(model,
     for r, qu_x in enumerate(qu_xs):
         l_kl_div = gauss_kl_div_loss(qu_x.mean, qu_x.std).unsqueeze(0)
         lw += beta * l_kl_div
-        loss_dict["prior"] += beta * l_kl_div.detach().cpu().sum().item()
+        loss_dict["prior"] += l_kl_div.detach().cpu().sum().item()
 
     return lw, uss, loss_dict
 

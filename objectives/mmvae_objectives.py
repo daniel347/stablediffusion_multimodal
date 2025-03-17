@@ -1,9 +1,8 @@
 # Objectives
 import torch
 from numpy import prod
-from ..utils import log_mean_exp, is_multidata
-from ..ldm.data.dataset_CelebAMask import MMCelebA
-from .objective_util import compute_microbatch_split, reconstruction_loss, gauss_kl_div_loss, get_objective, register_objective
+from .objective_util import log_mean_exp
+from .objective_util import compute_microbatch_split, reconstruction_loss, register_objective, log_mean_exp
 
 eta = 1e-20
 

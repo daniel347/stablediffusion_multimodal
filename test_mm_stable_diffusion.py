@@ -25,11 +25,17 @@ import torchvision.utils as tvu
 from ray import train
 
 from ldm.util import instantiate_from_config, Timer
-from ldm.data.dataset_NYU_Depth import NYUDepth
+from ldm.data import get_dataset
 import pyiqa
+import copy
+
+from utils import save_and_log_latents, save_and_log_img
 
 enable_wandb = False
 
+notes = ("Training diffusion using our best autoencoder with computed normalisation constant and 32 bit precision. We "
+         "initialise with duplicated stable diffusion weights, which should make a fair comparison to our factorised model")
+name = "z_dist_ae_computed_norm_32_bit"
 
 def expand_sub_confs(conf):
     # Expand sub-configs
@@ -85,6 +91,45 @@ def stack_generation_matrices(mats, data):
 
     return out_mat
 
+def load_image_datasets(conf):
+    tx = v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])
+    return_class = "return_class" in conf.data and conf.data.return_class
+    return_index = conf.training.precompute_latents
+
+    train_opts = conf.data
+    test_opts = copy.deepcopy(OmegaConf.to_container(conf.data))
+    for key in ["p_hor_flip", "p_colour_jitter"]:
+        test_opts.pop(key, None)
+
+    train_dataset = get_dataset(conf.data.dataset_name,
+                                transform=tx,
+                                split="train",
+                                return_index=return_index,
+                                return_class=return_class,
+                                **train_opts)
+    test_dataset = get_dataset(conf.data.dataset_name,
+                               transform=tx,
+                               split="val",
+                               return_index=return_index,
+                               return_class=return_class,
+                               **test_opts)
+
+    return train_dataset, test_dataset
+
+def create_dataloaders(train_dataset, test_dataset, conf, world_size=1, rank=0, data_parallel=False):
+    kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
+    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
+                                       shuffle=True) if data_parallel else None
+    test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,
+                                      shuffle=False) if data_parallel else None
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=conf.training.batch_size,
+                                               shuffle=not data_parallel, sampler=train_sampler, **kwargs)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
+                                              sampler=test_sampler, **kwargs)
+
+    return train_loader, test_loader
+
 
 def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False, enable_pbars=True):
     try:
@@ -109,7 +154,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
             conf.experiment = model.modelName
 
         # Set up run path
-        runId = str(datetime.now().strftime("%Y_%m_%d__%H_%M_%S")) + "_test"
+        runId = str(datetime.now().strftime("%Y_%m_%d__%H_%M_%S")) + f"_test_{name}"
 
         if ray_tune:
             runId += f"_rank{train.get_context().get_world_rank()}"
@@ -131,7 +176,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
         # WandB
         if enable_wandb:
             wandb.login()
-            wandb.init(
+            run = wandb.init(
                 # Set the project where this run will be logged
                 project=conf.experiment,
                 # Track hyperparameters and run metadata
@@ -139,24 +184,35 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
                 # Run name
                 name=f"{runId}_{str(rank)}",
                 group=f"DDP_{runId}",
+                notes=notes,
             )
 
         scheduler_step_freq = 25
 
 
-        # Load NYU dataset
-        modalities = ['colour']
-        kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
-        tx = v2.Compose([v2.Resize([conf.data.input_size, conf.data.input_size])])
+        train_dataset, test_dataset = load_image_datasets(conf)
+        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
 
-        test_dataset = NYUDepth(conf.data.datadir, transform=tx, train=False, modality=modalities)
-        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank, shuffle=False) if data_parallel else None
-        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False, sampler=test_sampler, **kwargs)
+        def move_data_to_device(data, device="cuda"):
+            if isinstance(data, torch.Tensor):
+                return data.to(device)
+            elif isinstance(data, tuple) or isinstance(data, list):
+                return [move_data_to_device(d, device) for d in data]
 
-        def unpack_data_nyu(data, device="cuda"):
-            return [d.to(device) for d in data]
+        best_test_loss = 10000
+        test_worseining_count = 0
+        early_stop = False
+
+        total_latent_channels = model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels
+        latent_mean = torch.zeros(total_latent_channels, device=device)
+        latent_scale = torch.ones(total_latent_channels, device=device) * 1.0 / 0.18215
+
+        scaling = torch.load("")
+        latent_mean = scaling["latent_mean"].to(device)
+        latent_scale = scaling["latent_scale"].to(device)
 
         def test_epoch(epoch):
+            # TODO update this
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0)
             else:
@@ -165,7 +221,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
             b_loss = 0
             with torch.no_grad():
                 for i, dataT in pbar:
-                    data = unpack_data_nyu(dataT, device=device)
+                    data = move_data_to_device(dataT, device=device)
 
                     latents = model_first_stage.encode(data)
                     loss, loss_dict = model(latents)
@@ -212,6 +268,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
                     else:
                         latents = model.sample(None, batch_size=gen_batch_size)
 
+                    latents = latents * latent_scale[None, :, None, None] + latent_mean[None, :, None, None]
                     reconstructions = model_first_stage.decode(latents)
 
                     for j in range(NUM_VAES):
@@ -228,6 +285,18 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
                         if enable_wandb:
                             wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=n)
                             wandb.log({f'Reconstructions/m{j}': wandb.Image(reconstructions[j].mean)}, step=n)
+
+                        save_and_log_img(samples_x[m], f'Generation/m{m}',
+                                         runPath, display_data_fs[m], epoch, run, wandb_kwargs=wandb_kwargs,
+                                         save_kwargs={}, nrow=4)
+
+                        *latents_w, latents_z = torch.split(latents,
+                                                            [model_first_stage.w_channels for _ in range(NUM_VAES)] + [
+                                                                model_first_stage.z_channels], dim=1)
+                        for j, latent in enumerate(latents_w):
+                            save_and_log_latents(latent, f'Latents/wm{j}', runPath, epoch, run)
+                        if latents_z.shape[1] > 0:
+                            save_and_log_latents(latents_z, f'Latents/z', runPath, epoch, run)
 
                     latent_img = latents[:, -latent_dim_z:].detach().cpu()
                     latent_img = torch.transpose(latent_img, 0, 1).reshape(-1, *latent_img.shape[2:]).unsqueeze(1)
@@ -299,7 +368,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_stable_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

@@ -40,8 +40,8 @@ import random
 
 enable_wandb = True
 
-notes = ("Training diffusion using our best autoencoder with computed normalisation constant and 32 bit precision. This should be the best result yet")
-name = "z_dist_ae_computed_norm_32_bit"
+notes = ("Training diffusion using the single autoencoder trained on both semantic segmentation and image generation")
+name = "non_distentangled_single_ae"
 
 
 def expand_sub_confs(conf):
@@ -157,7 +157,9 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode):
     else:
         latents = model_first_stage.encode(data, avg_z=avg_z)
 
-    if random_z or (avg_z and latents.shape[1] > model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) or isinstance(z_mode, int):
+    channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_channels
+
+    if random_z or (avg_z and latents.shape[1] > channel_u) or isinstance(z_mode, int):
         latents_split = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [
             model_first_stage.z_channels for _ in range(NUM_VAES)], dim=1)
         latents_w = latents_split[:NUM_VAES]
@@ -315,7 +317,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         test_worseining_count = 0
         early_stop = False
 
-        total_latent_channels = model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels
+        total_latent_channels = model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels if model_first_stage.factorised_latent_space else model_first_stage.u_channels
         latent_mean = torch.zeros(total_latent_channels, device=device)
         latent_scale = torch.ones(total_latent_channels, device=device) * 1.0/0.18215
 
@@ -446,11 +448,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                 if i == 0:
                     if conf.training.precompute_latents:
-                        *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
-                        for j, latent in enumerate(latents_w):
-                            save_and_log_latents(latent, f'Latents/wm{j}', runPath, epoch, run)
-                        if latents_z.shape[1] > 0:
-                            save_and_log_latents(latents_z, f'Latents/z', runPath, epoch, run)
+                        if model_first_stage.factorised_latent_space:
+                            *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
+                            for j, latent in enumerate(latents_w):
+                                save_and_log_latents(latent, f'Latents/wm{j}', runPath, epoch, run)
+                            if latents_z.shape[1] > 0:
+                                save_and_log_latents(latents_z, f'Latents/z', runPath, epoch, run)
+                        else:
+                            save_and_log_latents(latents, f'Latents/u', runPath, epoch, run)
                     else:
                         for m, (name, dbatch) in enumerate(zip(modalities, data)):
                             save_and_log_img(dbatch, f"Data/{name}", runPath,
@@ -497,7 +502,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         samples_zw = samples_zw * latent_scale[None, :, None, None] + latent_mean[None, :, None, None]
                         samples_x = model_first_stage.decode(samples_zw)
 
-                        for m in range(NUM_VAES):
+                        for m in range(len(samples_x)):
                             if return_class:
                                 wandb_kwargs = {"caption" : "\n".join([f"{b}: {test_dataset.class_num_to_name(c)}" for b, c in enumerate(classes)])}
                             else:
@@ -586,10 +591,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             if conf.training.compute_latent_scale:
                 latent_mean, latent_scale = get_latent_scale_factor(train_loader, n_batches=10)
+                torch.save({"latent_mean": latent_mean, "latent_scale": latent_scale}, os.path.join(runPath, "latent_stats_non_disentangled_single.pt"))
             print(f"Using a latent mean of {latent_mean} and latent scale of {latent_scale}")
 
-            test_epoch(start_epoch)
-            fid_scores = test_fid(start_epoch)
+            # test_epoch(start_epoch)
+            # fid_scores = test_fid(start_epoch)
             # print("   ".join([f"{mod} FID: {fid}" for mod, fid in zip(modalities, fid_scores)]))
             for epoch in range(start_epoch + 1, conf.training.num_epochs + 1 + start_epoch):
                 train_epoch(epoch)
@@ -630,7 +636,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_single_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
