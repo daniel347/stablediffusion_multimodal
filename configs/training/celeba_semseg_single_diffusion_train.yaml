@@ -1,5 +1,5 @@
 seed: 1
-device: "cuda:1"  # ["cuda:0", "cuda:1"]
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM CelebA Stable Diffusion"
 print_freq: 50
 
@@ -41,5 +41,5 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg-non-disentangled-non-seperable.yaml
-model_initialisation: # "../outputs/MM CelebA Stable Diffusion/checkpoints/2025_03_15__11_11_49_z_dist_ae_computed_norm_32_bit/model_5.rar"
+model_initialisation: "../outputs/MM CelebA Stable Diffusion/checkpoints/2025_03_19__08_56_09_non_disentangled_single_ae/model_4.rar"
 init_from_stable_diffusion: False

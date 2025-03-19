@@ -30,6 +30,7 @@ from ray import train
 from ray.train import Checkpoint, get_checkpoint
 import ray.cloudpickle as pickle
 import tempfile
+import sys
 
 from ldm.util import instantiate_from_config, Timer, save_model_light
 from ldm.data import get_dataset
@@ -40,8 +41,8 @@ import random
 
 enable_wandb = True
 
-notes = ("Training diffusion using the single autoencoder trained on both semantic segmentation and image generation")
-name = "non_distentangled_single_ae"
+notes = ("Training diffusion using the single autoencoder trained on both semantic segmentation and image generation. Test the FID of colour generations")
+name = "test_non_distentangled_single_ae"
 
 
 def expand_sub_confs(conf):
@@ -593,6 +594,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 latent_mean, latent_scale = get_latent_scale_factor(train_loader, n_batches=10)
                 torch.save({"latent_mean": latent_mean, "latent_scale": latent_scale}, os.path.join(runPath, "latent_stats_non_disentangled_single.pt"))
             print(f"Using a latent mean of {latent_mean} and latent scale of {latent_scale}")
+
+            fid_scores = test_fid(0, n_samples=256)
+            sys.exit()
 
             # test_epoch(start_epoch)
             # fid_scores = test_fid(start_epoch)

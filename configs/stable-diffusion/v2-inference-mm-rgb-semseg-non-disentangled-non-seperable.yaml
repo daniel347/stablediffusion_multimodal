@@ -41,7 +41,7 @@ model:
       params:
         prior_dist: normal
         latent_channel_u: 6
-        ckpt_path: # "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_16__09_24_30_single_ae_non_seperable/model_19.rar"
+        ckpt_path: "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_18__13_42_43_single_ae_non_seperable_sd_init/model_18.rar"
         seperable: False
         lik_dist_splits: [3, 18]
         lik_dists: [Laplace, Bernoulli]
