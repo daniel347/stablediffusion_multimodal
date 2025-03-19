@@ -37,10 +37,11 @@ from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_
 
 import pyiqa
 
-enable_wandb = False
+enable_wandb = True
 
-notes = ("Training a single joint autoencoder with semantic segmentation and rgb images, and the usual VAE loss. Restarting training from ")
-name = "single_ae_non_seperable"
+notes = ("Training a single joint autoencoder with semantic segmentation and rgb images, and the usual VAE loss." 
+        "We use a stable diffusion like initialisation and approximately the same number of parameters as our factorising model. We dont use class weightings but weight the semseg loss up by 100")
+name = "single_ae_non_seperable_sd_init"
 
 
 def expand_sub_confs(conf):
