@@ -46,7 +46,7 @@ model:
         lik_dist_splits: [3, 18]
         lik_dists: [Laplace, Bernoulli]
         final_acts: [identity, sigmoid]
-        llik_scales: [1.0, 10.0]
+        llik_scales: [1.0, 100.0]
 
         vae_params:
           - target: ldm.models.autoencoder.AutoencoderKL  # RGB images
