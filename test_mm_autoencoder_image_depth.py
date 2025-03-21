@@ -371,6 +371,23 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
                 wandb.log({f'pz_params/global/var': wandb.Image(var)}, step=0)
 
 
+        def decode_encode_latent():
+            # Note this is a simple test designed for unimodal data (ie StableIndigo work)
+            # - I should make a different file but im a little lazy
+            vaes = model.module.module.vaes if data_parallel else model.module.vaes
+
+
+            with torch.no_grad():
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
+                                          position=rank if data_parallel else 0):
+                    data = unpack_data_nyu(dataT, device=device)
+
+                    latents = model.module("encode", data, avg_z=avg_z) if data_parallel else model("encode", data,
+                                                                                                    avg_z=avg_z)
+
+                    if avg_z:
+                        reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
+
 
 
         with Timer('MMVAEplus') as t:

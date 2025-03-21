@@ -1,6 +1,6 @@
 seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
-experiment: "MM CelebA Autoencoder (Stable Diffusion)"
+experiment: "MM_CelebA_Autoencoder"
 print_freq: 50
 
 data:

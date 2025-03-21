@@ -136,7 +136,7 @@ def _m_dreg(model,
     return torch.stack(lws), torch.stack(uss), loss_dict
 
 
-@register_objective("disentangled_objective")
+@register_objective("mmvae_objective")
 def m_dreg(model, x, K=1, test=False, **kwargs):
     """
     DReG objective

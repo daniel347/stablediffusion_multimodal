@@ -1,6 +1,6 @@
 seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
-experiment: "NYU Depth Stable Diffusion"
+experiment: "NYU_Depth_Stable_Diffusion"
 print_freq: 50
 
 data:

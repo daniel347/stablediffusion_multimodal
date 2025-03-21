@@ -10,7 +10,7 @@ class MMVAEplus(nn.Module):
     """
     MMVAEplus class definition.
     """
-    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False):
+    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False, stop_self_z_grad=False):
         super(MMVAEplus, self).__init__()
         if isinstance(prior_dist, str):
             if prior_dist == 'normal':
@@ -52,6 +52,9 @@ class MMVAEplus(nn.Module):
 
         self.can_cross_generate = True
         self.can_sample = False
+        self.factorised_latent_space = True
+
+        self.stop_self_z_grad = stop_self_z_grad
 
         if ckpt_path is not None:
             print("Loading MMVAE checkpoint from {params.ckpt_path}")
@@ -84,7 +87,7 @@ class MMVAEplus(nn.Module):
         else:
             return self._pz_params[0], F.softmax(self._pz_params[1], dim=(1, 2, 3)) * self._pz_params[1].size(-1) + 1e-20
 
-    def self_and_cross_generation_choose_latent_dist(self, x, latent_dist_params, K=1, all_combinations=None):
+    def self_and_cross_generation_choose_latent_dist(self, x, latent_dist_params, K=1, all_combinations=None, stop_self_z_grad=False):
         """
         Choose the latent distribution for self- and cross-generation.
         Args:
@@ -118,6 +121,12 @@ class MMVAEplus(nn.Module):
         for e, us in enumerate(uss):
             for d, vae in enumerate(self.vaes):
                 if e == d: # Fill diagonal with self-reconstructions
+                    if stop_self_z_grad:
+                        w_e, z_e = torch.split(us, [self.latent_channel_w, self.latent_channel_z], dim=2)
+                        us_z_grad_stop = torch.cat([w_e, z_e.clone().detach()])
+                    else:
+                        us_z_grad_stop = us
+
                     if self.avg_z:
                         w_e, _ = torch.split(us, [self.latent_channel_w, self.latent_channel_z], dim=2)
                         us_combined = torch.cat([w_e, z_avg], dim=2)
@@ -126,9 +135,9 @@ class MMVAEplus(nn.Module):
                         if all_combinations:
                             latent_w_sample = self.sample_w(d, latent_dist_params, us.size(), x[0].device)
                             us_unkown_self_w = torch.cat([latent_w_sample, zs[e]], dim=2)
-                            px_us[e][d] = [vae.decode(us), vae.decode(us_unkown_self_w)]
+                            px_us[e][d] = [vae.decode(us_z_grad_stop), vae.decode(us_unkown_self_w)]
                         else:
-                            px_us[e][d] = vae.decode(us)
+                            px_us[e][d] = vae.decode(us_z_grad_stop)
 
                 else:  # fill-in off-diagonal with cross-modal reconstructions
                     # Get shared latents from encoding modality e

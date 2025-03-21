@@ -45,7 +45,8 @@ model:
         cross_w_mode: "sample"
         ckpt_path: "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_10__22_58_54/model_10.rar"  # "../trained_models/celeba_autoencoder_2025_03_04/model_4.rar"
         avg_z: False
-        all_combinations: True
+        all_combinations: False
+        stop_self_z_grad: False
 
         vae_params:
           - target: ldm.models.autoencoder.AutoencoderKL  # RGB images

@@ -1,5 +1,6 @@
 # Objectives
 import torch
+import torch.nn as nn
 from numpy import prod
 from ldm.data.dataset_CelebAMask import MMCelebA
 import math
@@ -16,10 +17,10 @@ def register_objective(name: str):
     return wrapper
 
 
-def get_objective(name: str):
+def get_objective(name: str, **kwargs):
     if __OBJECTIVES__.get(name, None) is None:
         raise NameError(f"Name {name} is not defined.")
-    return __OBJECTIVES__[name]
+    return __OBJECTIVES__[name](**kwargs)
 
 
 # Helper to vectorise computation
@@ -112,3 +113,46 @@ def log_mean_exp(value, dim=0, keepdim=False):
 
 def is_multidata(dataB):
     return isinstance(dataB, list) or isinstance(dataB, tuple)
+
+
+class RBF(nn.Module):
+
+    def __init__(self, n_kernels=5, mul_factor=2.0, bandwidth=None):
+        super().__init__()
+        self.bandwidth_multipliers = mul_factor ** (torch.arange(n_kernels) - n_kernels // 2)
+        self.bandwidth = bandwidth
+
+    def get_bandwidth(self, L2_distances):
+        if self.bandwidth is None:
+            n_samples = L2_distances.shape[0]
+            return L2_distances.data.sum() / (n_samples ** 2 - n_samples)
+
+        return self.bandwidth
+
+    def forward(self, X):
+        L2_distances = torch.cdist(X, X) ** 2
+        return torch.exp(-L2_distances[None, ...] / (self.get_bandwidth(L2_distances).to(X.device) * self.bandwidth_multipliers.to(X.device))[:, None, None]).sum(dim=0)
+
+
+class MMDIndependenceLoss(nn.Module):
+
+    def __init__(self, kernel=RBF(), target_dim=2):
+        super().__init__()
+        self.kernel = kernel
+        self.target_dim = target_dim
+
+    def forward(self, X, Y):
+        X_flat = X.flatten(start_dim=self.target_dim+1).permute(0, 1, 3, 2).flatten(end_dim=-2)
+        Y_flat = Y.flatten(start_dim=self.target_dim+1).permute(0, 1, 3, 2).flatten(end_dim=-2)
+
+        XY_samples = torch.cat([X_flat, Y_flat], dim=1)
+        perm = torch.randperm(X_flat.shape[0])
+        XY_ind_samples = torch.cat([X_flat, Y_flat[perm, :]], dim=1)
+
+        K = self.kernel(torch.vstack([XY_samples, XY_ind_samples]))
+
+        X_size = X.shape[0]
+        XX = K[:X_size, :X_size].mean()
+        XY = K[:X_size, X_size:].mean()
+        YY = K[X_size:, X_size:].mean()
+        return XX - 2 * XY + YY

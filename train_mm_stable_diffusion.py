@@ -41,8 +41,8 @@ import random
 
 enable_wandb = True
 
-notes = ("Training diffusion using the single autoencoder trained on both semantic segmentation and image generation. Test the FID of colour generations")
-name = "test_non_distentangled_single_ae"
+notes = ("Training diffusion using our best autoencoder with the z dist penalty and random z choice. Test the FID of colour generations")
+name = "test_z_dist_ae_computed_norm_32_bit_diffusion"
 
 
 def expand_sub_confs(conf):
@@ -640,7 +640,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_single_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

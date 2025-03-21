@@ -39,9 +39,8 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("Training a single joint autoencoder with semantic segmentation and rgb images, and the usual VAE loss." 
-        "We use a stable diffusion like initialisation and approximately the same number of parameters as our factorising model. We dont use class weightings but weight the semseg loss up by 100")
-name = "single_ae_non_seperable_sd_init"
+notes = ("Testing the new objective code, starting with just reconstruction (with LPIPS) and regularisation (2.5). Only 100 train iterations. Using the monte carlo kl divergence")
+name = "new_obj_reconstruction_reg_only"
 
 
 def expand_sub_confs(conf):
@@ -207,10 +206,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             train_adversary_f = partial(train_adversary, discriminator=disc, optimiser=disc_optimizer, device=device)
         else:
             train_adversary_f = None
-            assert conf.training.wadversary == 0.0
-
-        lpips = pyiqa.create_metric("lpips", device=device, as_loss=True)
-
+            assert conf.training.objective.params.wadversary == 0.0
 
         scheduler_step_freq = 50
 
@@ -251,17 +247,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
                                                   sampler=test_sampler, **kwargs)
 
-        if "weight_semseg_classes" in conf.training and conf.training.weight_semseg_classes is not None:
-            print("using inverse class frequency weighting for semantic segmentation loss")
-            class_freqs = torch.load(os.path.join(conf.data.datadir, conf.training.weight_semseg_classes))
-            class_weights = 1.0 / class_freqs
-            class_weights /= class_weights.sum()
-            class_weights = class_weights.to(device)
-
-            class_weights = [class_weights if m == "semseg" else None for m in modalities]
-        else:
-            class_weights = [None for _ in modalities]
-
 
         grad_clipper = None
         if "grad_clipper" in conf.training:
@@ -272,18 +257,26 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             for _ in range(len(train_loader)//scheduler_step_freq):
                 scheduler.step()
 
-        def unpack_data_nyu(data, device="cuda"):
+        def move_data_to_device(data, device="cuda"):
             return [d.to(device) for d in data]
 
-        objective = partial(get_objective(conf.training.objective),
-                            beta=conf.training.beta,
-                            data_parallel=data_parallel,
-                            wlpips=conf.training.wlpips,
-                            wadversary=conf.training.wadversary,
-                            train_adversary=None,
-                            lpips=lpips,
-                            channel_weighting=class_weights,
-                            z_close_weight=conf.training.z_close_weight)
+        objective_opts = OmegaConf.to_container(conf.training.objective.params)
+        if objective_opts["channel_weighting"] is not None:
+            print("using inverse class frequency weighting for semantic segmentation loss")
+            class_freqs = torch.load(os.path.join(conf.data.datadir, objective_opts["channel_weighting"]))
+            class_weights = 1.0 / class_freqs
+            class_weights /= class_weights.sum()
+            class_weights = class_weights.to(device)
+
+            class_weights = [class_weights if m == "semseg" else None for m in modalities]
+            objective_opts["channel_weighting"] = class_weights
+        else:
+            objective_opts["channel_weighting"] = [None for _ in modalities]
+
+        objective_opts["model"] = model
+        objective_opts["device"] = device
+
+        objective = get_objective(conf.training.objective.name, **objective_opts)
 
         t_objective = objective
 
@@ -303,14 +296,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader), position=rank if data_parallel else 0)
 
             for i, dataT in pbar:
-                data = unpack_data_nyu(dataT, device=device)
+                data = move_data_to_device(dataT, device=device)
                 # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                 optimizer.zero_grad()
 
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
-                        loss, loss_dict = objective(model, data,
-                                          K=conf.training.K)
+                        loss, loss_dict = objective(model, data, K=conf.training.K)
                         loss = -loss
 
                     scaler.scale(loss).backward()
@@ -321,8 +313,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
 
                 else:
-                    loss, loss_dict = objective(model, data,
-                                      K=conf.training.K)
+                    loss, loss_dict = objective(model, data, K=conf.training.K)
 
                     loss = -loss
 
@@ -352,6 +343,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         grid = make_grid(dbatch, nrow=8)
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
 
+                if i > 100:
+                    break
+
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
             loss_series = loss_series / len(train_loader.dataset)
@@ -370,10 +364,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
-                    data = unpack_data_nyu(dataT, device=device)
-                    loss, loss_dict = t_objective(model, data,
-                                        K=conf.training.K,
-                                        test=True)
+                    data = move_data_to_device(dataT, device=device)
+                    loss, loss_dict = t_objective(model, data, K=conf.training.K, test=True)
 
                     loss = -loss
 
@@ -477,7 +469,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_single_autoencoder_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
