@@ -37,7 +37,8 @@ class DisentanglingObjective(torch.nn.Module):
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
 
-    def _m_dreg(self, model, x, K=1, test=False):
+    def _m_dreg(self, model, x, K=1, test=False, train_z_combiner=False):
+
 
         qu_xs, px_us, uss = model("self_and_cross_modal_generation_forward", x, K) if test else model("forward", x, K)
 
@@ -51,14 +52,15 @@ class DisentanglingObjective(torch.nn.Module):
 
             qw_x_mean, qz_x_mean = torch.split(qu_x_r_mean, [self.mod.w_channels, self.mod.z_channels], dim=1)
             qw_x_std, qz_x_std = torch.split(qu_x_r_std, [self.mod.w_channels, self.mod.z_channels], dim=1)
-            qw_x = self.mod.vaes[r].qu_x(qw_x_mean.detach(), qw_x_std.detach())
-            qz_x = self.mod.vaes[r].qu_x(qz_x_mean.detach(), qz_x_std.detach())
+            # These detaches make me feel uncomfortable
+            qw_x = self.mod.vaes[r].qu_x(qw_x_mean, qw_x_std)
+            qz_x = self.mod.vaes[r].qu_x(qz_x_mean, qz_x_std)
             qz_xs.append(qz_x)
             qw_xs.append(qw_x)
 
         lws = []
 
-        loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0, "mmd_zw": 0, "mmd_ww": 0}
+        loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0, "mmd_zw": 0, "mmd_ww": 0, "z_dist_normed_euclidean": 0}
 
         # reconstruction loss
         for r, qu_x in enumerate(qu_xs):
@@ -66,55 +68,73 @@ class DisentanglingObjective(torch.nn.Module):
             for d, px_u in enumerate(px_us[r]):
                 wlpips_d = self.wlpips[d] if hasattr(self.wlpips, "__getitem__") else self.wlpips
                 if self.all_combinations:
-                    lpx_u += reconstruction_loss(px_u[0], x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, self.lpips,
+                    lpx_u = lpx_u + reconstruction_loss(px_u[0], x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, self.lpips,
                                                  self.channel_weighting[d], fail_on_nan=True)
-                    lpx_u += reconstruction_loss(px_u[1], x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, self.lpips,
+                    lpx_u = lpx_u + reconstruction_loss(px_u[1], x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, self.lpips,
                                                  self.channel_weighting[d], fail_on_nan=True) * self.off_combination_weight
                 else:
-                    lpx_u = reconstruction_loss(px_u, x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, self.lpips,
+                    lpx_u = lpx_u + reconstruction_loss(px_u, x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, self.lpips,
                                                 self.channel_weighting[d],
                                                 fail_on_nan=True)
 
             lws.append(lpx_u)
+
+        # print(f"lws len: {len(lws)}  lws shapes: {[l.shape for l in lws]}")
 
         # KL divergence loss for w
         for r, qw_x in enumerate(qw_xs):
             for param in self.mod.pw_params:
                 assert not torch.isnan(param).any(), f"Model output is nan (pw_params[{r}])"
             pw = self.mod.pw(*self.mod.pw_params)
+            """
             ws, zs = torch.split(uss[r], [self.mod.w_channels, self.mod.z_channels], dim=2)
             lpw = pw.log_prob(ws).sum(dim=(-1, -2, -3))
             lqw_x = qw_xs[r].log_prob(ws).sum(dim=(-1, -2, -3))
             kl_div = (lqw_x - lpw)
             """
-            kl_div = torch.distributions.kl.kl_divergence(qw_x, pw).sum(dim=(-1, -2, -3))
-            """
-            lws[r] -= kl_div * self.beta
-            loss_dict["prior"] -= kl_div.detach().cpu().sum().item()
+            kl_div = torch.distributions.kl.kl_divergence(qw_x, pw).sum(dim=(-1, -2, -3)).unsqueeze(0)  # unsqueeze for K
+            # print("kldiv w shape: ", kl_div.shape)
+            lws[r] = lws[r] - kl_div * self.beta
+            loss_dict["prior"] -= kl_div.detach().cpu().sum().item() * self.beta
 
         # KL divergence loss for z
         for r, qz_x in enumerate(qz_xs):
             for param in self.mod.pz_params:
                 assert not torch.isnan(param).any(), f"Model output is nan (pz_params[{r}])"
             pz = self.mod.pz(*self.mod.pz_params)
+            """
             ws, zs = torch.split(uss[r], [self.mod.w_channels, self.mod.z_channels], dim=2)
             lpz = pz.log_prob(zs).sum(dim=(-1, -2, -3))
             lqz_x = log_mean_exp(torch.stack([qz_x.log_prob(zs).sum(dim=(-1, -2, -3)) for qz_x in qz_xs]))
             kl_div = (lqz_x - lpz)
-            # kl_div = torch.distributions.kl.kl_divergence(qz_x, pz).sum(dim=(-1, -2, -3))
-            lws[r] -= kl_div * self.beta
-            loss_dict["prior"] -= kl_div.detach().cpu().sum().item()
+            """
+            kl_div = torch.distributions.kl.kl_divergence(qz_x, pz).sum(dim=(-1, -2, -3)).unsqueeze(0)  # unsqueeze for K
+            # print("kldiv z shape: ", kl_div.shape)
+            lws[r] = lws[r] - kl_div * self.beta
+            loss_dict["prior"] -= kl_div.detach().cpu().sum().item() * self.beta
+
 
         # Z distance loss (Symmetric kl but only works for 2 modalities)
         if len(qu_xs) != 2:
             print("WARNING: Z distance loss only works for 2 modalities, skipping")
         else:
-            kl_div1 = torch.distributions.kl.kl_divergence(qz_xs[0], qz_xs[1]).sum(dim=(-1, -2, -3))
-            kl_div2 = torch.distributions.kl.kl_divergence(qz_xs[1], qz_xs[0]).sum(dim=(-1, -2, -3))
-            lws[0] -= kl_div1 * self.z_close_weight
-            lws[1] -= kl_div2 * self.z_close_weight
+            """
+            kl_div1 = torch.distributions.kl.kl_divergence(qz_xs[0], qz_xs[1]).sum(dim=(-1, -2, -3)).unsqueeze(0)
+            kl_div2 = torch.distributions.kl.kl_divergence(qz_xs[1], qz_xs[0]).sum(dim=(-1, -2, -3)).unsqueeze(0)
+            lws[0] = lws[0] - kl_div1 * self.z_close_weight
+            lws[1] = lws[1] - kl_div2 * self.z_close_weight
             loss_dict["z_dist"] -= kl_div1.detach().cpu().sum().item()
             loss_dict["z_dist"] -= kl_div2.detach().cpu().sum().item()
+            """
+
+            z1_norm = torch.linalg.vector_norm(qz_xs[0].mean, dim=(1, 2, 3))
+            z2_norm = torch.linalg.vector_norm(qz_xs[1].mean, dim=(1, 2, 3))
+            z_dist_loss = torch.sum((qz_xs[0].mean - qz_xs[1].mean)**2, dim=(1, 2, 3))/(z1_norm * z2_norm)[:, None, None, None]
+
+            lws[0] = lws[0] - z_dist_loss.unsqueeze(0) * self.z_close_weight/2
+            lws[1] = lws[1] - z_dist_loss.unsqueeze(0) * self.z_close_weight/2
+            loss_dict["z_dist_normed_euclidean"] = -z_dist_loss.detach().cpu().sum().item()
+
 
         # z - w independence loss with MMD
         mmd_loss = MMDIndependenceLoss()
@@ -123,15 +143,15 @@ class DisentanglingObjective(torch.nn.Module):
             lmmd_zw_r = 0
             lmmd_ww_r = 0
             for d, qw_x in enumerate(qw_xs):
-                lmmd_zw_r += mmd_loss(qz_x.mean, qw_x.mean)
+                lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x.mean, qw_x.mean)
                 if r != d:
-                    lmmd_ww_r += mmd_loss(qw_x_r.mean, qw_x.mean)
+                    lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r.mean, qw_x.mean)
 
             loss_dict["mmd_zw"] -= lmmd_zw_r.detach().cpu().sum().item()
             loss_dict["mmd_ww"] -= lmmd_ww_r.detach().cpu().sum().item()
 
-            lws[r] -= lmmd_zw_r * self.mmd_ww_weight
-            lws[r] -= lmmd_ww_r * self.mmd_zw_weight
+            lws[r] = lws[r] - lmmd_zw_r * self.mmd_ww_weight
+            lws[r] = lws[r] - lmmd_ww_r * self.mmd_zw_weight
 
         return torch.stack(lws), torch.stack(uss), loss_dict
 

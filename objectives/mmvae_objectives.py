@@ -115,10 +115,10 @@ def _m_dreg(model,
         for d, px_u in enumerate(px_us[r]):
             wlpips_d = wlpips[d] if hasattr(wlpips, "__getitem__") else wlpips
             if all_combinations:
-                lpx_u_elem = reconstruction_loss(px_u[0], x[d], mod.vaes[d], loss_dict, wlpips_d, lpips, channel_weighting[d], fail_on_nan=True)
-                lpx_u_elem += reconstruction_loss(px_u[1], x[d], mod.vaes[d], loss_dict, wlpips_d, lpips, channel_weighting[d], fail_on_nan=True) * off_combination_weight
+                lpx_u_elem = reconstruction_loss(px_u[0], x[d], mod.vaes[d].llik_scaling, loss_dict, wlpips_d, lpips, channel_weighting[d], fail_on_nan=True)
+                lpx_u_elem += reconstruction_loss(px_u[1], x[d], mod.vaes[d].llik_scaling, loss_dict, wlpips_d, lpips, channel_weighting[d], fail_on_nan=True) * off_combination_weight
             else:
-                lpx_u_elem = reconstruction_loss(px_u, x[d], mod.vaes[d], loss_dict, wlpips_d, lpips, channel_weighting[d], fail_on_nan=True)
+                lpx_u_elem = reconstruction_loss(px_u, x[d], mod.vaes[d].llik_scaling, loss_dict, wlpips_d, lpips, channel_weighting[d], fail_on_nan=True)
             lpx_u.append(lpx_u_elem)
 
         lpx_u = torch.stack(lpx_u).sum(0)

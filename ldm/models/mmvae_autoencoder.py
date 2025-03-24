@@ -4,13 +4,15 @@ import torch.nn as nn
 from ..util import instantiate_from_config, remove_module_prefix
 from torch.distributions import Normal, Laplace
 import torch.nn.functional as F
+from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
 from ..data.dataset_CelebAMask import MMCelebA
+from .z_combiner_net import ZCombinerNet
 
 class MMVAEplus(nn.Module):
     """
     MMVAEplus class definition.
     """
-    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False, stop_self_z_grad=False):
+    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False, stop_self_z_grad=False, z_net_params=None):
         super(MMVAEplus, self).__init__()
         if isinstance(prior_dist, str):
             if prior_dist == 'normal':
@@ -42,6 +44,9 @@ class MMVAEplus(nn.Module):
             nn.Parameter(torch.zeros(1, *z_shape), requires_grad=False)  # logvar
         ])
 
+        if z_net_params is not None:
+            self.z_comb_net = instantiate_from_config(z_net_params)
+
         self.cross_w_mode = cross_w_mode  # Options are "sample" (original MMVAE+), "constant", "zero"
         self.avg_z = avg_z
 
@@ -55,6 +60,9 @@ class MMVAEplus(nn.Module):
         self.factorised_latent_space = True
 
         self.stop_self_z_grad = stop_self_z_grad
+
+        self.use_z_comb_network = False
+
 
         if ckpt_path is not None:
             print("Loading MMVAE checkpoint from {params.ckpt_path}")
@@ -239,12 +247,30 @@ class MMVAEplus(nn.Module):
 
         return recons
 
-    def encode(self, data, avg_z=None):
+    def forward_z_comb_net(self, data, sample=False):
+        *w_dists, z_comb_dist = self.encode(data, return_dist=True, use_z_combnet=True)
+
+        if sample:
+            z = z_comb_dist.sample(squeeze=False)
+            W = [dist.sample(squeeze=False) for dist in w_dists]
+        else:
+            z = z_comb_dist.mean.unsqueeze(0)
+            W = [dist.mean.unsqueeze(0) for dist in w_dists]
+
+        recons = self.decode(torch.cat([*W, z], dim=2), use_kdim=True)
+
+        return [*w_dists, z_comb_dist], recons, [*W, z]
+
+    def encode(self, data, avg_z=None, return_dist=False, use_z_combnet=None):
         if avg_z is None: avg_z = self.avg_z
+        if use_z_combnet is None: use_z_combnet = self.use_z_comb_network
 
         # Encode data into z and W
         zs = []
         W = []
+
+        qz_xs = []
+        qw_xs = []
 
         for dm, vae in zip(data, self.vaes):
             qu_x = vae.encode(dm)
@@ -252,22 +278,39 @@ class MMVAEplus(nn.Module):
             zs.append(latents_z)
             W.append(latents_w)
 
+            if return_dist or use_z_combnet:
+                logvar_w, logvar_z = torch.split(qu_x.logvar, [self.latent_channel_w, self.latent_channel_z], dim=1)
+                qz_xs.append(DiagonalGaussianDistribution(torch.cat([latents_z, logvar_z], dim=1)))
+                qw_xs.append(DiagonalGaussianDistribution(torch.cat([latents_w, logvar_w], dim=1)))
+
         if avg_z:
             z = torch.stack(zs).mean(dim=0)
             full_latent = torch.concat([*W, z], dim=1)
             return full_latent
-        else:
-            return [*W, *zs]
 
-    def decode(self, full_latent):
+        if use_z_combnet:
+            z_comb_dist = self.z_comb_net(qz_xs)
+            if return_dist:
+                return [*qw_xs, z_comb_dist]
+            else:
+                return [*W, z_comb_dist.mean]
+
+        else:
+            if return_dist:
+                return [*qw_xs, *qz_xs]
+            else:
+                return [*W, *zs]
+
+    def decode(self, full_latent, use_kdim=False):
         # convert z and W to image and depth
-        zW = torch.split(full_latent, [*[self.latent_channel_w for _ in range(len(self.vaes))], self.latent_channel_z], dim=1)
+        concat_dim = 2 if use_kdim else 1
+        zW = torch.split(full_latent, [*[self.latent_channel_w for _ in range(len(self.vaes))], self.latent_channel_z], dim=concat_dim)
         z = zW[-1]
         W = zW[:-1]
 
         recons = []
         for vae, w in zip(self.vaes, W):
-            recons.append(vae.decode(torch.cat([w, z], dim=1)))
+            recons.append(vae.decode(torch.cat([w, z], dim=concat_dim)))
 
         return recons
 

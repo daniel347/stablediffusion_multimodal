@@ -42,10 +42,11 @@ model:
         latent_channel_z: 2
         latent_channel_w: 2
         ckpt_path: # "/home/ds3119/multimodal_generation/trained_models/model_8.rar"
+        avg_z: True
 
         vae_params:
           - target: ldm.models.autoencoder.AutoencoderKL  # RGB images
-            params: "/home/ds3119/multimodal_generation/trained_models/checkpoints/"
+            params: #
               ckpt_path: # "/home/ds3119/multimodal_generation/trained_models/model_8.rar"
               embed_dim: 4  #  = latent_channel_z + latent_channel_w
               monitor: val/rec_loss

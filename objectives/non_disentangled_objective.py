@@ -36,12 +36,12 @@ class NonDisentanglingObjective(torch.nn.Module):
         for r, px_u in enumerate(px_us):
             wlpips_r = self.wlpips[r] if hasattr(self.wlpips, "__getitem__") else self.wlpips
             lpx_u = reconstruction_loss(px_u, x[r], self.mod.llik_scales[r], loss_dict, wlpips_r, self.lpips, self.channel_weighting[r])
-            lw += lpx_u
+            lw = lw + lpx_u
 
         for r, qu_x in enumerate(qu_xs):
             l_kl_div = gauss_kl_div_loss(qu_x.mean, qu_x.std).unsqueeze(0)
-            lw -= self.beta * l_kl_div
-            loss_dict["prior"] += l_kl_div.detach().cpu().sum().item()
+            lw = lw - self.beta * l_kl_div
+            loss_dict["prior"] -= l_kl_div.detach().cpu().sum().item()
 
         return lw, uss, loss_dict
 

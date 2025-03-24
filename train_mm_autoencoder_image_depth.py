@@ -31,6 +31,7 @@ import pandas as pd
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
 from objectives import get_objective, train_adversary
+from objectives.mmvae_objectives import m_dreg
 from ldm.data import get_dataset
 
 from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights
@@ -39,8 +40,11 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("Testing the new objective code, starting with just reconstruction (with LPIPS) and regularisation (2.5). Only 100 train iterations. Using the monte carlo kl divergence")
-name = "new_obj_reconstruction_reg_only"
+notes = ("Fine tuning our autoencoder with the z combinor network. We freeze encoders and only train the decoders "
+         "(at small learning rate) and the z combiner network. Other loss parameters are identical. We also only train "
+         "on the reconstructions, not on cross generations. The intention is to improve reconstruction quality and have"
+         " a single fixed z target to aim for")
+name = "z_combiner_train"
 
 
 def expand_sub_confs(conf):
@@ -108,7 +112,7 @@ def initialise_model(conf):
     elif conf.model_initialisation is not None:
         print("Initialising with custom weights")
         model = MMVAEDataParallelWrapper(model)
-        model.load_state_dict(torch.load(conf.model_initialisation))
+        model.load_state_dict(torch.load(conf.model_initialisation), strict=False)
         return model
 
     return MMVAEDataParallelWrapper(model)
@@ -137,6 +141,14 @@ def stack_generation_matrices(mats, data, mode_display_fs=None):
     return out_mat
 
 
+def freeze_encoders(model, data_parallel, freeze=True):
+    vaes = model.module.module.vaes if data_parallel else model.module.vaes
+    for vae in vaes:
+        for param in vae.encoder.parameters():
+            param.requires_grad_(not freeze)
+        vae.quant_conv.requires_grad_(not freeze)
+
+
 def run_training(rank, conf, data_parallel=False, world_size=None):
     try:
         if data_parallel:
@@ -151,8 +163,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print(f"Initialising data-based parallelism with {len(conf.device)} GPUs")
             model = DDP(model, device_ids=[rank])
 
-
-        NUM_VAES = len(model.module.module.vaes) if data_parallel else len(model.module.vaes)
+        mod = model.module.module if data_parallel else model.module
+        vaes = mod.vaes
+        NUM_VAES = len(vaes)
 
         # Set experiment name if not set
         if not conf.experiment:
@@ -192,9 +205,22 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         else:
             run = None
 
+        if "objective_is_z_combiner" in conf.training and conf.training.objective_is_z_combiner:
+            print("Training the z combiner network - Freezing parameters of the "
+                  "encoders and using the z combiner network")
+            freeze_encoders(model, data_parallel, freeze=True)
+            mod.use_z_comb_network = True  # Default to using the z combiner when encoding
+
         # preparation for training
-        optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
-                               lr=conf.training.lr, amsgrad=True)
+        if "lr_decoder" in conf.training and conf.training.lr_decoder is not None:
+            # Use a different learning rate for the decoder, primarily for z combiner training
+            optim_args = [{"params": vae.decoder.parameters(), "lr": conf.training.lr_decoder} for vae in vaes]
+            optim_args += [{"params": vae.post_quant_conv.parameters(), "lr": conf.training.lr_decoder} for vae in vaes]
+            optim_args += [{"params": mod.z_comb_net.parameters(), "lr": conf.training.lr}]
+            optimizer = optim.Adam(optim_args, lr=conf.training.lr, amsgrad=True)
+        else:
+            optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
+                                   lr=conf.training.lr, amsgrad=True)
 
         scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=10),
                                       ExponentialLR(optimizer, 0.99)])
@@ -288,7 +314,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         def train(epoch):
             model.train()
             b_loss = 0
-            loss_series = pd.Series({"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0})
+            loss_series = None
 
             if data_parallel:
                 train_loader.sampler.set_epoch(epoch)
@@ -314,18 +340,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                 else:
                     loss, loss_dict = objective(model, data, K=conf.training.K)
-
                     loss = -loss
-
                     loss.backward()
-                    # print(f"grad norm: {get_total_norm(model.parameters())}")
-                    # grad_norm_sum = (grad_norm_sum + get_total_norm(model.parameters()))/(count + 1)
 
                     if grad_clipper is not None:
                         grad_clipper.autoclip_grad()
                     optimizer.step()
 
-                loss_series -= pd.Series(loss_dict)
+                if loss_series is None:
+                    loss_series = -pd.Series(loss_dict)
+                else:
+                    loss_series -= pd.Series(loss_dict)
 
                 b_loss += loss.detach().item()
                 if conf.print_freq > 0 and i % conf.print_freq == 0:
@@ -343,9 +368,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         grid = make_grid(dbatch, nrow=8)
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
 
-                if i > 100:
-                    break
-
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
             loss_series = loss_series / len(train_loader.dataset)
@@ -357,7 +379,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         def test(epoch):
             b_loss = 0
-            loss_series = pd.Series({"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0})
+            loss_series = None
 
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
             mod = model.module.module if data_parallel else model.module
@@ -370,7 +392,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     loss = -loss
 
                     b_loss += loss.detach().item()
-                    loss_series -= pd.Series(loss_dict)
+
+                    if loss_series is None:
+                        loss_series = -pd.Series(loss_dict)
+                    else:
+                        loss_series -= pd.Series(loss_dict)
 
                     if i == 0 and epoch % 1 == 0:
                         # Compute cross-generations
@@ -395,7 +421,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
 
                         if mod.factorised_latent_space:
-                            for j in range(NUM_VAES):  # Choice of z
+                            num_zs = len(latents) - NUM_VAES
+                            for j in range(num_zs):  # Choice of z
                                 latent_w_img = latents[j]
                                 latent_z_img = latents[j + NUM_VAES]
 
@@ -431,7 +458,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 save_and_log_img(rec, f'Reconstructions/m{k}',
                                                  runPath, display_data_fs[k], epoch, run)
 
-
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
             if enable_wandb:
@@ -442,8 +468,23 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             return epoch_loss
 
+
+        def run_grad_check(model):
+            x = (torch.randn(1, 3, 32, 32, dtype=torch.float32, requires_grad=True, device=device),
+                 (torch.randn(1, 18, 32,32, dtype=torch.float32, requires_grad=True, device=device) > 0.0).float())
+
+            model.train()
+
+            def obj_grad_check(t1, t2):
+                loss, loss_dict = t_objective(model, [t1, t2], K=conf.training.K, test=False)
+                return loss
+
+            grad_check = torch.autograd.gradcheck(obj_grad_check, x, eps=1e-6, atol=1e-4, fast_mode=True)
+            print(f"Grad check result: {grad_check}")
+
+
         with Timer('MMVAEplus') as t:
-            # test(0)
+            test(0)
 
             for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
                 train(epoch)
@@ -469,7 +510,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train_z_combiner.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

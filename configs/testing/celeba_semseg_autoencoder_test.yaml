@@ -1,13 +1,13 @@
 seed: 1
 device: "cuda:1"  # ["cuda:0", "cuda:1"]
-experiment: "MM CelebA Autoencoder (Stable Diffusion)"
+experiment: "MM_CelebA_Autoencoder"
 print_freq: 50
 
 data:
   dataset_name: mm_celeba
   datadir:  ../../datasets/CelebAMask-HQ # ../mmvaeplus/data/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
   input_size: 128
-  modalities: ["colour", "semseg"]
+  modalities: ["colour"]
 
   outputdir: ../outputs
 
@@ -47,6 +47,6 @@ training:
 eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
-model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg.yaml
-model_initialisation: "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_10__22_58_54/model_10.rar"
-init_from_stable_diffusion: False
+model_conf: configs/stable-diffusion/v2-inference-rgb.yaml
+model_initialisation: # "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_10__22_58_54/model_10.rar"
+init_from_stable_diffusion: True

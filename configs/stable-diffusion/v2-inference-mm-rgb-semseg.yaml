@@ -43,10 +43,19 @@ model:
         latent_channel_z: 2
         latent_channel_w: 2
         cross_w_mode: "sample"
-        ckpt_path: "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_10__22_58_54/model_10.rar"  # "../trained_models/celeba_autoencoder_2025_03_04/model_4.rar"
+        ckpt_path: # "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_10__22_58_54/model_10.rar"  # "../trained_models/celeba_autoencoder_2025_03_04/model_4.rar"
         avg_z: False
         all_combinations: False
         stop_self_z_grad: False
+
+        z_net_params:
+          target: ldm.models.z_combiner_net.ZCombinerNet
+          params:
+            z_dim: 2
+            dist_input_output: True  # work in terms of Normal distributions
+            nz: 2
+            ch: 32
+            nblocks: 1
 
         vae_params:
           - target: ldm.models.autoencoder.AutoencoderKL  # RGB images

@@ -47,8 +47,8 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, lpips, chann
             log_probs = log_probs * channel_weighting_d[None, None, :, None, None]
         recon_log_prob = log_probs.view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
 
+    lpx_u_elem = lpx_u_elem + recon_log_prob
     loss_dict["recon_logprob"] += recon_log_prob.detach().cpu().sum().item()
-    lpx_u_elem += recon_log_prob
 
     if fail_on_nan:
         if isinstance(px_u, torch.distributions.Bernoulli) or isinstance(px_u, torch.distributions.Categorical):
@@ -61,8 +61,8 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, lpips, chann
 
     if wlpips_d > 0.0:
         lpips_lpx_u_loss = torch.tensor([lpips(x_di, px_ui) for x_di, px_ui in zip(x_d.view(-1, *x_d.shape[1:]), px_u.mode.view(-1, *x_d.shape[1:]))], device=x_d.device).reshape(*px_u.batch_shape[:2])
+        lpx_u_elem = lpx_u_elem - wlpips_d * lpips_lpx_u_loss
         loss_dict["lpips"] -= lpips_lpx_u_loss.detach().cpu().sum().item()
-        lpx_u_elem += - wlpips_d * lpips_lpx_u_loss
 
     if fail_on_nan:
         assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpips)"
@@ -85,7 +85,7 @@ def train_adversary(real_data, px_us, discriminator, optimiser, device):
     real_loss = torch.nn.functional.binary_cross_entropy(real_output, real_labels) * weight_real
     fake_loss = 0
     for out in fake_outputs_detach:
-        fake_loss += torch.nn.functional.binary_cross_entropy(out, fake_labels) * weight_fake
+        fake_loss = fake_loss + torch.nn.functional.binary_cross_entropy(out, fake_labels) * weight_fake
 
     disc_loss = real_loss + fake_loss
     disc_loss.backward()
@@ -94,7 +94,7 @@ def train_adversary(real_data, px_us, discriminator, optimiser, device):
     fake_outputs = [torch.stack(discriminator(px_u), dim=1) for px_u in px_us]
     autoencoder_loss = 0
     for out in fake_outputs:
-        autoencoder_loss += torch.nn.functional.binary_cross_entropy(out, real_labels) * weight_fake
+        autoencoder_loss = autoencoder_loss + torch.nn.functional.binary_cross_entropy(out, real_labels) * weight_fake
 
     return disc_loss, autoencoder_loss
 

@@ -374,26 +374,42 @@ def run_testing(rank, conf, data_parallel=False, world_size=None):
         def decode_encode_latent():
             # Note this is a simple test designed for unimodal data (ie StableIndigo work)
             # - I should make a different file but im a little lazy
-            vaes = model.module.module.vaes if data_parallel else model.module.vaes
-
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = unpack_data_nyu(dataT, device=device)
 
-                    latents = model.module("encode", data, avg_z=avg_z) if data_parallel else model("encode", data,
-                                                                                                    avg_z=avg_z)
+                    mod = model.module if data_parallel else model
 
-                    if avg_z:
-                        reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
+                    latents = mod("encode", data, avg_z=True)
 
+                    latents_perturbed = latents + (0.05 * torch.std(latents)) * torch.randn_like(latents)
+
+                    reconstructions = mod("decode", latents)
+                    reconstructions_perturbed = mod("decode", latents_perturbed)
+
+                    reencoded_latents = mod("encode", [reconstructions_perturbed[0].mean], avg_z=True)
+                    reencoded_latents_perturbed = mod("encode", [reconstructions_perturbed[0].mean], avg_z=True)
+
+                    save_and_log_latents(latents.detach().cpu(), f'Latents/original', runPath, i, run)
+                    save_and_log_latents(latents_perturbed.detach().cpu(), f'Latents/perturbed', runPath, i, run)
+                    save_and_log_latents(reencoded_latents.detach().cpu(), f'Latents/reencoded', runPath, i, run)
+                    save_and_log_latents(reencoded_latents_perturbed.detach().cpu(), f'Latents/perturbed_reencoded', runPath, i, run)
+
+                    save_and_log_img(data[0].detach().cpu(), f'Data/input', runPath, display_data_fs[0], i, run)
+                    save_and_log_img(reconstructions[0], f'Reconstructions/non_perturbed', runPath, display_data_fs[0], i, run)
+                    save_and_log_img(reconstructions_perturbed[0], f'Reconstructions/perturbed', runPath, display_data_fs[0], i, run)
+
+                    if i > 5:
+                        break
 
 
         with Timer('MMVAEplus') as t:
             # check_z_closeness(16)
-            visualise_latents(64, avg_z=False)
+            # visualise_latents(64, avg_z=False)
             # check_learned_prior_params()
+            decode_encode_latent()
 
 
     finally:
