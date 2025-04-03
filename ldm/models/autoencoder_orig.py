@@ -244,3 +244,9 @@ class AutoencoderOrigWrapper(AutoencoderKL):
     def decode(self, z, **kwargs):
         mean = super(AutoencoderOrigWrapper, self).decode(z)
         return [Laplace(loc=mean, scale=torch.ones_like(mean))]
+
+    def scale_latents(self, z, reverse=False):
+        if reverse:
+            return z / 0.18215
+        else:
+            return z * 0.18215

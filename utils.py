@@ -14,6 +14,7 @@ from scipy.optimize import linear_sum_assignment as linear_assignment
 from torchvision.utils import make_grid, save_image
 from pathlib import Path
 import wandb
+from omegaconf import OmegaConf
 
 # Constants
 class Constants(object):
@@ -250,6 +251,7 @@ def duplicate_stable_diff_weights(sd_weights, vae):
         if source_key not in target_dict:
             del sd_weights[source_key]
             print(f"Deleting key: {source_key}")
+            continue
 
         if target_dict[source_key].shape != source_value.shape:
             if (len(target_dict[source_key].shape) == len(source_value.shape) == 4):
@@ -260,14 +262,14 @@ def duplicate_stable_diff_weights(sd_weights, vae):
 
                 source_value = source_value.repeat(math.ceil(out_mult), math.ceil(in_mult), 1, 1) / math.sqrt(out_mult)
                 source_value = source_value[:target_dict[source_key].shape[0], :target_dict[source_key].shape[1], :, :]
-                print(f"Dupicated conv weights: {source_key} by input factor {in_mult} and output factor {out_mult}")
+                print(f"Duplicated conv weights: {source_key} by input factor {in_mult} and output factor {out_mult}")
 
             elif (len(target_dict[source_key].shape) == len(source_value.shape) == 1):
                 # Conv bias
                 out_mult = float(target_dict[source_key].shape[0]) / source_value.shape[0]
                 source_value = source_value.repeat(math.ceil(out_mult)) / out_mult
                 source_value = source_value[:target_dict[source_key].shape[0]]
-                print(f"Dupicated bias: {source_key} by output factor {out_mult}")
+                print(f"Duplicated bias: {source_key} by output factor {out_mult}")
 
             else:
                 print(f"Could not duplicate weights for layer: {source_key}")
@@ -277,5 +279,48 @@ def duplicate_stable_diff_weights(sd_weights, vae):
     return sd_weights
 
 
+def expand_sub_confs(conf):
+    # Expand sub-configs
+    for key, val in conf.items():
+        if key[-4:] == "conf":
+            subconf = OmegaConf.load(val)
+            conf[key] = expand_sub_confs(subconf)
+    return conf
 
 
+def move_data_to_device(data, device="cuda"):
+    if isinstance(data, torch.Tensor):
+        return data.to(device)
+    elif isinstance(data, tuple) or isinstance(data, list):
+        return [move_data_to_device(d, device) for d in data]
+
+
+def override_config(conf, overrides):
+    for key, val in overrides.items():
+        print(f"overriding : {key} with value {val}")
+        key_stages = key.split(".")
+
+        if any(isinstance(val, t) for t in [np.int64, np.str_, np.float32, np.float64]):
+            val = val.item()
+
+        try:
+            conf_val = conf
+            for k in key_stages[:-1]:
+                if "[" in k:
+                    # If there is an array index
+                    conf_val = conf_val[k.split("[")[0]]
+                    conf_val = conf_val[int(k.split("[")[1][:-1])]
+                else:
+                    conf_val = conf_val[k]
+
+            if "[" in key_stages[-1]:
+                # handle array index
+                conf_val = conf_val[key_stages[-1].split("[")[0]]
+                conf_val[int(key_stages[-1].split("[")[1][:-1])] = val
+            else:
+                conf_val[key_stages[-1]] = val
+
+        except (IndexError, KeyError):
+            print(f"Could not override key: {key}")
+
+    return conf

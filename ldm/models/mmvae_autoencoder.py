@@ -47,6 +47,10 @@ class MMVAEplus(nn.Module):
         if z_net_params is not None:
             self.z_comb_net = instantiate_from_config(z_net_params)
 
+        total_latent_channels = self.w_channels * len(self.vaes) + self.z_channels
+        self.latent_mean = nn.Parameter(torch.zeros(total_latent_channels))
+        self.latent_scale = nn.Parameter(torch.ones(total_latent_channels) * 1.0 / 0.18215)
+
         self.cross_w_mode = cross_w_mode  # Options are "sample" (original MMVAE+), "constant", "zero"
         self.avg_z = avg_z
 
@@ -289,6 +293,7 @@ class MMVAEplus(nn.Module):
             return full_latent
 
         if use_z_combnet:
+            print("Using combnet")
             z_comb_dist = self.z_comb_net(qz_xs)
             if return_dist:
                 return [*qw_xs, z_comb_dist]
@@ -335,3 +340,9 @@ class MMVAEplus(nn.Module):
                 px_u = vae.decode(latents)
                 data.append(px_u.mean.view(-1, *px_u.mean.size()[2:]))
         return data  # list of generations---one for each modality
+
+    def scale_latents(self, latents, reverse=False):
+        if reverse:
+            return (latents * self.latent_scale[None, :, None, None]) + self.latent_mean[None, :, None, None]
+        else:
+            return (latents - self.latent_mean[None, :, None, None]) / self.latent_scale[None, :, None, None]

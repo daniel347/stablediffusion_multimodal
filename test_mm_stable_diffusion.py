@@ -29,13 +29,12 @@ from ldm.data import get_dataset
 import pyiqa
 import copy
 
-from utils import save_and_log_latents, save_and_log_img
+from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights
 
 enable_wandb = False
 
-notes = ("Training diffusion using our best autoencoder with computed normalisation constant and 32 bit precision. We "
-         "initialise with duplicated stable diffusion weights, which should make a fair comparison to our factorised model")
-name = "z_dist_ae_computed_norm_32_bit"
+notes = ("Testing the original stable diffusion weights for generation.")
+name = "orig_stable_diff"
 
 def expand_sub_confs(conf):
     # Expand sub-configs
@@ -62,7 +61,46 @@ def initialise_model(conf):
     model = instantiate_from_config(conf["model_conf"]["model"])
 
     if conf.init_from_stable_diffusion:
-        raise NotImplementedError("Initialising from stable diffusion not implemented")
+        sd_state_dict = torch.load("checkpoints/v2-1_512-ema-pruned.ckpt")
+        u_net_dict = {}
+        for name, param in sd_state_dict["state_dict"].items():
+            if "model.diffusion_model." in name:
+                new_name = name.split("model.diffusion_model.")[1]
+                u_net_dict[new_name] = param
+
+        M, U = model.model.load_state_dict(u_net_dict, strict=False)
+        for m in M:
+            print(f"Missing key: {m}")
+        for u in U:
+            print(f"Unused key: {u}")
+
+        first_stage_dict = {}
+        for name, param in sd_state_dict["state_dict"].items():
+            if "first_stage_model" in name:
+                new_name = name.split("first_stage_model.")[1]
+                first_stage_dict[new_name] = param
+
+        for vae in model.vaes:
+            ignore_keys = ["encoder.conv_in", "decoder.conv_out"] if vae.is_semseg else []
+            ignore_keys += ["encoder.conv_out", "quant_conv", "decoder.conv_in", "post_quant_conv"] if \
+            vae.decoder.z_shape[1] != 4 else []
+            sd = copy.deepcopy(first_stage_dict)
+            keys = list(sd.keys())
+            for k in keys:
+                for ik in ignore_keys:
+                    if k.startswith(ik):
+                        print("Deleting key {} from state_dict.".format(k))
+                        del sd[k]
+
+            # If we have doubled the number of channels we must go though and double all the initialisation weight shapes
+            sd = duplicate_stable_diff_weights(sd, vae)
+
+            M, U = vae.load_state_dict(sd, strict=False)
+            for m in M:
+                print(f"Missing key: {m}")
+            for u in U:
+                print(f"Unused key: {u}")
+
 
     elif conf.model_initialisation is not None:
         print("Initialising with custom weights")
@@ -189,9 +227,10 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
 
         scheduler_step_freq = 25
 
-
         train_dataset, test_dataset = load_image_datasets(conf)
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
+
+        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in conf.data.modality]
 
         def move_data_to_device(data, device="cuda"):
             if isinstance(data, torch.Tensor):
@@ -199,17 +238,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
             elif isinstance(data, tuple) or isinstance(data, list):
                 return [move_data_to_device(d, device) for d in data]
 
-        best_test_loss = 10000
-        test_worseining_count = 0
-        early_stop = False
-
         total_latent_channels = model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels
-        latent_mean = torch.zeros(total_latent_channels, device=device)
-        latent_scale = torch.ones(total_latent_channels, device=device) * 1.0 / 0.18215
-
-        scaling = torch.load("")
-        latent_mean = scaling["latent_mean"].to(device)
-        latent_scale = scaling["latent_scale"].to(device)
 
         def test_epoch(epoch):
             # TODO update this
@@ -230,15 +259,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
 
                     if i == 0 and epoch % 1 == 0:
                         # Perform test generations
-                        N_gen = 8
-                        samples_zw = model.module.sample(None, batch_size=N_gen) if data_parallel else model.sample(
-                            None, batch_size=N_gen)
-                        samples_x = model_first_stage.decode(samples_zw)
-
-                        for m in range(NUM_VAES):
-                            samples_x_grid = make_grid(samples_x[m].mean, nrow=2)
-                            print(samples_x_grid.shape)
-                            if enable_wandb: wandb.log({f'Generation/m{m}': wandb.Image(samples_x_grid)}, step=epoch)
+                        generate_unconditional_samples(epoch, 8, 8)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -246,6 +267,18 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
 
             return epoch_loss
+
+        def generate_unconditional_samples(epoch, n_samples=32, gen_batch=8):
+            mod = model.module if data_parallel else model
+
+            for i in range(n_samples // gen_batch):
+                samples_zw = mod.sample(None, batch_size=gen_batch)
+                samples_zw = model_first_stage.scale_latents(samples_zw, reverse=True)
+
+                samples_x = model_first_stage.decode(samples_zw)
+
+                for m in range(len(samples_x)):
+                    save_and_log_img(samples_x[m], f'Generation/m{m}_{i}', runPath, display_data_fs[m], epoch, run, nrow=4)
 
 
         def visualise_generated_latents(n_samples=32):
@@ -267,8 +300,8 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
                         latents = model.module.sample(None, batch_size=gen_batch_size)
                     else:
                         latents = model.sample(None, batch_size=gen_batch_size)
+                    latents = model_first_stage.scale_latents(latents, reverse=True)
 
-                    latents = latents * latent_scale[None, :, None, None] + latent_mean[None, :, None, None]
                     reconstructions = model_first_stage.decode(latents)
 
                     for j in range(NUM_VAES):
@@ -286,9 +319,8 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
                             wandb.log({'Latents/wm{}'.format(j): wandb.Image(latent_img)}, step=n)
                             wandb.log({f'Reconstructions/m{j}': wandb.Image(reconstructions[j].mean)}, step=n)
 
-                        save_and_log_img(samples_x[m], f'Generation/m{m}',
-                                         runPath, display_data_fs[m], epoch, run, wandb_kwargs=wandb_kwargs,
-                                         save_kwargs={}, nrow=4)
+                        save_and_log_img(reconstructions[j], f'Reconstructions/m{j}', runPath, display_data_fs[j], 0, run)
+                        save_and_log_latents(latent_img, f'Latents/wm{j}', runPath, 0, run)
 
                         *latents_w, latents_z = torch.split(latents,
                                                             [model_first_stage.w_channels for _ in range(NUM_VAES)] + [
@@ -360,7 +392,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
 
 
         with Timer('MMVAEplus') as t:
-            visualise_generated_latents(3)
+            generate_unconditional_samples(0, 32, 8)
 
     finally:
         if data_parallel:
@@ -368,7 +400,7 @@ def run_testing(rank, conf, data_parallel=False, world_size=None, ray_tune=False
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/testing/", config_name="stable_diffusion_test.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

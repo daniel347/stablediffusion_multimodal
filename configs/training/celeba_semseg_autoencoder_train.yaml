@@ -3,6 +3,10 @@ device: "cuda:1"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Autoencoder"
 print_freq: 50
 
+function:
+  name: training_loop
+  kwargs:
+
 data:
   dataset_name: mm_celeba
   datadir:  ../../datasets/CelebAMask-HQ # ../mmvaeplus/data/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ

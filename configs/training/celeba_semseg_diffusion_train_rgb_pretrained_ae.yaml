@@ -3,6 +3,10 @@ device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Stable_Diffusion"
 print_freq: 50
 
+function:
+  name: training_loop
+  kwargs:
+
 data:
   dataset_name: mm_celeba
   root_data_dir:  ../../datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ

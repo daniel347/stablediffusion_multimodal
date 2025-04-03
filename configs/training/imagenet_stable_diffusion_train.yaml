@@ -3,6 +3,10 @@ device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "ImageNet_Stable_Diffusion"
 print_freq: 50
 
+function:
+  name: training_loop
+  kwargs:
+
 data:
   dataset_name: "imagenet"
   datadir: ../../datasets/imagenet/ILSVRC/Data/CLS-LOC # /home/ds3119/multimodal_generation/stablediffusion/tests/imagenet_mock

@@ -211,6 +211,7 @@ class DDPM(pl.LightningModule):
         if "state_dict" in list(sd.keys()):
             sd = sd["state_dict"]
         keys = list(sd.keys())
+
         for k in keys:
             for ik in ignore_keys:
                 if k.startswith(ik):

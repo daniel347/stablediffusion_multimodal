@@ -1,5 +1,6 @@
 from abc import abstractmethod
 import math
+from typing import Mapping, Any
 
 import numpy as np
 import torch as th
@@ -812,3 +813,17 @@ class UNetModel(nn.Module):
             return self.id_predictor(h)
         else:
             return self.out(h)
+
+    def load_state_dict(self, state_dict, **kwargs):
+        target_dict = self.state_dict()
+        for source_key, source_value in state_dict.items():
+            if source_key not in target_dict:
+                continue
+
+            if target_dict[source_key].shape != source_value.shape:
+                if len(target_dict[source_key].shape) > len(source_value.shape):
+                    state_dict[source_key] = source_value.unsqueeze(-1)
+                else:
+                    state_dict[source_key] = source_value.squeeze(-1)
+
+        return super().load_state_dict(state_dict, **kwargs)

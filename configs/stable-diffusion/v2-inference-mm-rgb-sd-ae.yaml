@@ -13,8 +13,10 @@ model:
     cond_stage_trainable: false
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
+    make_it_fit: True
     scale_factor: 0.18215
     use_ema: True
+    ckpt_path: # "checkpoints/v2-1_512-ema-pruned.ckpt"
     reset_num_ema_updates: False
 
     unet_config:
@@ -41,7 +43,6 @@ model:
       params:
         embed_dim: 4
         monitor: val/rec_loss
-        ckpt_path: "checkpoints/v2-1_512-ema-pruned.ckpt"
         ckpt_is_full_sd: True
         ddconfig:
           #attn_type: "vanilla-xformers"

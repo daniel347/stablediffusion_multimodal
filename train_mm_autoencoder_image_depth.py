@@ -14,6 +14,8 @@ from functools import partial
 import numpy as np
 import matplotlib
 matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import seaborn as sns
 import wandb
 
 import torch
@@ -34,7 +36,7 @@ from objectives import get_objective, train_adversary
 from objectives.mmvae_objectives import m_dreg
 from ldm.data import get_dataset
 
-from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights
+from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs, move_data_to_device
 
 import pyiqa
 
@@ -45,15 +47,6 @@ notes = ("Fine tuning our autoencoder with the z combinor network. We freeze enc
          "on the reconstructions, not on cross generations. The intention is to improve reconstruction quality and have"
          " a single fixed z target to aim for")
 name = "z_combiner_train"
-
-
-def expand_sub_confs(conf):
-    # Expand sub-configs
-    for key, val in conf.items():
-        if key[-4:] == "conf":
-            subconf = OmegaConf.load(val)
-            conf[key] = expand_sub_confs(subconf)
-    return conf
 
 
 def setup(rank, world_size):
@@ -283,9 +276,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             for _ in range(len(train_loader)//scheduler_step_freq):
                 scheduler.step()
 
-        def move_data_to_device(data, device="cuda"):
-            return [d.to(device) for d in data]
-
         objective_opts = OmegaConf.to_container(conf.training.objective.params)
         if objective_opts["channel_weighting"] is not None:
             print("using inverse class frequency weighting for semantic segmentation loss")
@@ -483,26 +473,118 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print(f"Grad check result: {grad_check}")
 
 
-        with Timer('MMVAEplus') as t:
-            test(0)
+        def check_z_closeness(n_samples=10):
+            with torch.no_grad():
 
-            for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
-                train(epoch)
-                test_loss = test(epoch)
+                z_mses = []
+                z_mags = [[] for _ in range(NUM_VAES)]
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
+                    data = move_data_to_device(dataT, device=device)
 
-                if test_loss < best_test_loss:
-                    best_test_loss = test_loss
-                    test_worsening_count = 0
+                    latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
+                    latents_z = latents[NUM_VAES:]
 
-                if rank == 0 or not data_parallel:
-                    save_model_light(model.module if data_parallel else model,
-                                    runPath + '/model_' + str(epoch) + '.rar')
-                
-                else:
-                    test_worsening_count += 1
-                    if test_worsening_count > conf.training.patience:
-                        print(f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
+                    if enable_wandb:
+                        for m, lat_z in enumerate(latents_z):
+                            wandb.log({f'Latents/z_enc_{m}': wandb.Image(lat_z)}, step=i)
+
+                    z_mse = torch.linalg.vector_norm(latents_z[0] - latents_z[1], dim=(1, 2, 3))
+                    z_mses.append(z_mse.detach().cpu())
+
+                    for j in range(NUM_VAES):
+                        z_mags[j].append(torch.linalg.vector_norm(latents_z[j], dim=(1,2,3)).detach().cpu())
+
+                    if (i + 1) * conf.training.batch_size >= n_samples:
                         break
+
+                z_mses = torch.cat(z_mses)
+                z_mags = [torch.cat(m) for m in z_mags]
+
+                data = pd.DataFrame({"z_mse": z_mses, **{f"z{j}_mag": z_mags[j] for j in range(NUM_VAES)}})
+
+                plot = sns.histplot(data=data, kde=True)
+                plot_save_path = os.path.join(runPath, f"z_mse_dists.png")
+                plt.savefig(plot_save_path, dpi=300)
+
+                if enable_wandb:
+                    wandb.log({'z_mse': wandb.Histogram(z_mses, num_bins=20)}, step=i+1)
+
+        def check_learned_prior_params(epoch):
+            vaes = model.module.module.vaes if data_parallel else model.module.vaes
+
+            def save_log_print_params(params, name):
+                mean = params[0].detach().cpu().transpose(0, 1)
+                var = params[1].detach().cpu().transpose(0, 1)
+
+                print(f"{name} variance {var.mean()}, min: {var.min()}, max: {var.max()}")
+                save_and_log_latents(mean, name+"_mean", runPath, epoch, run)
+                save_and_log_latents(var, name+"_std", runPath, epoch, run)
+
+            for m, vae in enumerate(vaes):
+                save_log_print_params(vae.pw_params_aux, f"prior/pw_aux{m}")
+
+            save_log_print_params(model.module.pw_params, f"prior/pw_global")
+            save_log_print_params(model.module.pz_params, f"prior/pz_global")
+
+        def decode_encode_latent():
+            # Note this is a simple test designed for unimodal data (ie StableIndigo work)
+            # - I should make a different file but im a little lazy
+
+            with torch.no_grad():
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
+                                          position=rank if data_parallel else 0):
+                    data = move_data_to_device(dataT, device=device)
+
+                    mod = model.module if data_parallel else model
+
+                    latents = mod("encode", data, avg_z=True)
+
+                    latents_perturbed = latents + (0.05 * torch.std(latents)) * torch.randn_like(latents)
+
+                    reconstructions = mod("decode", latents)
+                    reconstructions_perturbed = mod("decode", latents_perturbed)
+
+                    reencoded_latents = mod("encode", [reconstructions_perturbed[0].mean], avg_z=True)
+                    reencoded_latents_perturbed = mod("encode", [reconstructions_perturbed[0].mean], avg_z=True)
+
+                    save_and_log_latents(latents.detach().cpu(), f'Latents/original', runPath, i, run)
+                    save_and_log_latents(latents_perturbed.detach().cpu(), f'Latents/perturbed', runPath, i, run)
+                    save_and_log_latents(reencoded_latents.detach().cpu(), f'Latents/reencoded', runPath, i, run)
+                    save_and_log_latents(reencoded_latents_perturbed.detach().cpu(), f'Latents/perturbed_reencoded', runPath, i, run)
+
+                    save_and_log_img(data[0].detach().cpu(), f'Data/input', runPath, display_data_fs[0], i, run)
+                    save_and_log_img(reconstructions[0], f'Reconstructions/non_perturbed', runPath, display_data_fs[0], i, run)
+                    save_and_log_img(reconstructions_perturbed[0], f'Reconstructions/perturbed', runPath, display_data_fs[0], i, run)
+
+                    if i > 5:
+                        break
+
+        def training_loop():
+            with Timer('MMVAEplus') as t:
+                test(0)
+
+                for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
+                    train(epoch)
+                    test_loss = test(epoch)
+
+                    if test_loss < best_test_loss:
+                        best_test_loss = test_loss
+                        test_worsening_count = 0
+
+                    if rank == 0 or not data_parallel:
+                        save_model_light(model.module if data_parallel else model,
+                                        runPath + '/model_' + str(epoch) + '.rar')
+
+                    else:
+                        test_worsening_count += 1
+                        if test_worsening_count > conf.training.patience:
+                            print(f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
+                            break
+
+        if conf.function.name is not None:
+            locals()[conf.function.name](**conf.function.params)
+        else:
+            training_loop()
 
     finally:
         if data_parallel:

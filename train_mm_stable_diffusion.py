@@ -18,7 +18,7 @@ import torch
 from torch import optim
 from torchvision.transforms import v2
 from torchvision.utils import make_grid
-from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR
+from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR, CosineAnnealingWarmRestarts
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -26,32 +26,34 @@ import torch.multiprocessing as mp
 import torchvision.utils as tvu
 from torch.amp import GradScaler, autocast
 
+import ray
+from ray import tune
 from ray import train
 from ray.train import Checkpoint, get_checkpoint
+from ray.tune.schedulers import ASHAScheduler, HyperBandForBOHB
+from ray.tune.search.bohb import TuneBOHB
 import ray.cloudpickle as pickle
 import tempfile
 import sys
+import logging
 
-from ldm.util import instantiate_from_config, Timer, save_model_light
+from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
 from ldm.data import get_dataset
 import pyiqa
-from utils import save_and_log_latents, save_and_log_img
+from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, duplicate_stable_diff_weights, move_data_to_device, override_config
 
 import random
+from functools import partial
 
 enable_wandb = True
+optimise_hyperparameters = False
+log_iterations = True
 
-notes = ("Training diffusion using our best autoencoder with the z dist penalty and random z choice. Test the FID of colour generations")
-name = "test_z_dist_ae_computed_norm_32_bit_diffusion"
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-
-def expand_sub_confs(conf):
-    # Expand sub-configs
-    for key, val in conf.items():
-        if key[-4:] == "conf":
-            subconf = OmegaConf.load(val)
-            conf[key] = expand_sub_confs(subconf)
-    return conf
+notes = ("Apply the new hyperperameters and cosine annealing learning rate")
+name = "diff_cos_anneal"
 
 
 def setup(rank, world_size):
@@ -119,7 +121,49 @@ def initialise_model(conf):
     model = instantiate_from_config(conf["model_conf"]["model"])
 
     if conf.init_from_stable_diffusion:
-        raise NotImplementedError("Initialising from stable diffusion not implemented")
+        # sd_state_dict = torch.load("checkpoints/sd-v1-4.ckpt")
+        model.init_from_ckpt("checkpoints/v2-1_512-ema-pruned.ckpt")
+
+        """
+        u_net_dict = {}
+        for name, param in sd_state_dict["state_dict"].items():
+            if "model.diffusion_model." in name:
+                new_name = name.split("model.diffusion_model.")[1]
+                u_net_dict[new_name] = param
+
+        M, U = model.model.load_state_dict(u_net_dict, strict=False)
+        for m in M:
+            print(f"Missing key: {m}")
+        for u in U:
+            print(f"Unused key: {u}")
+
+        first_stage_dict = {}
+        for name, param in sd_state_dict["state_dict"].items():
+            if "first_stage_model" in name:
+                new_name = name.split("first_stage_model.")[1]
+                first_stage_dict[new_name] = param
+
+        for vae in model.vaes:
+            ignore_keys = ["encoder.conv_in", "decoder.conv_out"] if vae.is_semseg else []
+            ignore_keys += ["encoder.conv_out", "quant_conv", "decoder.conv_in", "post_quant_conv"] if \
+            vae.decoder.z_shape[1] != 4 else []
+            sd = copy.deepcopy(first_stage_dict)
+            keys = list(sd.keys())
+            for k in keys:
+                for ik in ignore_keys:
+                    if k.startswith(ik):
+                        print("Deleting key {} from state_dict.".format(k))
+                        del sd[k]
+
+            # If we have doubled the number of channels we must go though and double all the initialisation weight shapes
+            sd = duplicate_stable_diff_weights(sd, vae)
+
+            M, U = vae.load_state_dict(sd, strict=False)
+            for m in M:
+                print(f"Missing key: {m}")
+            for u in U:
+                print(f"Unused key: {u}")
+        """
 
     elif conf.model_initialisation is not None:
         print("Initialising with custom weights")
@@ -127,55 +171,42 @@ def initialise_model(conf):
 
     return model
 
-def stack_generation_matrices(mats, data):
-    # Given a list of N_gen cross and self generation matrices, get them into a single matix
-    n_modes = len(mats[0])
-    n_inputs = data[0].shape[0]
 
-    out_mat = [[None for _ in range(n_modes)] for _ in range(n_modes)]
-    for i in range(n_modes):
-        for j in range(n_modes):
-            img_shape = (3, *mats[0][i][j].shape[3:])
-            input_data = data[i].unsqueeze(0).detach().cpu()
-            output_data = [m[i][j].detach().cpu() for m in mats]
-
-            if i == 1:
-                input_data = input_data.repeat(1, 1, 3, 1, 1)
-            if j == 1:
-                output_data = [m.repeat(1, 1, 3, 1, 1) for m in output_data]
-            out_mat[i][j] = make_grid(torch.cat([input_data] + output_data, dim=0).view(-1, *img_shape),
-                                      nrow=n_inputs)
-
-    return out_mat
+def cat_dists_or_tensor_latents(latents):
+    if all([isinstance(l, torch.Tensor) for l in latents]):
+        # Tensors
+        latents = torch.cat(latents, dim=1)
+    else:
+        # Distributions
+        latents = torch.cat([l.mean for l in latents], dim=1)
+    return latents
 
 
 def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode):
     avg_z = z_mode == "avg"
     random_z = z_mode == "random"
+    channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_channels
 
     if conf.training.precompute_latents:
         latents = data
     else:
         latents = model_first_stage.encode(data, avg_z=avg_z)
 
-    channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_channels
-
-    if random_z or (avg_z and latents.shape[1] > channel_u) or isinstance(z_mode, int):
-        latents_split = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [
-            model_first_stage.z_channels for _ in range(NUM_VAES)], dim=1)
-        latents_w = latents_split[:NUM_VAES]
-        if random_z:
-            latent_z = random.choice(latents_split[NUM_VAES:])
-            latents = torch.cat([*latents_w, latent_z], dim=1)
-        elif avg_z:
-            latent_z = torch.mean(torch.stack(latents_split[NUM_VAES:]), dim=0)
-            latents = torch.cat([*latents_w, latent_z], dim=1)
-        elif isinstance(z_mode, int):
-            latents = torch.cat([*latents_w, latents_split[NUM_VAES + z_mode]], dim=1)
+    if isinstance(latents, torch.Tensor):
+        if latents.shape[1] == channel_u:
+            return latents
         else:
-            raise ValueError("Unrecognised z_mode")
+            latents = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [
+            model_first_stage.z_channels for _ in range(NUM_VAES)], dim=1)
+        
+    if isinstance(latents, list):
+        if len(latents) > NUM_VAES + 1:
+            assert (random_z or isinstance(z_mode, int)), "One of average or random z must be set or a integer supplied to choose one z, or the z-combiner must be used"
+            latents = [*latents[:NUM_VAES], random.choice(latents[NUM_VAES:])]
+            return cat_dists_or_tensor_latents(latents)
 
-    return latents
+        else:
+            return cat_dists_or_tensor_latents(latents)
 
 
 def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=False, enable_pbars=True):
@@ -183,13 +214,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if data_parallel:
             setup(rank, world_size)
 
+        print("Working directory: ", os.getcwd())
+
         use_mixed_precision = conf.training.use_mixed_precision
         conf["model_conf"]["model"]["params"]["unet_config"]["params"]["use_fp16"] = use_mixed_precision
         if use_mixed_precision:
             print("Using mixed precision training")
             scaler = GradScaler()
 
-        # Initialise with SD model?
+        # Initialise the model
+        if "ckpt_path" not in conf.model_conf.model.params.first_stage_config.params or \
+                conf.model_conf.model.params.first_stage_config.params.ckpt_path is None:
+            logger.warning("No checkpoint path for first stage! This is could be unintentional")
         model = initialise_model(conf)
         device = rank
         model = model.to(device)
@@ -221,10 +257,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if rank == 0 or not data_parallel:
             experiment_dir = Path(os.path.join(conf.data.outputdir, conf.experiment, "checkpoints"))
             experiment_dir.mkdir(parents=True, exist_ok=True)
-            runPath = os.path.join(str(experiment_dir), runId)
-            if os.path.exists(runPath):
+            runPath = experiment_dir / runId
+            if runPath.exists():
                 shutil.rmtree(runPath)
-            os.makedirs(runPath)
+            runPath.mkdir(parents=True, exist_ok=True)
             print('Expt:', runPath)
             print('RunID:', runId)
 
@@ -253,10 +289,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
                                lr=conf.training.lr, amsgrad=True)
 
-        scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=10),
-                                      ExponentialLR(optimizer, conf.training.gamma)])
+        grad_clipper = None
+        if "grad_clipper" in conf.training:
+            grad_clipper = GradAutoClipper(model, **conf.training.grad_clipper)
 
-        scheduler_step_freq = 25
+        scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=200),
+                                      CosineAnnealingWarmRestarts(optimizer, 4000, 1, eta_min=0.1 * conf.training.lr)])
+                                      # ExponentialLR(optimizer, conf.training.gamma)])
+        scheduler_step_freq = 1
 
         start_epoch = None
 
@@ -294,33 +334,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         modalities = conf.data.modality
         avg_z = conf.training.z_mode == "avg"
         random_z = conf.training.z_mode == "random"
+        z_combiner = conf.training.z_mode == "z_combiner"
+        
+        if z_combiner:
+            model_first_stage.use_z_comb_network = True
 
         # Set the learning rate forward to continue training after pause
         if conf.training.start_epoch > 0:
-            for _ in range(len(train_loader)//scheduler_step_freq):
+            for _ in range((len(train_loader) * conf.training.start_epoch)//scheduler_step_freq):
                 scheduler.step()
-
-        def unpack_data_nyu(data, device="cuda", has_class=False, is_latent=False):
-            if has_class:
-                return unpack_data_nyu(data[0], device=device, is_latent=is_latent), data[1].to(device)
-            elif is_latent:
-                return data.to(device)
-            else:
-                return [d.to(device) for d in data]
-
-        def move_data_to_device(data, device="cuda"):
-            if isinstance(data, torch.Tensor):
-                return data.to(device)
-            elif isinstance(data, tuple) or isinstance(data, list):
-                return [move_data_to_device(d, device) for d in data]
-
-        best_test_loss = 10000
-        test_worseining_count = 0
-        early_stop = False
-
-        total_latent_channels = model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels if model_first_stage.factorised_latent_space else model_first_stage.u_channels
-        latent_mean = torch.zeros(total_latent_channels, device=device)
-        latent_scale = torch.ones(total_latent_channels, device=device) * 1.0/0.18215
 
         def get_latent_scale_factor(data_loader, n_batches=1):
             if enable_pbars:
@@ -357,7 +379,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             model.eval()
 
             if data_parallel:
-                dataloader.sampler.set_epoch(epoch)
+                dataloader.sampler.set_epoch(0)
 
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(dataloader), total=len(dataloader),
@@ -420,23 +442,33 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 optimizer.zero_grad()
 
                 latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
-                latents = (latents - latent_mean[None, :, None, None]) / latent_scale[None, :, None, None]
+                latents = model_first_stage.scale_latents(latents)
+
+                logging.debug(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latent.mean(dim=(0, 2, 3))}")
 
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
                         loss, loss_dict = model(latents, c=(classes if return_class else None))
 
                     scaler.scale(loss).backward()
+
+                    if grad_clipper is not None:
+                        scaler.unscale_(optimizer)
+                        grad_clipper.autoclip_grad()
+                    scaler.step(optimizer)
                 else:
                     loss, loss_dict = model(latents, c=(classes if return_class else None))
                     loss.backward()
+
+                    if grad_clipper is not None:
+                        grad_clipper.autoclip_grad()
+                    optimizer.step()
 
                 if torch.isnan(loss).item():
                     if enable_wandb:
                         wandb.alert(title="Loss is NaN", text=f"Halting training at epoch {epoch} and step {i}")
                     raise ValueError("Loss has become NaN, halting training")
 
-                optimizer.step()
                 b_loss += loss.detach().item()
                 if conf.print_freq > 0 and i % conf.print_freq == 0 and enable_pbars:
                     pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
@@ -447,27 +479,34 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     scheduler.step()
                     # print(f"Learning rate: {scheduler.get_last_lr()}")
 
+                step = epoch * len(train_loader) + i if log_iterations else epoch
+
+                if enable_wandb and log_iterations:
+                    wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr(), "epoch": epoch}, step=step)
+
                 if i == 0:
                     if conf.training.precompute_latents:
                         if model_first_stage.factorised_latent_space:
                             *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
                             for j, latent in enumerate(latents_w):
-                                save_and_log_latents(latent, f'Latents/wm{j}', runPath, epoch, run)
+                                save_and_log_latents(latent, f'Latents/wm{j}', runPath, step, run)
                             if latents_z.shape[1] > 0:
-                                save_and_log_latents(latents_z, f'Latents/z', runPath, epoch, run)
+                                save_and_log_latents(latents_z, f'Latents/z', runPath, step, run)
                         else:
-                            save_and_log_latents(latents, f'Latents/u', runPath, epoch, run)
+                            save_and_log_latents(latents, f'Latents/u', runPath, step, run)
                     else:
                         for m, (name, dbatch) in enumerate(zip(modalities, data)):
                             save_and_log_img(dbatch, f"Data/{name}", runPath,
-                                             display_data_fs[m], step=epoch, wandb_run=run)
+                                             display_data_fs[m], step=step, wandb_run=run)
 
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
-            if enable_wandb: wandb.log({"Loss/train": epoch_loss}, step=epoch)
+            if enable_wandb and not log_iterations: wandb.log({"Loss/train": epoch_loss}, step=epoch)
             print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
 
         def test_epoch(epoch):
+            step = epoch * len(train_loader)
+
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0)
             else:
@@ -482,7 +521,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         data = move_data_to_device(dataT, device=device)
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
-                    latents = (latents - latent_mean[None, :, None, None]) / latent_scale[None, :, None, None]
+                    latents = model_first_stage.scale_latents(latents)
 
                     loss, loss_dict = model(latents, c=(classes if return_class else None))
                     b_loss += loss.detach().item()
@@ -497,10 +536,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                                     size=(N_gen,),
                                                     device=device)
 
-                        samples_zw = model.module.sample((classes if return_class else None), batch_size=N_gen) if data_parallel else \
-                                     model.sample((classes if return_class else None), batch_size=N_gen)
+                        samples_zw = model.module.sample((classes if return_class else None), verbose=enable_pbars, batch_size=N_gen) if data_parallel else \
+                                     model.sample((classes if return_class else None), verbose=enable_pbars, batch_size=N_gen)
 
-                        samples_zw = samples_zw * latent_scale[None, :, None, None] + latent_mean[None, :, None, None]
+                        samples_zw = model_first_stage.scale_latents(samples_zw, reverse=True)
                         samples_x = model_first_stage.decode(samples_zw)
 
                         for m in range(len(samples_x)):
@@ -509,8 +548,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             else:
                                 wandb_kwargs = {}
                             save_and_log_img(samples_x[m], f'Generation/m{m}',
-                                             runPath, display_data_fs[m], epoch, run, wandb_kwargs=wandb_kwargs, save_kwargs={}, nrow=4)
-
+                                             runPath, display_data_fs[m], step, run, wandb_kwargs=wandb_kwargs, save_kwargs={}, nrow=4)
+                            save_and_log_latents(samples_zw, f'Generation/latent',
+                                             runPath, display_data_fs[m], step, run, wandb_kwargs=wandb_kwargs)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -520,6 +560,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             return epoch_loss
 
         def test_fid(epoch, n_samples=32, use_diffusion=True):
+            step = epoch * len(train_loader)
+
             gen_batch_size = 16
             n_batches = n_samples // gen_batch_size
 
@@ -544,11 +586,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                                     size=(gen_batch_size,),
                                                     device=device)
 
-                        latents = model.module.sample((classes if return_class else None),
+                        latents = model.module.sample((classes if return_class else None), verbose=enable_pbars,
                                                       batch_size=gen_batch_size) if data_parallel else model.sample(
-                            (classes if return_class else None), batch_size=gen_batch_size)
+                            (classes if return_class else None), verbose=enable_pbars, batch_size=gen_batch_size)
 
-                        latents = latents * latent_scale[None, :, None, None] + latent_mean[None, :, None, None]
+                        latents = model_first_stage.scale_latents(latents, reverse=True)
                     else:
                         latent_dim = (
                         gen_batch_size, *(model.module.input_shape if data_parallel else model.input_shape))
@@ -568,7 +610,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     split = "test" if conf.data.dataset_name == "nyu_depth" else "val"
                     fid_score = fid(tempdirs[mod], dataset_name=f"{conf.data.dataset_name}_{mod}", dataset_res=299, dataset_split=split)
                     if enable_wandb:
-                        wandb.log({f"FID_{mod}": fid_score}, step=epoch)
+                        wandb.log({f"FID_{mod}": fid_score, "epoch": epoch}, step=step)
 
                     fid_scores.append(fid_score)
 
@@ -578,66 +620,94 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return fid_scores
 
-        with Timer('MMVAEplus') as t:
-            if conf.training.precompute_latents and not already_precomputed:
-                # Compute the latents and reload the latent dataloader
-                print("Beginning latent computation and saving")
-                precompute_latents("train", conf.training.precompute_latents_path)
-                precompute_latents("val", conf.training.precompute_latents_path)
+        def training_loop():
+            best_test_loss = 10000
+            test_worseining_count = 0
+            early_stop = False
 
-                # Replace the dataloaders with the precomputed latent loaders
-                train_dataset, test_dataset = load_precomputed_datasets(conf)
-                train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
+            print("Entering training loop")
+            with Timer('MMVAEplus') as t:
+                if conf.training.precompute_latents and not already_precomputed:
+                    # Compute the latents and reload the latent dataloader
+                    print("Beginning latent computation and saving")
+                    precompute_latents("train", conf.training.precompute_latents_path)
+                    precompute_latents("val", conf.training.precompute_latents_path)
+
+                    # Replace the dataloaders with the precomputed latent loaders
+                    train_dataset, test_dataset = load_precomputed_datasets(conf)
+                    train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
 
 
-            if conf.training.compute_latent_scale:
-                latent_mean, latent_scale = get_latent_scale_factor(train_loader, n_batches=10)
-                torch.save({"latent_mean": latent_mean, "latent_scale": latent_scale}, os.path.join(runPath, "latent_stats_non_disentangled_single.pt"))
-            print(f"Using a latent mean of {latent_mean} and latent scale of {latent_scale}")
+                if conf.training.compute_latent_scale:
+                    latent_mean, latent_scale = get_latent_scale_factor(train_loader, n_batches=10)
+                    model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
+                    model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
+                    print("resaving the fisrt stage model with latent mean and scale")
+                    torch.save(model_first_stage.state_dict(), conf.model_conf.model.params.first_stage_config.params.ckpt_path)
 
-            fid_scores = test_fid(0, n_samples=256)
-            sys.exit()
+                print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
 
-            # test_epoch(start_epoch)
-            # fid_scores = test_fid(start_epoch)
-            # print("   ".join([f"{mod} FID: {fid}" for mod, fid in zip(modalities, fid_scores)]))
-            for epoch in range(start_epoch + 1, conf.training.num_epochs + 1 + start_epoch):
-                train_epoch(epoch)
+                # fid_scores = test_fid(0, n_samples=256)
+                # sys.exit()
 
-                test_loss = test_epoch(epoch)
-                fids = test_fid(epoch)
+                # test_epoch(start_epoch)
+                # fid_scores = test_fid(start_epoch)
+                # print("   ".join([f"{mod} FID: {fid}" for mod, fid in zip(modalities, fid_scores)]))
+                for epoch in range(start_epoch + 1, conf.training.num_epochs + 1 + start_epoch):
+                    print("============================ starting training =========================")
+                    train_epoch(epoch)
+                    print("============================ finished one epoch =========================")
 
-                if test_loss < best_test_loss:
-                    best_test_loss = test_loss
-                    test_worsening_count = 0
-                    if (rank == 0 or not data_parallel) and not ray_tune:
-                        save_model_light(model.module if data_parallel else model,
-                                         runPath + '/model_' + str(epoch) + '.rar')
-                else:
-                    test_worsening_count += 1
-                    if test_worsening_count > conf.training.patience and not ray_tune:
-                        print(f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
+                    test_loss = test_epoch(epoch)
+                    print("============================ finished testing =========================")
+                    fids = test_fid(epoch)
+                    print("============================ finished computing FID =========================")
 
-                        break
+                    if ray_tune:
+                        checkpoint_data = {
+                            "epoch": epoch,
+                            "net_state_dict": model.state_dict(),
+                            "optimizer_state_dict": optimizer.state_dict(),
+                        }
+                        with tempfile.TemporaryDirectory(dir="/home/ds3119/ray_tmp") as checkpoint_dir:
+                            print("Saving ray tune checkpoint and reporting")
+                            data_path = Path(checkpoint_dir) / "data.pkl"
+                            with open(data_path, "wb") as fp:
+                                pickle.dump(checkpoint_data, fp)
 
-                if ray_tune:
-                    checkpoint_data = {
-                        "epoch": epoch,
-                        "net_state_dict": model.state_dict(),
-                        "optimizer_state_dict": optimizer.state_dict(),
-                    }
-                    with tempfile.TemporaryDirectory() as checkpoint_dir:
-                        data_path = Path(checkpoint_dir) / "data.pkl"
-                        with open(data_path, "wb") as fp:
-                            pickle.dump(checkpoint_data, fp)
+                            checkpoint = Checkpoint.from_directory(checkpoint_dir)
+                            train.report({"loss": test_loss, **{f"fid_{mod}": fid for mod, fid in zip(modalities, fids)}}, checkpoint=checkpoint)
+                    else:
+                        if test_loss < best_test_loss:
+                            best_test_loss = test_loss
+                            test_worsening_count = 0
+                            if (rank == 0 or not data_parallel) and not ray_tune:
+                                save_model_light(model.module if data_parallel else model,
+                                                 runPath / ('model_' + str(epoch) + '.rar'))
+                        else:
+                            test_worsening_count += 1
+                            if test_worsening_count > conf.training.patience and not ray_tune:
+                                print(
+                                    f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
 
-                        checkpoint = Checkpoint.from_directory(checkpoint_dir)
-                        train.report({"loss": best_test_loss, **{f"fid_{mod}": fid for mod, fid in zip(modalities, fids)}}, checkpoint=checkpoint)
+                                break
+
+        if conf.function.name is not None:
+            locals()[conf.function.name](**conf.function.kwargs)
+        else:
+            training_loop()
 
     finally:
         if data_parallel:
             print("Performing cleanup")
             cleanup()
+
+
+def run_training_ray_tune(config, conf, **params):
+    conf = override_config(conf, config)
+    print(conf)
+
+    run_training(conf=conf, **params)
 
 
 @hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
@@ -650,16 +720,86 @@ def main(conf: DictConfig) -> None:
     torch.manual_seed(conf.seed)
     np.random.seed(conf.seed)
 
-    # start the training function, possibly with data parallelism
-    if isinstance(conf.device, str):
-        run_training(conf.device, conf, False)
-    elif isinstance(conf.device, Iterable):
-        mp.spawn(
-            run_training,
-            args=(conf, True, len(conf.device)),
-            nprocs=len(conf.device),
-            join=True
+
+    if optimise_hyperparameters:
+        ray.init(_temp_dir="/home/ds3119/ray_tmp")
+
+        num_samples = 10
+        max_num_epochs = 15
+        gpus_per_trial = 1
+
+        output_dir = Path(os.path.join(conf.data.outputdir, conf.experiment, "ray_tune"))
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        assert isinstance(conf.device, str), "Hyperparameter optimisation only works with single GPU"
+        config = {
+            "model_conf.model.params.unet_config.params.model_channels": tune.choice([128, 192, 320, 448]),
+            "model_conf.model.params.unet_config.params.num_res_blocks": tune.choice([1, 2, 3]),
+            "training.lr": tune.choice([ 1e-5, 5e-5, 1e-4, 5e-4, 1e-3]),
+            # "training.batch_size": tune.choice([8, 16, 32, 64]),
+        }
+
+        algo = TuneBOHB(metric="loss", mode="min")
+        algo = tune.search.ConcurrencyLimiter(algo, max_concurrent=1)
+        scheduler = HyperBandForBOHB(
+            time_attr="training_iteration",
+            metric="loss",
+            mode="min",
+            max_t=1800)
+
+        trainable = partial(run_training_ray_tune, rank="cuda:0", conf=conf, data_parallel=False, world_size=1, ray_tune=True, enable_pbars=False)
+        trainable_with_resources = tune.with_resources(trainable,
+                                                       resources={"gpu": 1})
+
+        tuner = tune.Tuner(
+            trainable_with_resources,
+            tune_config=tune.TuneConfig(
+                search_alg=algo,
+                scheduler=scheduler,
+                num_samples=num_samples,
+            ),
+            run_config=train.RunConfig(
+                name="bohb_exp",
+                stop={"training_iteration": max_num_epochs},
+            ),
+            param_space=config,
         )
+        result = tuner.fit()
+
+        # save last results
+        result.get_dataframe().to_csv(output_dir / "last_epoch_results.csv")
+
+        for metric in ["loss", "fid_colour", "fid_depth"]:
+            print("==================")
+            print(f"{metric}")
+            print("==================")
+            best_trial = result.get_best_result(metric, "min")
+            print(f"Best trial config: {best_trial.config}")
+            print(f"Best trial final validation loss: {best_trial.metrics['loss']}")
+
+            best_checkpoint = best_trial.checkpoint
+            with best_checkpoint.as_directory() as dir:
+                data_path = Path(dir) / "data.pkl"
+                shutil.copy(data_path, output_dir / "best_checkpoint_loss_data.pkl")
+
+            print("==================")
+
+            # Get last reported results per trial
+            df_best_metric = result.get_dataframe(
+                filter_metric=metric, filter_mode="min"
+            )
+            df_best_metric.to_csv(output_dir / f"best_{metric}_results.csv")
+    else:
+        # start the training function, possibly with data parallelism
+        if isinstance(conf.device, str):
+            run_training(conf.device, conf, False)
+        elif isinstance(conf.device, Iterable):
+            mp.spawn(
+                run_training,
+                args=(conf, True, len(conf.device)),
+                nprocs=len(conf.device),
+                join=True
+            )
 
 
 if __name__ == '__main__':

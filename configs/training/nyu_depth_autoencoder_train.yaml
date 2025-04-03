@@ -3,6 +3,10 @@ device: "cuda:1"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
 print_freq: 50
 
+function:
+  name: training_loop
+  kwargs:
+
 data:
   datadir: ../mmvaeplus/data/nyu_data
   input_size: 256
