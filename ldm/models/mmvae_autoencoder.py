@@ -12,7 +12,7 @@ class MMVAEplus(nn.Module):
     """
     MMVAEplus class definition.
     """
-    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False, stop_self_z_grad=False, z_net_params=None):
+    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False, stop_self_z_grad=False, z_net_params=None, scale_per_channel=False):
         super(MMVAEplus, self).__init__()
         if isinstance(prior_dist, str):
             if prior_dist == 'normal':
@@ -48,8 +48,12 @@ class MMVAEplus(nn.Module):
             self.z_comb_net = instantiate_from_config(z_net_params)
 
         total_latent_channels = self.w_channels * len(self.vaes) + self.z_channels
-        self.latent_mean = nn.Parameter(torch.zeros(total_latent_channels))
-        self.latent_scale = nn.Parameter(torch.ones(total_latent_channels) * 1.0 / 0.18215)
+        if scale_per_channel:
+            self.latent_mean = nn.Parameter(torch.zeros(total_latent_channels))
+            self.latent_scale = nn.Parameter(torch.ones(total_latent_channels) * 1.0 / 0.18215)
+        else:
+            self.latent_mean = nn.Parameter(torch.tensor(0.0))
+            self.latent_scale = nn.Parameter(torch.tensor(1.0 / 0.18215))
 
         self.cross_w_mode = cross_w_mode  # Options are "sample" (original MMVAE+), "constant", "zero"
         self.avg_z = avg_z
@@ -293,7 +297,6 @@ class MMVAEplus(nn.Module):
             return full_latent
 
         if use_z_combnet:
-            print("Using combnet")
             z_comb_dist = self.z_comb_net(qz_xs)
             if return_dist:
                 return [*qw_xs, z_comb_dist]
@@ -343,6 +346,12 @@ class MMVAEplus(nn.Module):
 
     def scale_latents(self, latents, reverse=False):
         if reverse:
-            return (latents * self.latent_scale[None, :, None, None]) + self.latent_mean[None, :, None, None]
+            if len(self.latent_scale.shape) == 1:
+                return (latents * self.latent_scale[None, :, None, None]) + self.latent_mean[None, :, None, None]
+            else:
+                return (latents * self.latent_scale) + self.latent_mean
         else:
-            return (latents - self.latent_mean[None, :, None, None]) / self.latent_scale[None, :, None, None]
+            if len(self.latent_scale.shape) == 1:
+                return (latents - self.latent_mean[None, :, None, None]) / self.latent_scale[None, :, None, None]
+            else:
+                return (latents - self.latent_mean) / self.latent_scale

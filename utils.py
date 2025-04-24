@@ -249,8 +249,8 @@ def duplicate_stable_diff_weights(sd_weights, vae):
     target_dict = vae.state_dict()
     for source_key, source_value in sd_weights.items():
         if source_key not in target_dict:
-            del sd_weights[source_key]
-            print(f"Deleting key: {source_key}")
+            # del sd_weights[source_key]
+            # print(f"Deleting key: {source_key}")
             continue
 
         if target_dict[source_key].shape != source_value.shape:

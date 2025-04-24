@@ -18,7 +18,7 @@ import torch
 from torch import optim
 from torchvision.transforms import v2
 from torchvision.utils import make_grid
-from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR, CosineAnnealingWarmRestarts
+from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR, CosineAnnealingWarmRestarts, LambdaLR
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
@@ -35,25 +35,34 @@ from ray.tune.search.bohb import TuneBOHB
 import ray.cloudpickle as pickle
 import tempfile
 import sys
+import glob
 import logging
 
 from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
 from ldm.data import get_dataset
+from ldm.modules.ema import DummyEMA
 import pyiqa
+import cmmd_pytorch as cmmd
 from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, duplicate_stable_diff_weights, move_data_to_device, override_config
+from reconstruct_model_phema import reconstruct_phema
 
 import random
 from functools import partial
+from itertools import product
+
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 enable_wandb = True
 optimise_hyperparameters = False
 log_iterations = True
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("Apply the new hyperperameters and cosine annealing learning rate")
-name = "diff_cos_anneal"
+notes = ("Try NVidias EDM2 U-net model with their loss and timestep sampling strategy. "
+         "We also used a learned logvar weighting for the timesteps loss, with a penalty on too large values")
+name = "test_edm2"
 
 
 def setup(rank, world_size):
@@ -73,6 +82,46 @@ def load_precomputed_datasets(conf):
     test_dataset = get_dataset("latents", latent_folder_name=conf.training.precompute_latents_path, split="val", **conf.data)
 
     return train_dataset, test_dataset
+
+
+def save_checkpoint(ema, model, optimiser, scheduler, iteration, path):
+    sd = {"ema": ema.state_dict(),
+          "model": model.state_dict(),
+          "optimiser": optimiser.state_dict(),
+          "scheduler": scheduler.state_dict(),
+          "iteration": iteration}
+
+    torch.save(sd, path)
+
+
+def learning_rate_schedule(cur_nimg, batch_size, ref_lr=100e-4, ref_batches=70e3, rampup_Mimg=10):
+    lr = ref_lr
+    if ref_batches > 0:
+        lr /= np.sqrt(max(cur_nimg / (ref_batches * batch_size), 1))
+    if rampup_Mimg > 0:
+        lr *= min(cur_nimg / (rampup_Mimg * 1e6), 1)
+    return lr
+
+
+def load_checkpoint(ema, model, optimiser, scheduler, path):
+    sd = torch.load(path)
+    model.load_state_dict(sd["model"])
+    if "ema" in sd:
+        ema.load_state_dict(sd["ema"])
+    else:
+        logger.warning("No EMA state dict found in checkpoint")
+
+    if "optimiser" in sd:
+        optimiser.load_state_dict(sd["optimiser"])
+    else:
+        logger.warning("No optimiser state dict found in checkpoint")
+
+    if "scheduler" in sd:
+        scheduler.load_state_dict(sd["scheduler"])
+    else:
+        logger.warning("No scheduler state dict found in checkpoint")
+
+    return sd["iteration"]
 
 
 def load_image_datasets(conf):
@@ -165,10 +214,6 @@ def initialise_model(conf):
                 print(f"Unused key: {u}")
         """
 
-    elif conf.model_initialisation is not None:
-        print("Initialising with custom weights")
-        model.load_state_dict(torch.load(conf.model_initialisation))
-
     return model
 
 
@@ -234,10 +279,25 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             print(f"Initialising data-based parallelism with {len(conf.device)} GPUs")
             model = DDP(model, device_ids=[rank])
 
+        if conf.training.t_sampler is not None:
+            t_sampler_conf = OmegaConf.to_container(conf.training.t_sampler)
+            t_sampler_conf["params"]["sigma_sched"] = torch.sqrt((1 - model.alphas_cumprod)/model.alphas_cumprod)
+            t_sampler = instantiate_from_config(t_sampler_conf)
+        else:
+            t_sampler = None
+
         model_first_stage = model.module.first_stage_model if data_parallel else model.first_stage_model
 
         NUM_VAES = len(model_first_stage.vaes)
         print(f"Using {NUM_VAES} vaes")
+
+        if "ema" in conf:
+            logger.info(f"Using EMA {conf.ema.target}")
+            ema_conf = OmegaConf.to_container(conf.ema)
+            ema_conf["params"]["net"] = model
+            ema = instantiate_from_config(ema_conf)
+        else:
+            ema = DummyEMA(model)
 
         # Set experiment name if not set
         if not conf.experiment:
@@ -293,23 +353,33 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if "grad_clipper" in conf.training:
             grad_clipper = GradAutoClipper(model, **conf.training.grad_clipper)
 
+        """
         scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=200),
                                       CosineAnnealingWarmRestarts(optimizer, 4000, 1, eta_min=0.1 * conf.training.lr)])
                                       # ExponentialLR(optimizer, conf.training.gamma)])
+                                     """
+
+        scheduler = LambdaLR(optimizer, lambda epoch: learning_rate_schedule(epoch * conf.training.batch_size,
+                                                                             conf.training.batch_size,
+                                                                             ref_lr=conf.training.lr,
+                                                                             ref_batches=1000,
+                                                                             rampup_Mimg=0.005))
+
         scheduler_step_freq = 1
 
         start_epoch = None
+
+
+        if conf.model_initialisation is not None:
+            start_epoch = load_checkpoint(ema, model, optimizer, scheduler, conf.model_initialisation)
+
 
         if ray_tune:
             checkpoint = get_checkpoint()
             if checkpoint:
                 with checkpoint.as_directory() as checkpoint_dir:
                     data_path = Path(checkpoint_dir) / "data.pkl"
-                    with open(data_path, "rb") as fp:
-                        checkpoint_state = pickle.load(fp)
-                    start_epoch = checkpoint_state["epoch"]
-                    model.load_state_dict(checkpoint_state["net_state_dict"])
-                    optimizer.load_state_dict(checkpoint_state["optimizer_state_dict"])
+                    start_epoch = load_checkpoint(ema, model, optimizer, scheduler, data_path)
 
         if start_epoch is None:
             start_epoch = conf.training.start_epoch
@@ -344,7 +414,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             for _ in range((len(train_loader) * conf.training.start_epoch)//scheduler_step_freq):
                 scheduler.step()
 
-        def get_latent_scale_factor(data_loader, n_batches=1):
+        def get_latent_scale_factor(split="train", n_batches=1, per_channel=True):
+            data_loader = train_loader if split == "train" else test_loader
+
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(data_loader), total=len(data_loader),
                                  position=rank if data_parallel else 0)
@@ -363,8 +435,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
 
-                    channel_means += latents.mean(dim=(0, 2, 3))
-                    channel_vars += latents.var(dim=(0, 2, 3))
+                    if per_channel:
+                        channel_means += latents.mean(dim=(0, 2, 3))
+                        channel_vars += latents.var(dim=(0, 2, 3))
+                    else:
+                        channel_means += latents.mean(dim=(0, 1, 2, 3))
+                        channel_vars += latents.var(dim=(0, 1, 2, 3))
 
                     if i >= n_batches:
                         break
@@ -444,11 +520,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
                 latents = model_first_stage.scale_latents(latents)
 
-                logging.debug(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latent.mean(dim=(0, 2, 3))}")
+                # print(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latents.mean(dim=(0, 2, 3))}")
 
                 if use_mixed_precision:
                     with autocast(dtype=torch.float16, device_type="cuda"):
-                        loss, loss_dict = model(latents, c=(classes if return_class else None))
+                        loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
 
                     scaler.scale(loss).backward()
 
@@ -457,7 +533,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         grad_clipper.autoclip_grad()
                     scaler.step(optimizer)
                 else:
-                    loss, loss_dict = model(latents, c=(classes if return_class else None))
+                    loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
                     loss.backward()
 
                     if grad_clipper is not None:
@@ -473,7 +549,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 if conf.print_freq > 0 and i % conf.print_freq == 0 and enable_pbars:
                     pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
 
-                model.on_train_batch_end()  # Updates EMA if present
+                if ema is not None:
+                    ema.update(conf.training.batch_size)
 
                 if i % scheduler_step_freq == 0:
                     scheduler.step()
@@ -482,11 +559,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 step = epoch * len(train_loader) + i if log_iterations else epoch
 
                 if enable_wandb and log_iterations:
-                    wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr(), "epoch": epoch}, step=step)
+                    wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr()[0], "epoch": epoch}, step=step)
 
                 if i == 0:
                     if conf.training.precompute_latents:
-                        if model_first_stage.factorised_latent_space:
+                        if model_first_stage.factorised_latent_space and False:
                             *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
                             for j, latent in enumerate(latents_w):
                                 save_and_log_latents(latent, f'Latents/wm{j}', runPath, step, run)
@@ -504,8 +581,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             if enable_wandb and not log_iterations: wandb.log({"Loss/train": epoch_loss}, step=epoch)
             print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
 
-        def test_epoch(epoch):
-            step = epoch * len(train_loader)
+        def test_epoch(epoch, reencode_end=False):
+            step = (epoch+1) * len(train_loader) if log_iterations else epoch
 
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0)
@@ -513,7 +590,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 pbar = enumerate(test_loader)
 
             b_loss = 0
-            with (torch.no_grad(), model.ema_scope("Epoch test")):
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in pbar:
                     if return_class:
                         data, classes = move_data_to_device(dataT, device=device)
@@ -523,7 +600,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
                     latents = model_first_stage.scale_latents(latents)
 
-                    loss, loss_dict = model(latents, c=(classes if return_class else None))
+                    loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
                     b_loss += loss.detach().item()
 
                     if i == 0 and epoch % 1 == 0:
@@ -539,28 +616,47 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         samples_zw = model.module.sample((classes if return_class else None), verbose=enable_pbars, batch_size=N_gen) if data_parallel else \
                                      model.sample((classes if return_class else None), verbose=enable_pbars, batch_size=N_gen)
 
-                        samples_zw = model_first_stage.scale_latents(samples_zw, reverse=True)
-                        samples_x = model_first_stage.decode(samples_zw)
+                        # print(f"Generated latent scale: {samples_zw.std(dim=(0, 2, 3))}   mean: {samples_zw.mean(dim=(0, 2, 3))}")
+
+                        samples_zw_scaled = model_first_stage.scale_latents(samples_zw, reverse=True)
+                        samples_x = model_first_stage.decode(samples_zw_scaled)
+
+                        if return_class:
+                            wandb_kwargs = {"caption": "\n".join(
+                                [f"{b}: {test_dataset.class_num_to_name(c)}" for b, c in enumerate(classes)])}
+                        else:
+                            wandb_kwargs = {}
+
+                        if reencode_end:
+                            samples_zw_2 = model_first_stage.encode([sx.mean for sx in samples_x], avg_z=avg_z)
+                            samples_zw_2 = cat_dists_or_tensor_latents(samples_zw_2)
+                            samples_x_2 = model_first_stage.decode(samples_zw_2)
+
+                            for m in range(len(samples_x)):
+                                save_and_log_img(samples_x_2[m], f'Generation/reencoded_m{m}',
+                                                 runPath, display_data_fs[m], step, run, wandb_kwargs=wandb_kwargs,
+                                                 save_kwargs={}, nrow=4)
+                            save_and_log_latents(samples_zw_2, f'Generation/reencoded_latent',
+                                                 runPath, step, run, wandb_kwargs=wandb_kwargs)
+
+
 
                         for m in range(len(samples_x)):
-                            if return_class:
-                                wandb_kwargs = {"caption" : "\n".join([f"{b}: {test_dataset.class_num_to_name(c)}" for b, c in enumerate(classes)])}
-                            else:
-                                wandb_kwargs = {}
                             save_and_log_img(samples_x[m], f'Generation/m{m}',
                                              runPath, display_data_fs[m], step, run, wandb_kwargs=wandb_kwargs, save_kwargs={}, nrow=4)
-                            save_and_log_latents(samples_zw, f'Generation/latent',
-                                             runPath, display_data_fs[m], step, run, wandb_kwargs=wandb_kwargs)
+
+                        save_and_log_latents(samples_zw, f'Generation/latent',
+                                         runPath, step, run, wandb_kwargs=wandb_kwargs)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
-            if enable_wandb: wandb.log({"Loss/test": epoch_loss}, step=epoch)
+            if enable_wandb: wandb.log({"Loss/test": epoch_loss}, step=step)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
 
             return epoch_loss
 
-        def test_fid(epoch, n_samples=32, use_diffusion=True):
-            step = epoch * len(train_loader)
+        def test_metrics(epoch, n_samples=32, use_diffusion=True, reencode_end=False, metrics=["fid", "kid", "cmmd"]):
+            step = (epoch+1) * len(train_loader)
 
             gen_batch_size = 16
             n_batches = n_samples // gen_batch_size
@@ -597,33 +693,74 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         latents = torch.randn(latent_dim, device=device)
                     samples_x = model_first_stage.decode(latents)
 
+                    if reencode_end:
+                        samples_zw = model_first_stage.encode([sx.mean for sx in samples_x], avg_z=avg_z)
+                        samples_zw = cat_dists_or_tensor_latents(samples_zw)
+                        samples_x = model_first_stage.decode(samples_zw)
+
                     for m, (name, samples) in enumerate(zip(modalities, samples_x)):
                         for i, s in enumerate(samples.mean):
                             s_disp = display_data_fs[m](s.detach().cpu())
                             tvu.save_image(s_disp, os.path.join(tempdirs[name], f"sample_{name}_{n * gen_batch_size + i}.png"))
 
-            fid = pyiqa.create_metric('fid', device=device)
-
-            fid_scores = []
-            for mod in modalities:
-                if mod in ["colour", "depth"]:
-                    split = "test" if conf.data.dataset_name == "nyu_depth" else "val"
-                    fid_score = fid(tempdirs[mod], dataset_name=f"{conf.data.dataset_name}_{mod}", dataset_res=299, dataset_split=split)
-                    if enable_wandb:
-                        wandb.log({f"FID_{mod}": fid_score, "epoch": epoch}, step=step)
-
-                    fid_scores.append(fid_score)
-
-                    print(f'====>             FID {mod}: {fid_score:.2f}')
+            metric_scores = {}
+            for met in metrics:
+                if met == "cmmd":
+                    metric = partial(cmmd.compute_cmmd, device=device)
                 else:
-                    fid_scores.append(None)
+                    metric = pyiqa.create_metric(met, device=device)
 
-            return fid_scores
+                scores = []
+                for mod in modalities:
+                    if mod in ["colour", "depth"]:
+                        split = "test" if conf.data.dataset_name == "nyu_depth" else "val"
+                        score = metric(tempdirs[mod], dataset_name=f"{conf.data.dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
+                        if enable_wandb:
+                            wandb.log({f"{met}_{mod}": score, "epoch": epoch}, step=step)
+
+                        scores.append(score)
+
+                        print(f'====>             {met} {mod}: {score:.2f}')
+                    else:
+                        scores.append(None)
+
+                metric_scores[met] = scores
+
+            return metric_scores
+
+        def test_optimum_EMA(out_epochs, out_stds):
+            saves_path = os.path.dirname(conf.model_initialisation)
+
+            out_epochs, out_stds = zip(*product(out_epochs, out_stds))
+
+            model_names = [f"model_it{out_es}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_epochs, out_stds)]
+
+            it = reconstruct_phema(saves_path, out_std=out_stds, out_nepoch=out_epochs, out_dir=saves_path, epoch_size=24000)
+            for _ in it:
+                pass
+
+            for step, name in enumerate(model_names):
+                logging.info(f"Testing configuration with epochs:{out_epochs[step]} and std:{out_stds[step]}")
+                load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
+                test_epoch(step)
+                test_metrics(step)
+
+                if enable_wandb:
+                    wandb.log({"n_epochs": out_epochs[step], "ema_std": out_stds[step]}, step=step)
+
+
+        def plot_timestep_logvars():
+            logvars = model.logvar.cpu().detach().numpy()
+            timesteps = np.arange(0, len(logvars))
+            plot = sns.lineplot(x=timesteps, y=logvars)
+            plot.set(xlabel="Diffusion timestep", ylabel="timestep log weighting")
+            fig = plot.get_figure()
+            fig.savefig(os.path.join(runPath, "timestep_logvars.png"))
+
 
         def training_loop():
             best_test_loss = 10000
-            test_worseining_count = 0
-            early_stop = False
+            test_worsening_count = 0
 
             print("Entering training loop")
             with Timer('MMVAEplus') as t:
@@ -639,7 +776,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
 
                 if conf.training.compute_latent_scale:
-                    latent_mean, latent_scale = get_latent_scale_factor(train_loader, n_batches=10)
+                    latent_mean, latent_scale = get_latent_scale_factor(n_batches=100, per_channel=conf.training.latent_scale_per_channel)
                     model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
                     model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
                     print("resaving the fisrt stage model with latent mean and scale")
@@ -647,6 +784,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                 print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
 
+                # metrics = test_metrics(0)
+                # print(metrics)
                 # fid_scores = test_fid(0, n_samples=256)
                 # sys.exit()
 
@@ -660,7 +799,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     test_loss = test_epoch(epoch)
                     print("============================ finished testing =========================")
-                    fids = test_fid(epoch)
+                    metrics = test_metrics(epoch)
                     print("============================ finished computing FID =========================")
 
                     if ray_tune:
@@ -672,23 +811,26 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         with tempfile.TemporaryDirectory(dir="/home/ds3119/ray_tmp") as checkpoint_dir:
                             print("Saving ray tune checkpoint and reporting")
                             data_path = Path(checkpoint_dir) / "data.pkl"
-                            with open(data_path, "wb") as fp:
-                                pickle.dump(checkpoint_data, fp)
-
+                            save_checkpoint(ema, model, optimizer, scheduler, epoch, data_path)
                             checkpoint = Checkpoint.from_directory(checkpoint_dir)
-                            train.report({"loss": test_loss, **{f"fid_{mod}": fid for mod, fid in zip(modalities, fids)}}, checkpoint=checkpoint)
+                            train.report({"loss": test_loss, **{f"{met}_{mod}": score for met, scores in metrics.items() for mod, score in zip(modalities, scores)}}, checkpoint=checkpoint)
                     else:
+                        save_checkpoint(ema, model, optimizer, scheduler, epoch, runPath / f"model_{epoch}.pt")
+                        """
+                        best_test_loss = test_loss
+                        test_worsening_count = 0
+                        if (rank == 0 or not data_parallel) and not ray_tune:
+                            save_checkpoint(ema, model, optimizer, scheduler, epoch, runPath / f"model_{epoch}.pt")
+                        """
                         if test_loss < best_test_loss:
-                            best_test_loss = test_loss
-                            test_worsening_count = 0
-                            if (rank == 0 or not data_parallel) and not ray_tune:
-                                save_model_light(model.module if data_parallel else model,
-                                                 runPath / ('model_' + str(epoch) + '.rar'))
+                            pass
                         else:
                             test_worsening_count += 1
                             if test_worsening_count > conf.training.patience and not ray_tune:
                                 print(
                                     f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
+                                logger.info("saving last model")
+                                save_checkpoint(ema, model, optimizer, scheduler, epoch, runPath / "last_model.pt")
 
                                 break
 
@@ -702,6 +844,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             print("Performing cleanup")
             cleanup()
 
+        if not conf.training.keep_intermediate_models:
+            models = [s for s in glob.glob(f"{str(runPath)}/model_*.pt")]
+            model_epochs = [int(os.path.basename(m).split("_")[1].split(".")[0]) for m in models]
+
+            models = sorted(models, key=lambda x: model_epochs[x])
+            for m in models[:-1]:
+                os.remove(m)
+
+
+
 
 def run_training_ray_tune(config, conf, **params):
     conf = override_config(conf, config)
@@ -710,7 +862,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train_edm2.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
@@ -722,6 +874,7 @@ def main(conf: DictConfig) -> None:
 
 
     if optimise_hyperparameters:
+        logger.info("Beginning hyperparameter tuning")
         ray.init(_temp_dir="/home/ds3119/ray_tmp")
 
         num_samples = 10

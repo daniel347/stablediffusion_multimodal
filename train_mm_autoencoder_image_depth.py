@@ -42,11 +42,9 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("Fine tuning our autoencoder with the z combinor network. We freeze encoders and only train the decoders "
-         "(at small learning rate) and the z combiner network. Other loss parameters are identical. We also only train "
-         "on the reconstructions, not on cross generations. The intention is to improve reconstruction quality and have"
-         " a single fixed z target to aim for")
-name = "z_combiner_train"
+notes = ("We perform initial training  of the autoencoder with downsampling by 4x to produce 32x32 latents rather than 16x16."
+         " It may be that 16x16 latents are too small for diffusion to learn effectively.")
+name = "4x_down_train"
 
 
 def setup(rank, world_size):
@@ -509,6 +507,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 if enable_wandb:
                     wandb.log({'z_mse': wandb.Histogram(z_mses, num_bins=20)}, step=i+1)
 
+
         def check_learned_prior_params(epoch):
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
 
@@ -525,6 +524,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             save_log_print_params(model.module.pw_params, f"prior/pw_global")
             save_log_print_params(model.module.pz_params, f"prior/pz_global")
+
 
         def decode_encode_latent():
             # Note this is a simple test designed for unimodal data (ie StableIndigo work)
@@ -592,7 +592,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train_z_combiner.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

@@ -276,3 +276,20 @@ def noise_like(shape, device, repeat=False):
     repeat_noise = lambda: torch.randn((1, *shape[1:]), device=device).repeat(shape[0], *((1,) * (len(shape) - 1)))
     noise = lambda: torch.randn(shape, device=device)
     return repeat_noise() if repeat else noise()
+
+
+class EDM2tsampler():
+
+    def __init__(self, sigma_sched, P_mean=0.4, P_std=1.0, sigma_data=0.5, t_max=999):
+        self.P_mean = P_mean
+        self.P_std = P_std
+        self.sigma_data = sigma_data
+        self.t_max = t_max
+        self.sigma_sched = sigma_sched
+
+    def __call__(self, images):
+        rnd_normal = torch.randn([images.shape[0],], device=images.device)
+        sigma = (rnd_normal * self.P_std + self.P_mean).exp()
+        tind = torch.argmin(torch.abs(self.sigma_sched[None, :] - sigma[:, None]), dim=1)
+        t = torch.clamp(tind, 0, self.t_max)
+        return t

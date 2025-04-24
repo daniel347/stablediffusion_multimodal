@@ -61,6 +61,6 @@ training:
 eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
-model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg.yaml
+model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg-32.yaml
 model_initialisation: "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_03_22__13_27_41_new_obj_z_dist_mmd/model_18.rar"
 init_from_stable_diffusion: False

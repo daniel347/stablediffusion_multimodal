@@ -14,7 +14,6 @@ def construct_model(model):
     return model(**config), config
 
 
-
 def test_encoder_grad_checkpointing():
     device = "cuda" if torch.cuda.is_available() else "cpu"
 

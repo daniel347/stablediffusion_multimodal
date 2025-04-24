@@ -1,0 +1,6 @@
+target: ldm.modules.diffusionmodules.util.EDM2tsampler
+params:
+  P_mean: 0.4
+  P_std: 1
+  sigma_data: 0.5
+  t_max: 999

@@ -21,7 +21,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from omegaconf import ListConfig
 
 from ldm.util import log_txt_as_img, exists, default, ismap, isimage, mean_flat, count_params, instantiate_from_config
-from ldm.modules.ema import LitEma
+from ldm.modules.ema import LitEma, PowerEMAWrapper
 from ldm.modules.distributions.distributions import normal_kl, DiagonalGaussianDistribution
 from ldm.models.autoencoder import IdentityFirstStage, AutoencoderKL
 from ldm.modules.diffusionmodules.util import make_beta_schedule, extract_into_tensor, noise_like
@@ -31,6 +31,9 @@ from ldm.models.diffusion.ddim import DDIMSampler
 __conditioning_keys__ = {'concat': 'c_concat',
                          'crossattn': 'c_crossattn',
                          'adm': 'y'}
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 def disabled_train(self, mode=True):
@@ -76,6 +79,7 @@ class DDPM(pl.LightningModule):
                  ucg_training=None,
                  reset_ema=False,
                  reset_num_ema_updates=False,
+                 sigma_data=0.5
                  ):
         super().__init__()
         assert parameterization in ["eps", "x0", "v"], 'currently only supporting "eps" and "x0" and "v"'
@@ -94,7 +98,7 @@ class DDPM(pl.LightningModule):
         count_params(self.model, verbose=True)
         self.use_ema = use_ema
         if self.use_ema:
-            self.model_ema = LitEma(self.model)
+            self.model_ema = PowerEMAWrapper(self.model)
             print(f"Keeping EMAs of {len(list(self.model_ema.buffers()))}.")
 
         self.use_scheduler = scheduler_config is not None
@@ -114,7 +118,7 @@ class DDPM(pl.LightningModule):
             if reset_ema:
                 assert self.use_ema
                 print(f"Resetting ema to pure model weights. This is useful when restoring from an ema-only checkpoint.")
-                self.model_ema = LitEma(self.model)
+                self.model_ema = PowerEMAWrapper(self.model)
         if reset_num_ema_updates:
             print(" +++++++++++ WARNING: RESETTING NUM_EMA UPDATES TO ZERO +++++++++++ ")
             assert self.use_ema
@@ -123,16 +127,20 @@ class DDPM(pl.LightningModule):
         self.register_schedule(given_betas=given_betas, beta_schedule=beta_schedule, timesteps=timesteps,
                                linear_start=linear_start, linear_end=linear_end, cosine_s=cosine_s)
 
+        if hasattr(self.model, "set_schedule"):
+            self.model.set_schedule(self.alphas_cumprod)
+
         self.loss_type = loss_type
 
         self.learn_logvar = learn_logvar
         self.logvar = torch.full(fill_value=logvar_init, size=(self.num_timesteps,))
         if self.learn_logvar:
             self.logvar = nn.Parameter(self.logvar, requires_grad=True)
-
         self.ucg_training = ucg_training or dict()
         if self.ucg_training:
             self.ucg_prng = np.random.RandomState()
+
+        self.sigma_data = sigma_data
 
     def register_schedule(self, given_betas=None, beta_schedule="linear", timesteps=1000,
                           linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3):
@@ -363,7 +371,7 @@ class DDPM(pl.LightningModule):
                 extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x.shape) * x
         )
 
-    def get_loss(self, pred, target, mean=True):
+    def get_loss(self, pred, target, t, mean=True):
         if self.loss_type == 'l1':
             loss = (target - pred).abs()
             if mean:
@@ -373,6 +381,15 @@ class DDPM(pl.LightningModule):
                 loss = torch.nn.functional.mse_loss(target, pred)
             else:
                 loss = torch.nn.functional.mse_loss(target, pred, reduction='none')
+        elif self.loss_type == 'edm2':
+            # The loss used in https://arxiv.org/pdf/2312.02696, ignoring the logvar though
+            sigma = torch.sqrt(1 - self.alphas_cumprod[t]) / torch.sqrt(self.alphas_cumprod[t])
+            weight = (sigma ** 2 + self.sigma_data ** 2) / (sigma * self.sigma_data) ** 2
+
+            loss = torch.nn.functional.mse_loss(target, pred, reduction='none')
+            loss = loss * weight[:, None, None, None]
+            if mean:
+                loss = loss.mean(dim=[1, 2, 3])
         else:
             raise NotImplementedError("unknown loss type '{loss_type}'")
 
@@ -382,6 +399,8 @@ class DDPM(pl.LightningModule):
         noise = default(noise, lambda: torch.randn_like(x_start))
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         model_out = self.model(x_noisy, t)
+
+        print(f"model output mean: {torch.mean(model_out)}, std: {torch.std(model_out)}")
 
         loss_dict = {}
         if self.parameterization == "eps":
@@ -393,7 +412,9 @@ class DDPM(pl.LightningModule):
         else:
             raise NotImplementedError(f"Parameterization {self.parameterization} not yet supported")
 
-        loss = self.get_loss(model_out, target, mean=False).mean(dim=[1, 2, 3])
+        print(f"target output mean: {torch.mean(x_start)}, std: {torch.std(x_start)}")
+
+        loss = self.get_loss(model_out, target, t, mean=False).mean(dim=[1, 2, 3])
 
         log_prefix = 'train' if self.training else 'val'
 
@@ -462,8 +483,9 @@ class DDPM(pl.LightningModule):
         self.log_dict(loss_dict_ema, prog_bar=False, logger=True, on_step=False, on_epoch=True)
 
     def on_train_batch_end(self, *args, **kwargs):
+        logger.debug("on train batch end run")
         if self.use_ema:
-            self.model_ema(self.model)
+            self.model_ema(self.model, **kwargs)
 
     def _get_rows_from_list(self, samples):
         n_imgs_per_row = len(samples)
@@ -575,7 +597,7 @@ class LatentDiffusion(DDPM):
                 assert self.use_ema
                 print(
                     f"Resetting ema to pure model weights. This is useful when restoring from an ema-only checkpoint.")
-                self.model_ema = LitEma(self.model)
+                self.model_ema = PowerEMAWrapper(self.model)
         if reset_num_ema_updates:
             print(" +++++++++++ WARNING: RESETTING NUM_EMA UPDATES TO ZERO +++++++++++ ")
             assert self.use_ema
@@ -589,6 +611,7 @@ class LatentDiffusion(DDPM):
     @rank_zero_only
     @torch.no_grad()
     def on_train_batch_start(self, batch, batch_idx, dataloader_idx):
+        logger.debug("on train batch start running")
         # only for very first batch
         if self.scale_by_std and self.current_epoch == 0 and self.global_step == 0 and batch_idx == 0 and not self.restarted_from_ckpt:
             assert self.scale_factor == 1., 'rather not use custom rescaling and std-rescaling simultaneously'
@@ -832,8 +855,10 @@ class LatentDiffusion(DDPM):
         loss = self(x, c)
         return loss
 
-    def forward(self, x, c=None, *args, **kwargs):
-        t = torch.randint(0, self.num_timesteps, (x.shape[0],), device=self.device).long()
+    def forward(self, x, c=None, t_sampler=None, *args, **kwargs):
+        if t_sampler is None:
+            t_sampler = lambda x: torch.randint(0, self.num_timesteps, (x.shape[0],))
+        t = t_sampler(x).to(self.device).long()
         return self.p_losses(x, c, t, *args, **kwargs)
 
     def apply_model(self, x_noisy, t, cond, return_ids=False):
@@ -897,7 +922,7 @@ class LatentDiffusion(DDPM):
 
         mean_dims = [i+1 for i, _ in enumerate(self.input_shape)]
 
-        loss_simple = self.get_loss(model_output, target, mean=False).mean(dim=mean_dims)
+        loss_simple = self.get_loss(model_output, target, t, mean=False).mean(dim=mean_dims)
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
 
         logvar_t = self.logvar[t.cpu()].to(self.device)
@@ -909,7 +934,7 @@ class LatentDiffusion(DDPM):
 
         loss = self.l_simple_weight * loss.mean()
 
-        loss_vlb = self.get_loss(model_output, target, mean=False).mean(dim=mean_dims)
+        loss_vlb = self.get_loss(model_output, target, t, mean=False).mean(dim=mean_dims)
         loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
         loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
         loss += (self.original_elbo_weight * loss_vlb)

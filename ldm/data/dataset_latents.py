@@ -35,7 +35,7 @@ class LatentDataset(Dataset):
         return len(self.latents)
 
     def __getitem__(self, idx):
-        latent = torch.load(self.latents[idx]).to("cpu")
+        latent = torch.load(self.latents[idx], weights_only=True).to("cpu")
         if not self.return_class and not self.return_index:
             return latent
         else:

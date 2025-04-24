@@ -14,7 +14,7 @@ model:
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
     scale_factor: 0.18215
-    use_ema: True
+    use_ema: False
     reset_num_ema_updates: False
 
     unet_config:
@@ -47,6 +47,7 @@ model:
         avg_z: False
         all_combinations: False
         stop_self_z_grad: False
+        scale_per_channel: False
 
         z_net_params:
           target: ldm.models.z_combiner_net.ZCombinerNet
