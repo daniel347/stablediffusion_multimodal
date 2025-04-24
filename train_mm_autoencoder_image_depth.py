@@ -294,11 +294,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         t_objective = objective
 
-        best_test_loss = 1e20
-        test_worsening_count = 0
-
-        early_stop = False
-
         def train(epoch):
             model.train()
             b_loss = 0
@@ -560,6 +555,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         break
 
         def training_loop():
+            best_test_loss = 1e20
+            test_worsening_count = 0
+
             with Timer('MMVAEplus') as t:
                 test(0)
 
@@ -570,16 +568,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if test_loss < best_test_loss:
                         best_test_loss = test_loss
                         test_worsening_count = 0
-
-                    if rank == 0 or not data_parallel:
-                        save_model_light(model.module if data_parallel else model,
-                                        runPath + '/model_' + str(epoch) + '.rar')
-
                     else:
                         test_worsening_count += 1
                         if test_worsening_count > conf.training.patience:
                             print(f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
                             break
+
+                    if rank == 0 or not data_parallel:
+                        save_model_light(model.module if data_parallel else model,
+                                        runPath + '/model_' + str(epoch) + '.rar')
+
 
         if conf.function.name is not None:
             locals()[conf.function.name](**conf.function.params)

@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -l select=1:ncpus=4:mem=16gb:ngpus=1
-#PBS -l walltime=08:00:00
+#PBS -l walltime=24:00:00
 
 eval "$(~/miniconda3/bin/conda shell.bash hook)"
 conda activate mmvae
