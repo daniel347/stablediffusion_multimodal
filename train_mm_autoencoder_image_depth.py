@@ -42,9 +42,9 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("We perform initial training  of the autoencoder with downsampling by 4x to produce 32x32 latents rather than 16x16."
-         " It may be that 16x16 latents are too small for diffusion to learn effectively.")
-name = "4x_down_train"
+notes = ("We perform z combiner second stage training  of the autoencoder with downsampling by 4x to produce 32x32 latents rather than 16x16."
+         " It may be that 16x16 latents are too small for diffusion to learn effectively. We resart training with a higher likelihood scaling for the semseg as this performs poorly")
+name = "4x_down_z_comb_train"
 
 
 def setup(rank, world_size):
@@ -590,7 +590,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train_z_combiner.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
