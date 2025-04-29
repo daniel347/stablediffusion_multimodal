@@ -12,7 +12,7 @@ class NonDisentanglingAE(nn.Module):
     """
     MMVAEplus class definition.
     """
-    def __init__(self, prior_dist, latent_channel_u, lik_dist_splits=None, lik_dists=None, final_acts=None, llik_scales=None, seperable=True, vae_params=None, ckpt_path=None):
+    def __init__(self, prior_dist, latent_channel_u, lik_dist_splits=None, lik_dists=None, final_acts=None, llik_scales=None, seperable=True, vae_params=None, ckpt_path=None, scale_per_channel=False):
         super(NonDisentanglingAE, self).__init__()
         if isinstance(prior_dist, str):
             if prior_dist == 'normal':
@@ -50,6 +50,12 @@ class NonDisentanglingAE(nn.Module):
         self.modelName = None  # Filled-in in subclass
 
         self.u_channels = latent_channel_u
+        if scale_per_channel:
+            self.latent_mean = nn.Parameter(torch.zeros(self.u_channels))
+            self.latent_scale = nn.Parameter(torch.ones(self.u_channels) * 1.0 / 0.18215)
+        else:
+            self.latent_mean = nn.Parameter(torch.tensor(0.0))
+            self.latent_scale = nn.Parameter(torch.tensor(1.0 / 0.18215))
 
         u_shape = (vae_params[0]["params"]["ddconfig"]["z_channels"], vae_params[0]["params"]["embed_spatial_dim"], vae_params[0]["params"]["embed_spatial_dim"])
 
@@ -117,18 +123,18 @@ class NonDisentanglingAE(nn.Module):
 
     def encode(self, data, **kwargs):
         # Encode data into z and W
-        U = []
-
         if not self.seperable:
             X = torch.cat(data, dim=1)
             qu_x = self.vaes[0].encode(X)
             return qu_x.mean
-        for dm, vae in zip(data, self.vaes):
-            qu_x = vae.encode(dm)
-            U.append(qu_x.mean)
+        else:
+            U = []
+            for dm, vae in zip(data, self.vaes):
+                qu_x = vae.encode(dm)
+                U.append(qu_x.mean)
 
-        full_latent = torch.concat(U, dim=1)
-        return full_latent
+            full_latent = torch.concat(U, dim=1)
+            return full_latent
 
     def decode(self, full_latent, **kwargs):
         # convert z and W to image and depth
@@ -157,3 +163,15 @@ class NonDisentanglingAE(nn.Module):
                 px_us_dists.append(ld(act(split), scale=scale))
 
         return px_us_dists
+
+    def scale_latents(self, latents, reverse=False):
+        if reverse:
+            if len(self.latent_scale.shape) == 1:
+                return (latents * self.latent_scale[None, :, None, None]) + self.latent_mean[None, :, None, None]
+            else:
+                return (latents * self.latent_scale) + self.latent_mean
+        else:
+            if len(self.latent_scale.shape) == 1:
+                return (latents - self.latent_mean[None, :, None, None]) / self.latent_scale[None, :, None, None]
+            else:
+                return (latents - self.latent_mean) / self.latent_scale

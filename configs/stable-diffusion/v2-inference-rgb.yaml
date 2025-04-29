@@ -9,12 +9,13 @@ model:
     timesteps: 1000
     first_stage_key: "jpg"
     cond_stage_key: "txt"
-    input_shape: [4, 32, 32]
+    input_shape: [4, 16, 16]
     cond_stage_trainable: false
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
     scale_factor: 0.18215
-    use_ema: True
+    use_ema: False
+    reset_num_ema_updates: False
 
     unet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
@@ -35,38 +36,43 @@ model:
         context_dim:
         legacy: False
 
+
     first_stage_config:
-      target: ldm.models.mmvae_autoencoder.MMVAEplus
+      target: ldm.models.non_disentangled_autoencoder.NonDisentanglingAE
       params:
         prior_dist: normal
-        latent_channel_z: 2
-        latent_channel_w: 2
-        ckpt_path: # "/home/ds3119/multimodal_generation/trained_models/model_8.rar"
-        avg_z: True
+        latent_channel_u: 4
+        ckpt_path: "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_04_28__13_53_22_rgb_only_ae/model_10.rar"
+        seperable: False
+        lik_dist_splits: [ 3 ]
+        lik_dists: [ Laplace ]
+        final_acts: [ identity ]
+        llik_scales: [ 1.0 ]
+        scale_per_channel: False
 
         vae_params:
           - target: ldm.models.autoencoder.AutoencoderKL  # RGB images
-            params: #
-              ckpt_path: # "/home/ds3119/multimodal_generation/trained_models/model_8.rar"
+            params:
               embed_dim: 4  #  = latent_channel_z + latent_channel_w
               monitor: val/rec_loss
-              embed_spatial_dim: 32
+              embed_spatial_dim: 16
+              return_lik_dist: False
               ddconfig:
                 #attn_type: "vanilla-xformers"
                 double_z: true
                 z_channels: 4  # This is really z + w channels
-                w_channels: 2
+                w_channels: 2  # Unused in this case
                 resolution: 256
                 in_channels: 3
                 out_ch: 3
                 ch: 128
                 ch_mult:
-                - 1
-                - 2
-                - 4
-                - 4
+                  - 1
+                  - 2
+                  - 4
+                  - 4
                 num_res_blocks: 2
-                attn_resolutions: []
+                attn_resolutions: [ ]
                 dropout: 0.0
                 checkpoint: True
               lossconfig:

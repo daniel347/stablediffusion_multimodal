@@ -21,7 +21,6 @@ class NonDisentanglingObjective(torch.nn.Module):
 
         self.lpips = pyiqa.create_metric("lpips", device=device, as_loss=True)
         self.mod = model.module.module if data_parallel else model.module
-        self.all_combinations = self.mod.all_combinations
 
         self.wlpips = wlpips
         self.wadversary = wadversary
@@ -43,7 +42,7 @@ class NonDisentanglingObjective(torch.nn.Module):
             lw = lw - self.beta * l_kl_div
             loss_dict["prior"] -= l_kl_div.detach().cpu().sum().item()
 
-        return lw, uss, loss_dict
+        return lw.unsqueeze(0), torch.stack(uss), loss_dict
 
     def forward(self, model, x, K=1, test=False, **kwargs):
         S = compute_microbatch_split(x, K)

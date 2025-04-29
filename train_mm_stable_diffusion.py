@@ -45,6 +45,7 @@ import pyiqa
 import cmmd_pytorch as cmmd
 from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, duplicate_stable_diff_weights, move_data_to_device, override_config
 from reconstruct_model_phema import reconstruct_phema
+import ldm.models.diffusion as diffusion
 
 import random
 from functools import partial
@@ -60,9 +61,10 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("Try NVidias EDM2 U-net model with their loss and timestep sampling strategy. "
-         "We also used a learned logvar weighting for the timesteps loss, with a penalty on too large values")
-name = "test_edm2"
+notes = ("Train diffusion with 32x32 latents. THe semantic segmentation autoencoder reconstruction is poor, "
+         "so we dont expect brilliant results, but if we avoid unrealistic RGB generations this would indicate "
+         "diffusion prefers higher resolution latents")
+name = "32_latents"
 
 
 def setup(rank, world_size):
@@ -299,6 +301,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         else:
             ema = DummyEMA(model)
 
+        if "sampler" in conf:
+            sampler_conf = OmegaConf.to_container(conf.sampler)
+            if "ddpm" in sampler_conf["target"]:
+                sampler = model
+            else:
+                sampler_conf["params"]["model"] = model
+                sampler_conf["params"]["device"] = device
+                sampler = instantiate_from_config(sampler_conf)
+
         # Set experiment name if not set
         if not conf.experiment:
             conf.experiment = model.modelName
@@ -353,17 +364,19 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if "grad_clipper" in conf.training:
             grad_clipper = GradAutoClipper(model, **conf.training.grad_clipper)
 
-        """
+
         scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=200),
                                       CosineAnnealingWarmRestarts(optimizer, 4000, 1, eta_min=0.1 * conf.training.lr)])
                                       # ExponentialLR(optimizer, conf.training.gamma)])
-                                     """
 
+
+        """
         scheduler = LambdaLR(optimizer, lambda epoch: learning_rate_schedule(epoch * conf.training.batch_size,
                                                                              conf.training.batch_size,
                                                                              ref_lr=conf.training.lr,
                                                                              ref_batches=1000,
                                                                              rampup_Mimg=0.005))
+        """
 
         scheduler_step_freq = 1
 
@@ -480,7 +493,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         latents = model_first_stage.encode(data, avg_z=avg_z)
 
-                    if not avg_z:
+                    if isinstance(latents, list):
                         latents = torch.cat(latents, dim=1)
 
                     print(latents.shape)
@@ -583,6 +596,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         def test_epoch(epoch, reencode_end=False):
             step = (epoch+1) * len(train_loader) if log_iterations else epoch
+            if "sampler" in conf:
+                run_params = conf.sampler.run_params
+            else:
+                run_params = {"S": 1000}  # For all but DDPM we must specify a number of timesteps, so we default to 1000
 
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0)
@@ -613,8 +630,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                                     size=(N_gen,),
                                                     device=device)
 
-                        samples_zw = model.module.sample((classes if return_class else None), verbose=enable_pbars, batch_size=N_gen) if data_parallel else \
-                                     model.sample((classes if return_class else None), verbose=enable_pbars, batch_size=N_gen)
+                        samples_zw = sampler.sample(verbose=enable_pbars,
+                                                    batch_size=N_gen,
+                                                    shape=model.input_shape,
+                                                    conditioning=(classes if return_class else None),
+                                                    **run_params)
 
                         # print(f"Generated latent scale: {samples_zw.std(dim=(0, 2, 3))}   mean: {samples_zw.mean(dim=(0, 2, 3))}")
 
@@ -656,7 +676,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             return epoch_loss
 
         def test_metrics(epoch, n_samples=32, use_diffusion=True, reencode_end=False, metrics=["fid", "kid", "cmmd"]):
-            step = (epoch+1) * len(train_loader)
+            if "sampler" in conf:
+                run_params = conf.sampler.run_params
+            else:
+                run_params = {"S": 1000}  # For all but DDPM we must specify a number of timesteps, so we default to 1000
+
+            step = ((epoch+1) * len(train_loader)) if log_iterations else epoch
 
             gen_batch_size = 16
             n_batches = n_samples // gen_batch_size
@@ -682,9 +707,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                                     size=(gen_batch_size,),
                                                     device=device)
 
-                        latents = model.module.sample((classes if return_class else None), verbose=enable_pbars,
-                                                      batch_size=gen_batch_size) if data_parallel else model.sample(
-                            (classes if return_class else None), verbose=enable_pbars, batch_size=gen_batch_size)
+                        latents = sampler.sample(verbose=enable_pbars,
+                                                 batch_size=gen_batch_size,
+                                                 shape=model.input_shape,
+                                                 conditioning=(classes if return_class else None),
+                                                 **run_params)
 
                         latents = model_first_stage.scale_latents(latents, reverse=True)
                     else:
@@ -745,8 +772,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 test_epoch(step)
                 test_metrics(step)
 
+                log_step = ((step + 1) * len(train_loader)) if log_iterations else step
+
                 if enable_wandb:
-                    wandb.log({"n_epochs": out_epochs[step], "ema_std": out_stds[step]}, step=step)
+                    wandb.log({"n_epochs": out_epochs[step], "ema_std": out_stds[step]}, step=log_step)
 
 
         def plot_timestep_logvars():
@@ -862,7 +891,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train_only_rgb.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

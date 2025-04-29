@@ -76,6 +76,7 @@ class DDIMSampler(object):
                unconditional_conditioning=None, # this has to come in the same format as the conditioning, # e.g. as encoded tokens, ...
                dynamic_threshold=None,
                ucg_schedule=None,
+               return_intermediates=False,
                **kwargs
                ):
         if conditioning is not None:
@@ -118,7 +119,10 @@ class DDIMSampler(object):
                                                     dynamic_threshold=dynamic_threshold,
                                                     ucg_schedule=ucg_schedule
                                                     )
-        return samples, intermediates
+        if return_intermediates:
+            return samples, intermediates
+        else:
+            return samples
 
     @torch.no_grad()
     def ddim_sampling(self, cond, shape,

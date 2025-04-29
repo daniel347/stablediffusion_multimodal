@@ -356,7 +356,7 @@ class DDPM(pl.LightningModule):
         return img
 
     @torch.no_grad()
-    def sample(self, batch_size=16, return_intermediates=False):
+    def sample(self, batch_size=16, return_intermediates=False, **kwargs):
         return self.p_sample_loop((batch_size, *self.input_shape),
                                   return_intermediates=return_intermediates)
 
@@ -1112,20 +1112,20 @@ class LatentDiffusion(DDPM):
         return img
 
     @torch.no_grad()
-    def sample(self, cond, batch_size=16, return_intermediates=False, x_T=None,
+    def sample(self, S, batch_size, shape, conditioning=None, return_intermediates=False, x_T=None,
                verbose=True, timesteps=None, quantize_denoised=False,
-               mask=None, x0=None, shape=None, **kwargs):
-        if cond is not None:
-            if isinstance(cond, dict):
-                cond = {key: cond[key][:batch_size] if not isinstance(cond[key], list) else
-                list(map(lambda x: x[:batch_size], cond[key])) for key in cond}
+               mask=None, x0=None, **kwargs):
+        if conditioning is not None:
+            if isinstance(conditioning, dict):
+                conditioning = {key: conditioning[key][:batch_size] if not isinstance(conditioning[key], list) else
+                list(map(lambda x: x[:batch_size], conditioning[key])) for key in conditioning}
             else:
-                cond = [c[:batch_size] for c in cond] if isinstance(cond, list) else cond[:batch_size]
+                conditioning = [c[:batch_size] for c in conditioning] if isinstance(conditioning, list) else conditioning[:batch_size]
 
         if shape is None:
             shape = (batch_size, *self.input_shape)
 
-        return self.p_sample_loop(cond,
+        return self.p_sample_loop(conditioning,
                                   shape,
                                   return_intermediates=return_intermediates, x_T=x_T,
                                   verbose=verbose, timesteps=timesteps, quantize_denoised=quantize_denoised,
@@ -1140,7 +1140,7 @@ class LatentDiffusion(DDPM):
                                                          shape, cond, verbose=False, **kwargs)
 
         else:
-            samples, intermediates = self.sample(cond=cond, batch_size=batch_size,
+            samples, intermediates = self.sample(conditioning=cond, batch_size=batch_size,
                                                  return_intermediates=True, **kwargs)
 
         return samples, intermediates

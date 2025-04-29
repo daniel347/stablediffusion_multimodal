@@ -5,7 +5,7 @@ print_freq: 50
 
 function:
   name: training_loop
-  kwargs:
+  kwargs: {}
 
 data:
   dataset_name: mm_celeba
@@ -19,29 +19,28 @@ data:
 
 training:
   use_mixed_precision: False
-  objective: non_disentangled_objective
+
   lr: 1e-4  # 3.0e-4
   batch_size: 32
   num_epochs: 10
   patience: 3
 
-  weight_semseg_classes: # semseg_class_freqs.pt
-
-  beta: 1e-6
-  z_close_weight: 500000
-
   start_epoch: 10
-
   K: 1
 
-  wlpips: [25.0, 0.0]
-  wadversary: 0
+  objective:
+    name: non_disentangled_objective
+    params:
+      wlpips: [ 1000, 0.0 ]
+      wadversary: 0
+      beta: 1
+      channel_weighting: #
 
   grad_clipper:
-          clip_percentile: 95
-          clip_update_freq: 10
-          keep_history_upto: 5000
-          start_clip: 10
+    clip_percentile: 95
+    clip_update_freq: 10
+    keep_history_upto: 5000
+    start_clip: 10
 
   #discriminator:
   #  target: ldm.models.discriminator.MMDiscriminator

@@ -45,6 +45,7 @@ class DPMSolverSampler(object):
                log_every_t=100,
                unconditional_guidance_scale=1.,
                unconditional_conditioning=None,
+               return_intermediates=False,
                # this has to come in the same format as the conditioning, # e.g. as encoded tokens, ...
                **kwargs
                ):
@@ -93,4 +94,7 @@ class DPMSolverSampler(object):
         x = dpm_solver.sample(img, steps=S, skip_type="time_uniform", method="multistep", order=2,
                               lower_order_final=True)
 
-        return x.to(device), None
+        if return_intermediates:
+            return x.to(device), None
+        else:
+            return x.to(device)

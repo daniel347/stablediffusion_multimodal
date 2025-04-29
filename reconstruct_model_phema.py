@@ -124,7 +124,7 @@ def reconstruct_phema(
 
 
 if __name__ == "__main__":
-    saves_path = "/home/ds3119/multimodal_generation/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_04_04__20_18_28_nvidia_ema"
+    saves_path = "/home/ds3119/multimodal_generation/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_04_28__11_18_27_32_latents"
     it = reconstruct_phema(saves_path, out_std=[0.2], out_nepoch=[10], out_dir=saves_path, epoch_size=24000)
     for _ in it:
         pass

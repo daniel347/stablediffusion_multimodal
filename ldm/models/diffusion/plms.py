@@ -80,6 +80,7 @@ class PLMSSampler(object):
                unconditional_conditioning=None,
                # this has to come in the same format as the conditioning, # e.g. as encoded tokens, ...
                dynamic_threshold=None,
+               return_intermediates=False,
                **kwargs
                ):
         if conditioning is not None:
@@ -113,7 +114,11 @@ class PLMSSampler(object):
                                                     unconditional_conditioning=unconditional_conditioning,
                                                     dynamic_threshold=dynamic_threshold,
                                                     )
-        return samples, intermediates
+        if return_intermediates:
+            return samples, intermediates
+        else:
+            return samples
+
 
     @torch.no_grad()
     def plms_sampling(self, cond, shape,

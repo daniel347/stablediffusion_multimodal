@@ -36,8 +36,6 @@ training:
   num_epochs: 20
   patience: 4
 
-  weight_semseg_classes: #
-
   start_epoch: 0
   K: 1
 
