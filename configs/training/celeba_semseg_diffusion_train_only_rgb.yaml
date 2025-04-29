@@ -1,0 +1,70 @@
+seed: 1
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
+experiment: "MM_CelebA_Stable_Diffusion"
+print_freq: 50
+
+function:
+  name: training_loop  # test_epoch
+  kwargs: {}
+
+data:
+  dataset_name: mm_celeba
+  root_data_dir:  /home/ds3119/datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
+  input_size: 128
+  modality: ["colour"]
+  p_hor_flip: 0
+  p_color_jitter: 0
+  outputdir: ../outputs
+
+
+training:
+  use_mixed_precision: False
+
+  lr: 5e-4
+  gamma: 0.99
+  batch_size: 48
+  num_epochs: 20
+  start_epoch: 0
+  patience: 10
+  test_only: False
+
+  precompute_latents: True
+  force_recompute: False
+  precompute_latents_path: "latents_rgb_only"
+  compute_latent_scale: True
+  latent_scale_per_channel: False
+
+  keep_intermediate_models: True  # With false only the best model and the last model is saved, otherwise all epochs showing improvement are saved.
+
+  z_mode: "z_combiner"  # one of ["random", "avg", "z_combiner" or an integer between 0 and NUM_VAES-1]
+
+  grad_clipper:
+    clip_percentile: 95
+    clip_update_freq: 10
+    keep_history_upto: 5000
+    start_clip: 10
+
+  t_sampler:
+
+# ema:
+#   target: ldm.modules.ema.DummyEMA
+#   params: {}
+
+ema:
+  target: ldm.modules.ema.PowerFunctionEMA
+  params:
+    stds: [0.05, 0.10]
+
+sampler:
+  target: "ddpm"
+  params: {}
+  run_params:
+    S: 1000
+
+
+eval:
+  inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
+
+model_conf: configs/stable-diffusion/v2-inference-rgb.yaml
+model_initialisation:
+init_from_stable_diffusion: False
