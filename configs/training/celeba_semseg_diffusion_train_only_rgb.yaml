@@ -9,7 +9,7 @@ function:
 
 data:
   dataset_name: mm_celeba
-  root_data_dir:  /home/ds3119/datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
+  root_data_dir:  ../../datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
   input_size: 128
   modality: ["colour"]
   p_hor_flip: 0
