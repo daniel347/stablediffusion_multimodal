@@ -632,7 +632,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                         samples_zw = sampler.sample(verbose=enable_pbars,
                                                     batch_size=N_gen,
-                                                    shape=model.input_shape,
+                                                    shape=model.module.input_shape if data_parallel else model.input_shape,
                                                     conditioning=(classes if return_class else None),
                                                     **run_params)
 
@@ -709,7 +709,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                         latents = sampler.sample(verbose=enable_pbars,
                                                  batch_size=gen_batch_size,
-                                                 shape=model.input_shape,
+                                                 shape=model.module.input_shape if data_parallel else model.input_shape,
                                                  conditioning=(classes if return_class else None),
                                                  **run_params)
 

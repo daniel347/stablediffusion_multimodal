@@ -1124,6 +1124,8 @@ class LatentDiffusion(DDPM):
 
         if shape is None:
             shape = (batch_size, *self.input_shape)
+        else:
+            shape = (batch_size, *shape)
 
         return self.p_sample_loop(conditioning,
                                   shape,
