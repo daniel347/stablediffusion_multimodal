@@ -39,7 +39,7 @@ import glob
 import logging
 
 from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
-from ldm.data import get_dataset
+from ldm.data import get_dataset, MMCelebA
 from ldm.modules.ema import DummyEMA
 import pyiqa
 import cmmd_pytorch as cmmd
@@ -61,10 +61,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("Train diffusion with 32x32 latents. THe semantic segmentation autoencoder reconstruction is poor, "
-         "so we dont expect brilliant results, but if we avoid unrealistic RGB generations this would indicate "
-         "diffusion prefers higher resolution latents")
-name = "32_latents"
+notes = ("We try to train diffusion with the original stable diffusion autoencoder. This repeats the past experiment with improved diffusion training.")
+name = "rgb_sd_ae"
 
 
 def setup(rank, world_size):
@@ -309,6 +307,23 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 sampler_conf["params"]["model"] = model
                 sampler_conf["params"]["device"] = device
                 sampler = instantiate_from_config(sampler_conf)
+
+        if "guidance" in conf:
+            meas_models = []
+            for meas_conf in conf.guidance.meas_confs:
+                if meas_conf is None:
+                    meas_models.append(None)
+                else:
+                    meas_models.append(instantiate_from_config(meas_conf))
+
+            guider_conf = OmegaConf.to_container(conf.guidance.guider)
+            guider_conf["params"]["model_first_stage"] = model_first_stage
+            guider_conf["params"]["measurement_models"] = meas_models
+
+            guider = instantiate_from_config(guider_conf)
+        else:
+            guider = None
+
 
         # Set experiment name if not set
         if not conf.experiment:
@@ -675,7 +690,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return epoch_loss
 
-        def test_metrics(epoch, n_samples=32, use_diffusion=True, reencode_end=False, metrics=["fid", "kid", "cmmd"]):
+        def test_metrics(epoch, n_samples=32, use_diffusion=True, reencode_end=False, metrics=["fid", "kid", "cmmd"], log_to_wandb=False):
             if "sampler" in conf:
                 run_params = conf.sampler.run_params
             else:
@@ -698,7 +713,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 pbar = range(n_batches)
 
             model.eval()
-            with torch.no_grad():
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for n in pbar:
                     if use_diffusion:
                         if return_class:
@@ -729,6 +744,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         for i, s in enumerate(samples.mean):
                             s_disp = display_data_fs[m](s.detach().cpu())
                             tvu.save_image(s_disp, os.path.join(tempdirs[name], f"sample_{name}_{n * gen_batch_size + i}.png"))
+
+                            if log_to_wandb:
+                                step_num = ((n*gen_batch_size + i + 1) * len(train_loader)) if log_iterations else n*gen_batch_size + i
+                                run.log({f"Generation/m{m}": wandb.Image(s_disp)}, step=step_num)
 
             metric_scores = {}
             for met in metrics:
@@ -785,6 +804,165 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             plot.set(xlabel="Diffusion timestep", ylabel="timestep log weighting")
             fig = plot.get_figure()
             fig.savefig(os.path.join(runPath, "timestep_logvars.png"))
+
+
+        def test_compare_bisenet(epoch, n_samples=32):
+            step = ((epoch + 1) * len(train_loader)) if log_iterations else epoch
+
+            test_metrics(epoch, n_samples=n_samples, log_to_wandb=True)  # Generate images with our method
+            colour_input_folder = os.path.join(runPath, f'temp_fid_colour')
+
+            run_bisenet(epoch, colour_input_folder)
+
+
+        def run_bisenet(epoch, img_dir=None, dataloader=None, out_folder_name="bisenet_output", n_imgs=32):
+            bisenet_output_folder = os.path.join(runPath, out_folder_name)
+            if not os.path.exists(bisenet_output_folder):
+                os.mkdir(bisenet_output_folder)
+
+            from BiSeNetFace.model import BiSeNet
+            from BiSeNetFace.remap_classes import bisenet_to_mm_class_inds
+            from PIL import Image
+
+            out_folder_name = os.path.join(runPath, out_folder_name)
+            if not os.path.exists(out_folder_name):
+                os.mkdir(out_folder_name)
+
+
+            cp = '79999_iter.pth'
+
+            n_classes = 19
+            net = BiSeNet(n_classes=n_classes)
+            net.to(device)
+            save_pth = os.path.join('BiSeNetFace/res/cp', cp)
+            net.load_state_dict(torch.load(save_pth))
+            net.eval()
+
+            to_tensor = v2.Compose([
+                v2.ToTensor(),
+                v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+            ])
+
+            B = 1 if img_dir is not None else conf.training.batch_size
+
+            iter = dataloader if dataloader is not None else os.listdir(img_dir)
+            if enable_pbars:
+                iter = tqdm.tqdm(iter)
+
+            with torch.no_grad():
+                for i, data in enumerate(iter):
+                    if isinstance(data, str):  # we have a file path
+                        img = Image.open(os.path.join(img_dir, data))
+                        orig_size = img.size
+
+                        image = img.resize((512, 512), Image.BILINEAR)
+                        image = to_tensor(image)
+                        image = torch.unsqueeze(image, 0)
+                        image = image.to(device)
+                    else:
+                        img = data[0]
+                        orig_size = img.shape[2:]
+                        image = v2.functional.resize(img, (512, 512), Image.BILINEAR, antialias=True)
+                        image = v2.functional.normalize(image, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
+                        image = image.to(device)
+
+
+                    out = net(image)[0]
+                    parsing = out.argmax(1)
+                    s_disp = []
+                    for p in parsing:
+                        p = bisenet_to_mm_class_inds(p)
+                        p = MMCelebA.index_semseg_to_one_hot(p)
+                        s_disp.append(display_data_fs[1](p.detach().cpu()))
+
+                    s_disp = torch.stack(s_disp, dim=0)
+                    s_disp = v2.functional.resize(s_disp, orig_size, v2.InterpolationMode.BILINEAR, antialias=True)
+
+                    for j, s in enumerate(s_disp):
+                        img_path = os.path.join(out_folder_name, f"bisenet_{i*B + j}.png")
+                        tvu.save_image(s, img_path)
+
+                        if enable_wandb:
+                            step_num = ((i*B + j + 1) * len(train_loader)) if log_iterations else i*B + j
+                            run.log({"Generation/bisenet_m1": wandb.Image(s_disp)}, step=step_num)
+
+                    if i*B >= n_imgs:
+                        break
+
+        def generate_conditional(n_samples=32, run_bisenet_on_input=False):
+            if "sampler" in conf:
+                run_params = conf.sampler.run_params
+            else:
+                run_params = {
+                    "S": 1000}  # For all but DDPM we must specify a number of timesteps, so we default to 1000
+
+            gen_batch_size = conf.training.batch_size  # Set this to control gen batch size
+
+            if enable_pbars:
+                pbar = tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0)
+            else:
+                pbar = enumerate(test_loader)
+
+            for i, dataT in pbar:
+                if return_class:
+                    data, classes = move_data_to_device(dataT, device=device)
+                else:
+                    data = move_data_to_device(dataT, device=device)
+
+                for m, (name, dbatch) in enumerate(zip(modalities, data)):
+                    for k, s in enumerate(dbatch):
+                        save_and_log_img(s.unsqueeze(0).detach().cpu(), f'Generation/m{m}_{i * gen_batch_size + k}', runPath,
+                                         display_data_fs[m], 0, run, save_kwargs={})
+
+                if i*gen_batch_size >= n_samples:
+                    raise ValueError
+
+            model.eval()
+            with ema.ema_scope("Epoch test"):
+                for i, dataT in pbar:
+                    if return_class:
+                        data, classes = move_data_to_device(dataT, device=device)
+                    else:
+                        data = move_data_to_device(dataT, device=device)
+
+                    y = []
+                    for d, meas_model in zip(data, meas_models):
+                        if meas_model is None:
+                            y.append(None)
+                        else:
+                            y.append(meas_model(d))
+
+                    latents = sampler.sample(verbose=enable_pbars,
+                                             batch_size=gen_batch_size,
+                                             shape=model.module.input_shape if data_parallel else model.input_shape,
+                                             conditioning=None,
+                                             guidance=guider,
+                                             y=y,
+                                             **run_params)
+
+                    latents = model_first_stage.scale_latents(latents, reverse=True)
+                    samples_x = model_first_stage.decode(latents)
+
+                    print(f"latent shape: {latents.shape}")
+
+                    save_and_log_latents(latents, f'Generation/latent_{i*gen_batch_size}', runPath, 0,
+                                         run)
+
+                    for m, (name, samples) in enumerate(zip(modalities, samples_x)):
+                        print(f"sample modality {m} shape: {samples.mean.shape}")
+                        for k, s in enumerate(samples.mean):
+                            save_and_log_img(s.unsqueeze(0), f'Generation/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
+
+                    if i * gen_batch_size >= n_samples:
+                        break
+
+            if run_bisenet_on_input:
+                # Reload the dataset - this is quite gross
+                _, _test_dataset = load_image_datasets(conf)
+                _, _test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
+                                                               data_parallel)
+
+                run_bisenet(0, dataloader=_test_loader)
 
 
         def training_loop():

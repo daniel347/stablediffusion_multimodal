@@ -1,4 +1,5 @@
 import torch
+from torch import nn
 import pytorch_lightning as pl
 import torch.nn.functional as F
 from contextlib import contextmanager
@@ -52,7 +53,7 @@ class AutoencoderKL(pl.LightningModule):
             self.init_from_ckpt(ckpt_path, ignore_keys=ignore_keys, full_sd=ckpt_is_full_sd)
 
     def init_from_ckpt(self, path, ignore_keys=list(), full_sd=False):
-        sd = torch.load(path, map_location="cpu")["state_dict"]
+        sd = torch.load(path, map_location="cpu")
         if full_sd:
             first_stage_dict = {}
             for name, param in sd.items():
@@ -229,13 +230,28 @@ class IdentityFirstStage(torch.nn.Module):
 
 
 class AutoencoderOrigWrapper(AutoencoderKL):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, scale_per_channel=False, **kwargs):
         super(AutoencoderOrigWrapper, self).__init__(*args, **kwargs)
 
         self.w_channels = kwargs.get("ddconfig", {"z_channels": 0})["z_channels"]
+        self.u_channels = self.w_channels
         self.z_channels = 0
 
         self.vaes = [self]  # I hate it
+        self.llik_scales = [1.0]
+
+        self.can_cross_generate = False
+        self.can_sample = False
+        self.factorised_latent_space = False
+
+        if scale_per_channel:
+            self.latent_mean = nn.Parameter(torch.zeros(self.u_channels))
+            self.latent_scale = nn.Parameter(torch.ones(self.u_channels) * 1.0 / 0.18215)
+        else:
+            self.latent_mean = nn.Parameter(torch.tensor(0.0))
+            self.latent_scale = nn.Parameter(torch.tensor(1.0 / 0.18215))
+
+
 
     def encode(self, x, **kwargs):
         enc_dist = super(AutoencoderOrigWrapper, self).encode(x[0])
@@ -245,8 +261,14 @@ class AutoencoderOrigWrapper(AutoencoderKL):
         mean = super(AutoencoderOrigWrapper, self).decode(z)
         return [Laplace(loc=mean, scale=torch.ones_like(mean))]
 
-    def scale_latents(self, z, reverse=False):
+    def scale_latents(self, latents, reverse=False):
         if reverse:
-            return z / 0.18215
+            if len(self.latent_scale.shape) == 1:
+                return (latents * self.latent_scale[None, :, None, None]) + self.latent_mean[None, :, None, None]
+            else:
+                return (latents * self.latent_scale) + self.latent_mean
         else:
-            return z * 0.18215
+            if len(self.latent_scale.shape) == 1:
+                return (latents - self.latent_mean[None, :, None, None]) / self.latent_scale[None, :, None, None]
+            else:
+                return (latents - self.latent_mean) / self.latent_scale

@@ -15,7 +15,7 @@ model:
     monitor: val/loss_simple_ema
     make_it_fit: True
     scale_factor: 0.18215
-    use_ema: True
+    use_ema: False
     ckpt_path: # "checkpoints/v2-1_512-ema-pruned.ckpt"
     reset_num_ema_updates: False
 
@@ -43,7 +43,8 @@ model:
       params:
         embed_dim: 4
         monitor: val/rec_loss
-        ckpt_is_full_sd: True
+        ckpt_is_full_sd: False
+        ckpt_path: "checkpoints/sd-v1-4-autoencoder.ckpt"
         ddconfig:
           #attn_type: "vanilla-xformers"
           double_z: true

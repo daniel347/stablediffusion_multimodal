@@ -5,7 +5,7 @@ print_freq: 50
 
 function:
   name: test_optimum_EMA # training_loop  # test_epoch
-  kwargs: {out_epochs: [7, 11, 15], out_stds: [0.1, 0.125, 0.15, 0.175, 0.2, 0.225]}
+  kwargs: {out_epochs: [7, 11, 14], out_stds: [0.1, 0.125, 0.15, 0.175, 0.2, 0.225]}
 
 data:
   dataset_name: mm_celeba
@@ -22,7 +22,7 @@ training:
 
   lr: 5e-4
   gamma: 0.99
-  batch_size: 48
+  batch_size: 32
   num_epochs: 20
   start_epoch: 0
   patience: 10
@@ -46,14 +46,14 @@ training:
 
   t_sampler:
 
-# ema:
-#   target: ldm.modules.ema.DummyEMA
-#   params: {}
-
 ema:
-  target: ldm.modules.ema.PowerFunctionEMA
-  params:
-    stds: [0.05, 0.10]
+  target: ldm.modules.ema.DummyEMA
+  params: {}
+
+# ema:
+#   target: ldm.modules.ema.PowerFunctionEMA
+#   params:
+#     stds: [0.05, 0.10]
 
 sampler:
   target: "ddpm"

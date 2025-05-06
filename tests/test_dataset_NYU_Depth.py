@@ -2,6 +2,7 @@ import pytest
 from ldm.data import get_dataset
 from torchvision.transforms import v2
 import torch
+import torchvision.utils as tvu
 
 dataset_opts = {"imagenet": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
                              "modality": ["colour", "depth"],
@@ -11,7 +12,7 @@ dataset_opts = {"imagenet": {"transform": v2.Compose([v2.Resize(256), v2.CenterC
                               "root_data_dir": "../mmvaeplus/data/nyu_data"},
                 "mm_celeba": {"transform": v2.Compose([v2.Resize([256, 256])]),
                               "modality": ["colour", "semseg"],
-                              "root_data_dir": "../mmvaeplus/data/CelebAMask-HQ"}}
+                              "root_data_dir": "../../datasets/CelebAMask-HQ"}}
 
 
 @pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "mm_celeba"), ("val", "nyu_depth"), ("val", "imagenet"), ("val", "mm_celeba")])
@@ -85,3 +86,35 @@ def test_len(split, dataset_name, expected_len):
     train_dataset = get_dataset(dataset_name, **dataset_opts[dataset_name], split=split)
 
     assert len(train_dataset) == expected_len
+
+
+def test_celeba_simgle_label_compat_semseg():
+    opts = dataset_opts["mm_celeba"]
+    opts["single_label"] = True
+    dataset = get_dataset("mm_celeba", **opts, split="train")
+
+    _, semseg = dataset[0]
+
+    assert semseg.shape == (256, 256)
+    assert semseg >= 0
+    assert semseg <= 18
+
+    rgb_display = dataset.semseg_display(semseg)
+    assert rgb_display.shape == (3, 256, 256)
+    assert rgb_display.dtype == torch.float32
+    assert rgb_display.min() >= 0.0
+    assert rgb_display.max() <= 1.0
+
+
+def test_celeba_single_label_vis_images():
+    opts = dataset_opts["mm_celeba"]
+    opts["single_label"] = True
+    dataset = get_dataset("mm_celeba", **dataset_opts["mm_celeba"], split="train")
+
+    for i, (rgb, semseg) in enumerate(dataset):
+        semseg_disp = dataset.semseg_display(semseg)
+        tvu.save_image(semseg_disp, f"celeba_semseg_{i}.png")
+
+        if i >= 10:
+            break
+

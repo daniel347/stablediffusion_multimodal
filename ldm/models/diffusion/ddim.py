@@ -3,6 +3,7 @@
 import torch
 import numpy as np
 from tqdm import tqdm
+from contextlib import nullcontext
 
 from ldm.modules.diffusionmodules.util import make_ddim_sampling_parameters, make_ddim_timesteps, noise_like, extract_into_tensor
 
@@ -52,7 +53,6 @@ class DDIMSampler(object):
                         1 - self.alphas_cumprod / self.alphas_cumprod_prev))
         self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
 
-    @torch.no_grad()
     def sample(self,
                S,
                batch_size,
@@ -77,6 +77,8 @@ class DDIMSampler(object):
                dynamic_threshold=None,
                ucg_schedule=None,
                return_intermediates=False,
+               guidance=None,
+               y=None,
                **kwargs
                ):
         if conditioning is not None:
@@ -102,36 +104,38 @@ class DDIMSampler(object):
         size = (batch_size, C, H, W)
         print(f'Data shape for DDIM sampling is {size}, eta {eta}')
 
-        samples, intermediates = self.ddim_sampling(conditioning, size,
-                                                    callback=callback,
-                                                    img_callback=img_callback,
-                                                    quantize_denoised=quantize_x0,
-                                                    mask=mask, x0=x0,
-                                                    ddim_use_original_steps=False,
-                                                    noise_dropout=noise_dropout,
-                                                    temperature=temperature,
-                                                    score_corrector=score_corrector,
-                                                    corrector_kwargs=corrector_kwargs,
-                                                    x_T=x_T,
-                                                    log_every_t=log_every_t,
-                                                    unconditional_guidance_scale=unconditional_guidance_scale,
-                                                    unconditional_conditioning=unconditional_conditioning,
-                                                    dynamic_threshold=dynamic_threshold,
-                                                    ucg_schedule=ucg_schedule
-                                                    )
+        with torch.no_grad() if guidance is None else nullcontext():
+            samples, intermediates = self.ddim_sampling(conditioning, size,
+                                                        callback=callback,
+                                                        img_callback=img_callback,
+                                                        quantize_denoised=quantize_x0,
+                                                        mask=mask, x0=x0,
+                                                        ddim_use_original_steps=False,
+                                                        noise_dropout=noise_dropout,
+                                                        temperature=temperature,
+                                                        score_corrector=score_corrector,
+                                                        corrector_kwargs=corrector_kwargs,
+                                                        x_T=x_T,
+                                                        log_every_t=log_every_t,
+                                                        unconditional_guidance_scale=unconditional_guidance_scale,
+                                                        unconditional_conditioning=unconditional_conditioning,
+                                                        dynamic_threshold=dynamic_threshold,
+                                                        ucg_schedule=ucg_schedule,
+                                                        guidance=guidance,
+                                                        y=y
+                                                        )
         if return_intermediates:
             return samples, intermediates
         else:
             return samples
 
-    @torch.no_grad()
     def ddim_sampling(self, cond, shape,
                       x_T=None, ddim_use_original_steps=False,
                       callback=None, timesteps=None, quantize_denoised=False,
                       mask=None, x0=None, img_callback=None, log_every_t=100,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None, dynamic_threshold=None,
-                      ucg_schedule=None):
+                      ucg_schedule=None, guidance=None, y=None):
         device = self.model.betas.device
         b = shape[0]
         if x_T is None:
@@ -144,6 +148,8 @@ class DDIMSampler(object):
         elif timesteps is not None and not ddim_use_original_steps:
             subset_end = int(min(timesteps / self.ddim_timesteps.shape[0], 1) * self.ddim_timesteps.shape[0]) - 1
             timesteps = self.ddim_timesteps[:subset_end]
+
+        assert (y is None) == (guidance is None), "require either guidance class and y to be supplied or none of them"
 
         intermediates = {'x_inter': [img], 'pred_x0': [img]}
         time_range = reversed(range(0,timesteps)) if ddim_use_original_steps else np.flip(timesteps)
@@ -171,23 +177,26 @@ class DDIMSampler(object):
                                       corrector_kwargs=corrector_kwargs,
                                       unconditional_guidance_scale=unconditional_guidance_scale,
                                       unconditional_conditioning=unconditional_conditioning,
-                                      dynamic_threshold=dynamic_threshold)
+                                      dynamic_threshold=dynamic_threshold,
+                                      guidance=guidance, y=y)
             img, pred_x0 = outs
             if callback: callback(i)
             if img_callback: img_callback(pred_x0, i)
 
             if index % log_every_t == 0 or index == total_steps - 1:
-                intermediates['x_inter'].append(img)
-                intermediates['pred_x0'].append(pred_x0)
+                intermediates['x_inter'].append(img.detach())
+                intermediates['pred_x0'].append(pred_x0.detach())
 
         return img, intermediates
 
-    @torch.no_grad()
     def p_sample_ddim(self, x, c, t, index, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None,
-                      dynamic_threshold=None):
+                      dynamic_threshold=None, guidance=None, y=None):
         b, *_, device = *x.shape, x.device
+
+        if guidance is not None:
+            x = x.requires_grad_()
 
         if unconditional_conditioning is None or unconditional_guidance_scale == 1.:
             model_output = self.model.apply_model(x, t, c)
@@ -252,7 +261,13 @@ class DDIMSampler(object):
         noise = sigma_t * noise_like(x.shape, device, repeat_noise) * temperature
         if noise_dropout > 0.:
             noise = torch.nn.functional.dropout(noise, p=noise_dropout)
+
         x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
+
+        if guidance is not None:
+            x_prev = guidance(zprev=x_prev, zt=x, z0=pred_x0, y=y, t=t)
+            x_prev = x_prev.detach_()
+
         return x_prev, pred_x0
 
     @torch.no_grad()

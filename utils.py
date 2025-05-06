@@ -218,7 +218,7 @@ def save_and_log_img(img, name, basepath, display_data_f=None,  step=0, wandb_ru
     if isinstance(img, torch.distributions.distribution.Distribution):
         img = distribution_to_tensor(img).detach().cpu()
     if display_data_f is not None:
-        img = torch.stack([display_data_f(d) for d in img], dim=0)
+        img = torch.stack([display_data_f(d.detach().cpu()) for d in img], dim=0)
 
     img_grid = make_grid(img, nrow=nrow)
 

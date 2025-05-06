@@ -9,8 +9,10 @@ import numpy as np
 import torch
 from torchvision.transforms.v2.functional import horizontal_flip
 from torchvision.transforms.v2 import ColorJitter
+import torchvision.utils as tvu
 import random
 from .register_datasets import register_dataset
+from BiSeNetFace.remap_classes import bisenet_to_mm_inds
 import glob
 import plotly.express as px
 import tqdm
@@ -21,7 +23,7 @@ import math
 @register_dataset("mm_celeba")
 class MMCelebA(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_index=False, force_reload=False, **kwargs):
+    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_index=False, force_reload=False, bisenet_compat=False, single_label=False, **kwargs):
 
         super().__init__()
         self.split = split
@@ -82,8 +84,9 @@ class MMCelebA(Dataset):
             self.colour_jitter = ColorJitter(0.1, 0.1, 0.1, 0.02)
 
         self.return_index = return_index
-
         self.force_reload = force_reload
+        self.bisenet_compat = bisenet_compat or single_label
+        self.single_label = single_label
 
     def make_semseg_class_list(self, index_list):
         self.semseg_labels = {}
@@ -116,6 +119,16 @@ class MMCelebA(Dataset):
             except Exception:
                 print(f"Failed to load mask {combined_path}, reloading")
 
+        if self.single_label:
+            combined_png_path = os.path.join(self.mask_dir, f"{index:05d}_combined.png")
+            if os.path.exists(combined_png_path) and not self.force_reload:
+                # print("Loading precomputed mask")
+                try:
+                    mask = cv2.imread(combined_png_path, cv2.IMREAD_GRAYSCALE)
+                    return mask
+                except Exception:
+                    print(f"Failed to load mask {combined_png_path}, reloading")
+
         p = os.path.join(self.mask_dir, f"{index:05d}_*.png")
         mask_files = glob.glob(p)
         mask = np.zeros((len(self.semseg_labels), 512, 512), dtype=np.float32)
@@ -125,9 +138,13 @@ class MMCelebA(Dataset):
             mask[self.semseg_labels[mask_class], :, :] = submask // 255
 
         torch_mask = torch.from_numpy(mask)
-        # torch.save(torch_mask.type(torch.uint8), combined_path)
 
-        return torch_mask
+        if self.single_label:
+            tvu.save_image(p.unsqueeze(0), combined_png_path)
+            return self.mask_to_single_labels(torch_mask)
+        else:
+            torch.save(torch_mask.type(torch.uint8), combined_path)
+            return torch_mask
 
     def read_colour(self, index):
         img = cv2.imread(os.path.join(self.img_dir, f"{index}.jpg"), cv2.IMREAD_COLOR)
@@ -139,14 +156,37 @@ class MMCelebA(Dataset):
         hex_str = hex.lstrip("#")
         return torch.Tensor([int(hex_str[i:i+2], 16) for i in [0, 2, 4]])/255.0
 
+    @staticmethod
+    def mask_to_single_labels(mask):
+        mask_inds = torch.zeros(*mask.shape[1:], dtype=torch.uint8) + 18
+
+        for i in bisenet_to_mm_inds.values():
+            if i == 18:  # Background class, which we have automatically filled
+                continue
+            mask_inds = torch.where(mask[i, :, :] > 0.5, i, mask_inds)
+        return mask_inds
+
     def semseg_display(self, mask):
+        if len(mask.shape) == 2:
+            # We have a mask of class indices
+            mask = self.index_semseg_to_one_hot(mask, num_classes=len(self.semseg_labels))
+
         mask_rgb = torch.zeros(*(3, *mask.shape[1:]), dtype=torch.float32)
-        # Norm so that multiple classes mix colours - We clamp to allow background to be 0 everywhere.
-        mask_norm = mask/torch.clamp(mask.sum(dim=0, keepdim=True), 1.0)
-        mask_norm = torch.nan_to_num(mask_norm)
-        for i in range(mask.shape[0]):
-            mask_rgb += self.semseg_display_colours[i][:, None, None] * mask_norm[i, :, :].unsqueeze(0).expand(3, -1, -1).float()
-        return mask_rgb
+        if self.bisenet_compat:
+            # We force the mask to be single class, based on class priority
+            mask_inds = self.mask_to_single_labels(mask)
+
+            semseg_display_colours_t = torch.stack([col for col in self.semseg_display_colours.values()] + [torch.zeros(3)])
+            mask_rgb = semseg_display_colours_t[mask_inds.to(int)]
+            return mask_rgb.permute((2, 0, 1))
+        else:
+            # Norm so that multiple classes mix colours - We clamp to allow background to be 0 everywhere.
+            mask_norm = mask/torch.clamp(mask.sum(dim=0, keepdim=True), 1.0)
+            mask_norm = torch.nan_to_num(mask_norm)
+
+            for i in range(mask.shape[0]):
+                mask_rgb += self.semseg_display_colours[i][:, None, None] * mask_norm[i, :, :].unsqueeze(0).expand(3, -1, -1).float()
+            return mask_rgb
 
     def colour_display(self, mask):
         return mask
@@ -216,6 +256,15 @@ class MMCelebA(Dataset):
         if flip:
             for i in range(len(outs)):
                 outs[i] = horizontal_flip(outs[i])
+
+            # swap left an right channels in semseg
+            if "semseg" in self.modality:
+                semseg_ind = self.modality.index("semseg")
+                semseg = outs[semseg_ind]
+                # swap 5 and 6 (eyes), 8 and 9 (brows) and 12 and 13 (ears)
+                permutation = [0, 1, 2, 3, 4, 6, 5, 7, 9, 8, 10, 13, 12, 14, 15, 16, 17]
+                semseg = semseg.permute(permutation)
+                outs[semseg_ind] = semseg
 
         colour_jitter = random.random() < self.p_colour_jitter
         if colour_jitter and "colour" in self.modality:

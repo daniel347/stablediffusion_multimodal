@@ -226,6 +226,7 @@ class PowerFunctionEMA(nn.Module):
         self.net = net
         self.stds = stds
         self.emas = [copy.deepcopy(net) for _std in stds]
+
         self.cur_nimg = 0
 
         self.latest_sd = None
