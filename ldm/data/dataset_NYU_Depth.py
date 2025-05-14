@@ -62,6 +62,14 @@ class NYUDepth(Dataset):
         colour_paths = list(x.scene_colour_path.iterdir())
         depth_paths = list(x.scene_depth_path.iterdir())
 
+        # Get only the files with the same index
+        colour_inds = [int(os.path.basename(p).rsplit("_", 1)[1]) for p in colour_paths]
+        depth_inds = [int(os.path.basename(p).rsplit("_", 1)[1]) for p in depth_paths]
+
+        combined_inds = list(set(colour_inds).union(depth_inds))
+        colour_paths = [x.scene_colour_path / f"{i}.png" for i in combined_inds]
+        depth_paths = [x.scene_depth_path / f"{i}.png" for i in combined_inds]
+
         assert len(colour_paths) == len(depth_paths), f"paths {x.scene_colour_path} and {x.scene_depth_path} have different numbers of files!"
         scene_class = [x.scene_class for _ in colour_paths]
         scene_ind = [x.scene_ind for _ in colour_paths]
