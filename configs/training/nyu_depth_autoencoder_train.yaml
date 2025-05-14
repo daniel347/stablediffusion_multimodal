@@ -1,44 +1,59 @@
 seed: 1
-device: "cuda:1"  # ["cuda:0", "cuda:1"]
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
 print_freq: 50
 
 function:
   name: training_loop
-  kwargs:
+  params: {}
 
 data:
-  datadir: ../mmvaeplus/data/nyu_data
-  input_size: 256
+  dataset_name: nyu_depth
+  datadir: "/rds/general/user/ds3119/ephemeral/nyuv2_processed"
+  input_size: 128
+  modalities: ["colour", "depth"]
 
   outputdir: ../outputs
 
 
 training:
-  objective: dreg
-  lr: 3.0e-4
-  batch_size: 7
-  num_epochs: 5
+  use_mixed_precision: False
+  objective:
+    name: disentangling_objective
+    params:
+      wlpips: [5000, 5000]
+      wadversary: 0
+      beta: 1
+      z_close_weight: 500000 # 0.1
+      off_combination_weight: 0.0
+      mmd_zw_weight: 1000.0  # 1000.0
+      mmd_ww_weight: 1000.0  # 1000.0
 
-  beta: 2.5
+  lr: 2.0e-4
+  batch_size: 48
+  num_epochs: 20
+  patience: 4
 
   start_epoch: 0
-
   K: 1
 
-  wlpips: 1.0
-  wadversary: 0.1
-  discriminator:
-    target: ldm.models.discriminator.MMDiscriminator
-    params:
-      disc_params:
-        - in_size: 128
-        - in_size: 128
-  discriminator_lr: 1.0e-4
+  grad_clipper:
+    clip_percentile: 95
+    clip_update_freq: 10
+    keep_history_upto: 5000
+    start_clip: 10
+
+  # discriminator:
+  #   target: ldm.models.discriminator.MMDiscriminator
+  #   params:
+  #     disc_params:
+  #       - in_size: 128
+  #       - in_size: 128
+  # discriminator_lr: 1.0e-4
 
 eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm.yaml
-model_initialisation: "../trained_models/model_8.rar"
-init_from_stable_diffusion: False
+model_initialisation: # "../trained_models/model_8.rar"
+init_from_stable_diffusion: True

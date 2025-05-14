@@ -42,14 +42,28 @@ model:
         prior_dist: normal
         latent_channel_z: 2
         latent_channel_w: 2
-        ckpt_path: "../trained_models/stable_diff_mmvae_nyu_z2_w2_2025_01_31__21_33_44/model_8.rar"
+        cross_w_mode: "sample"
+        ckpt_path:
+        avg_z: False
+        all_combinations: False
+        stop_self_z_grad: False
+        scale_per_channel: False
+
+        z_net_params:
+          target: ldm.models.z_combiner_net.ZCombinerNet
+          params:
+            z_dim: 2
+            dist_input_output: True  # work in terms of Normal distributions
+            nz: 2
+            ch: 32
+            nblocks: 1
 
         vae_params:
           - target: ldm.models.autoencoder.AutoencoderKL  # RGB images
             params:
               embed_dim: 4  #  = latent_channel_z + latent_channel_w
               monitor: val/rec_loss
-              embed_spatial_dim: 32
+              embed_spatial_dim: 16
               ddconfig:
                 #attn_type: "vanilla-xformers"
                 double_z: true
@@ -74,9 +88,10 @@ model:
             params:
               embed_dim: 4
               monitor: val/rec_loss
-              embed_spatial_dim: 32
+              embed_spatial_dim: 16
               conform_to_3_channel: true  # perform deterministic repetition and averaging to
               # convert 1 channel to 3 channels and back, so we may start from pretrained encoder
+
               ddconfig:
                 #attn_type: "vanilla-xformers"
                 double_z: true

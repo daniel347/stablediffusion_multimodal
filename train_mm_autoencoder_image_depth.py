@@ -40,11 +40,10 @@ from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_
 
 import pyiqa
 
-enable_wandb = True
+enable_wandb = False
 
-notes = ("We train just an rgb autoencoder to see if multimodality improves performance compared to single modality latent diffusion. "
-         "We use much lower beta like stable diffusion, since for the unimodal case this seems to work well")
-name = "rgb_only_ae"
+notes = ("We train an autoencoder on NYU depth using a small subset of the new NYUv2 datset, with the new autoencoder loss and architecture.")
+name = "new_ae_arch_test"
 
 
 def setup(rank, world_size):
@@ -237,7 +236,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
         tx = {"colour": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)]),
               "semseg": v2.Compose([v2.Resize(conf.data.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
-                                    v2.CenterCrop(conf.data.input_size)])}
+                                    v2.CenterCrop(conf.data.input_size)]),
+              "depth": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])}
 
         train_dataset = get_dataset(conf.data.dataset_name,
                                     root_data_dir=conf.data.datadir,
@@ -249,7 +249,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         test_dataset = get_dataset(conf.data.dataset_name,
                                    root_data_dir=conf.data.datadir,
                                    transform=tx,
-                                   split="val",
+                                   split="test",
                                    modality=modalities)
 
         display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in modalities]
@@ -275,7 +275,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 scheduler.step()
 
         objective_opts = OmegaConf.to_container(conf.training.objective.params)
-        if objective_opts["channel_weighting"] is not None:
+        if "channel_weighting" in objective_opts and objective_opts["channel_weighting"] is not None:
             print("using inverse class frequency weighting for semantic segmentation loss")
             class_freqs = torch.load(os.path.join(conf.data.datadir, objective_opts["channel_weighting"]))
             class_weights = 1.0 / class_freqs
@@ -590,7 +590,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_single_autoencoder_rgb_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
