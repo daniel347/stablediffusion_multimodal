@@ -63,8 +63,8 @@ class NYUDepth(Dataset):
         depth_paths = list(x.scene_depth_path.iterdir())
 
         # Get only the files with the same index
-        colour_inds = [int(os.path.basename(p).rsplit("_", 1)[1]) for p in colour_paths]
-        depth_inds = [int(os.path.basename(p).rsplit("_", 1)[1]) for p in depth_paths]
+        colour_inds = [int(p.name.split(".")[0]) for p in colour_paths]
+        depth_inds = [int(p.name.split(".")[0]) for p in depth_paths]
 
         combined_inds = list(set(colour_inds).union(depth_inds))
         colour_paths = [x.scene_colour_path / f"{i}.png" for i in combined_inds]
@@ -74,7 +74,7 @@ class NYUDepth(Dataset):
         scene_class = [x.scene_class for _ in colour_paths]
         scene_ind = [x.scene_ind for _ in colour_paths]
 
-        return pd.DataFrame({"colour_paths": colour_paths, "depth_paths": depth_paths, "scene_class": scene_class, "scene_ind": scene_ind})
+        return pd.DataFrame({"colour_path": colour_paths, "depth_path": depth_paths, "scene_class": scene_class, "scene_ind": scene_ind})
 
     def __len__(self):
         return len(self.index.index)
@@ -84,7 +84,7 @@ class NYUDepth(Dataset):
 
         outs = []
         for mod in self.modality:
-            img = self.mode_readers[mod](filepaths[f"{mod}_path"])
+            img = self.mode_readers[mod](str(filepaths[f"{mod}_path"]))
             if self.transform is not None:
                 if isinstance(self.transform, dict):
                     img = self.transform[mod](img)
