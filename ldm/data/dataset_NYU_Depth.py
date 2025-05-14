@@ -24,8 +24,8 @@ class NYUDepth(Dataset):
         self.split = split
         self.root_data_dir = root_data_dir
 
-        self.scene_colour_paths = list(*(Path(root_data_dir) / "colour").iterdir())
-        self.scene_depth_paths = list(*(Path(root_data_dir) / "depth").iterdir())
+        self.scene_colour_paths = list((Path(root_data_dir) / "colour").iterdir())
+        self.scene_depth_paths = list((Path(root_data_dir) / "depth").iterdir())
         self.scenes = [scene.name for scene in self.scene_colour_paths]
 
         self.scenes = pd.DataFrame({"scene_class": [s.rsplit("_", 1)[0] for s in self.scenes],
@@ -36,16 +36,13 @@ class NYUDepth(Dataset):
         self.scenes = self.scenes.sort_values(by=["scene_class", "scene_ind"])
 
         if self.split == "test":
-            self.scenes = self.scenes.groupby("scene_class").last()
+            self.scenes = self.scenes.groupby("scene_class", as_index=False).last()
         elif self.split == "train":
-            self.scenes = self.scenes.groupby("scene_class").apply(lambda x: x.iloc[:-1])
+            self.scenes = self.scenes.groupby("scene_class", as_index=False).apply(lambda x: x.iloc[:-1])
         else:
             raise ValueError(f"Unknown split: {self.split}")
 
-        self.index = self.scenes.apply(lambda x: pd.DataFrame({"colour_path": list(*x["scene_colour_path"].iterdir()),
-                                                               "depth_path": list(*x["scene_depth_path"].iterdir()),
-                                                               "scene_class": x.scene_class,
-                                                               "scene_ind": x.scene_ind}), axis=1)
+        self.index = self.scenes.apply(self.make_scene_dataframe, axis=1)
 
         if isinstance(modality, str):
             modality = [modality]
@@ -60,6 +57,16 @@ class NYUDepth(Dataset):
         self.return_index = return_index
 
         self.mode_readers = {"colour": self.read_colour, "depth": self.read_depth}
+
+    def make_scene_dataframe(self, x):
+        colour_paths = list(x.scene_colour_path.iterdir())
+        depth_paths = list(x.scene_depth_path.iterdir())
+
+        assert len(colour_paths) == len(depth_paths), f"paths {x.scene_colour_path} and {x.scene_depth_path} have different numbers of files!"
+        scene_class = [x.scene_class for _ in colour_paths]
+        scene_ind = [x.scene_ind for _ in colour_paths]
+
+        return pd.DataFrame({"colour_paths": colour_paths, "depth_paths": depth_paths, "scene_class": scene_class, "scene_ind": scene_ind})
 
     def __len__(self):
         return len(self.index.index)
