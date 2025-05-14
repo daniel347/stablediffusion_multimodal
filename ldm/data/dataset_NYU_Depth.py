@@ -25,7 +25,7 @@ class NYUDepth(Dataset):
         self.root_data_dir = root_data_dir
 
         self.scene_colour_paths = list((Path(root_data_dir) / "colour").iterdir())
-        self.scene_depth_paths = list((Path(root_data_dir) / "depth").iterdir())
+        self.scene_depth_paths = [Path(str(p).replace("colour", "depth")) for p in self.scene_colour_paths]
         self.scenes = [scene.name for scene in self.scene_colour_paths]
 
         self.scenes = pd.DataFrame({"scene_class": [s.rsplit("_", 1)[0] for s in self.scenes],
@@ -42,7 +42,10 @@ class NYUDepth(Dataset):
         else:
             raise ValueError(f"Unknown split: {self.split}")
 
-        self.index = self.scenes.apply(self.make_scene_dataframe, axis=1)
+        index_dfs = []
+        for _, scene in self.scenes.iterrows():
+            index_dfs.append(self.make_scene_dataframe(scene))
+        self.index = pd.concat(index_dfs, axis=0, ignore_index=True)
 
         if isinstance(modality, str):
             modality = [modality]
@@ -66,7 +69,7 @@ class NYUDepth(Dataset):
         colour_inds = [int(p.name.split(".")[0]) for p in colour_paths]
         depth_inds = [int(p.name.split(".")[0]) for p in depth_paths]
 
-        combined_inds = list(set(colour_inds).union(depth_inds))
+        combined_inds = list(set(colour_inds).intersection(depth_inds))
         colour_paths = [x.scene_colour_path / f"{i}.png" for i in combined_inds]
         depth_paths = [x.scene_depth_path / f"{i}.png" for i in combined_inds]
 
@@ -126,3 +129,16 @@ class NYUDepth(Dataset):
         img = img.astype(np.float32) / 65535
         return torch.from_numpy(img).permute((2, 0, 1))
 
+if __name__ == "__main__":
+    train_dataset = NYUDepth("../../datasets/nyuv2_processed", None, "test", ["colour", "depth"], 0, 0, False)
+    rgb, depth = train_dataset[0]
+
+    # NB depth is actually semseg for mm_celeba
+    _, rgb_h, rgb_w = rgb.shape
+    *_, depth_h, depth_w = depth.shape
+
+    assert rgb_w > 0
+    assert rgb_h > 0
+
+    assert depth_h > 0
+    assert depth_w > 0

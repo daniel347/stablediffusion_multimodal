@@ -10,7 +10,7 @@ dataset_opts = {"imagenet": {"transform": v2.Compose([v2.Resize(256), v2.CenterC
                              "root_data_dir": "tests/imagenet_mock"},
                 "nyu_depth": {"transform": v2.Resize([256, 256]),
                               "modality": ["colour", "depth"],
-                              "root_data_dir": "/rds/general/user/ds3119/ephemeral/nyuv2_processed"},
+                              "root_data_dir": "../../datasets/nyuv2_processed"},
                 "mm_celeba": {"transform": {"colour": v2.Resize([256, 256]), "semseg": lambda x: resize_semseg(x, (256, 256))},
                               "modality": ["colour", "semseg"],
                               "root_data_dir": "../../datasets/CelebAMask-HQ",
