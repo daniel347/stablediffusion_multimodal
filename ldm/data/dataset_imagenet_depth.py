@@ -51,7 +51,7 @@ class ImagenetMultiModal(Dataset):
             self.colour_jitter = ColorJitter(0.1, 0.1, 0.1, 0.02)
 
         self.return_class = return_class
-        if self.return_classes:
+        if self.return_class:
             classes = []
             with open(os.path.join(root_data_dir, "imagenet_classes.txt")) as f:
                 json_classes = json.load(f)

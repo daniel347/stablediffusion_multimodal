@@ -57,9 +57,11 @@ ema:
 
 sampler:
   target: ldm.models.diffusion.ddim.DDIMSampler
-  params: {eta: 0.5}
+  params: {}
   run_params:
     S: 200
+    eta: 0.5
+    timetravel_schedule: [[801, 851], [601, 651], [401, 451], [201, 251], [1, 51]]
 
 guidance:
   guider:
@@ -67,6 +69,8 @@ guidance:
     params:
       mod_weights: [1.0, 1.0]
       scale: 0.3
+      manifold_constraint: True
+      curvature_bound: 1000
 
   meas_confs:
     - null

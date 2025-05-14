@@ -1,9 +1,6 @@
-import io
 import os
 from torch.utils.data import Dataset
 import pandas as pd
-from torchvision import io
-from PIL import Image
 import cv2
 import numpy as np
 import torch
@@ -23,7 +20,18 @@ import math
 @register_dataset("mm_celeba")
 class MMCelebA(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_index=False, force_reload=False, bisenet_compat=False, single_label=False, **kwargs):
+    def __init__(self,
+                 root_data_dir,
+                 transform,
+                 split,
+                 modality,
+                 p_hor_flip=0,
+                 p_colour_jitter=0,
+                 return_index=False,
+                 force_reload=False,
+                 bisenet_compat=False,
+                 single_label=False,
+                 **kwargs):
 
         super().__init__()
         self.split = split
@@ -71,8 +79,6 @@ class MMCelebA(Dataset):
         self.index_list = self.index_mapping[self.index_mapping.split == self.split_num].idx.values
         print(f"Selected split {self.split} and found {len(self.index_list)} images")
 
-        self.mode_readers = {"colour": self.read_colour, "semseg": self.read_semseg}
-
         if isinstance(modality, str):
             modality = [modality]
         self.modality = modality
@@ -87,6 +93,8 @@ class MMCelebA(Dataset):
         self.force_reload = force_reload
         self.bisenet_compat = bisenet_compat or single_label
         self.single_label = single_label
+
+        self.mode_readers = {"colour": self.read_colour, "semseg": self.read_semseg}
 
     def make_semseg_class_list(self, index_list):
         self.semseg_labels = {}
@@ -111,13 +119,6 @@ class MMCelebA(Dataset):
         return class_counts/class_counts.sum()
 
     def read_semseg(self, index):
-        combined_path = os.path.join(self.mask_dir, f"{index:05d}_combined.pt")
-        if os.path.exists(combined_path) and not self.force_reload:
-            # print("Loading precomputed mask")
-            try:
-                return torch.load(combined_path).type(torch.float32)
-            except Exception:
-                print(f"Failed to load mask {combined_path}, reloading")
 
         if self.single_label:
             combined_png_path = os.path.join(self.mask_dir, f"{index:05d}_combined.png")
@@ -125,9 +126,17 @@ class MMCelebA(Dataset):
                 # print("Loading precomputed mask")
                 try:
                     mask = cv2.imread(combined_png_path, cv2.IMREAD_GRAYSCALE)
-                    return mask
+                    return torch.from_numpy(mask)
                 except Exception:
                     print(f"Failed to load mask {combined_png_path}, reloading")
+        else:
+            combined_path = os.path.join(self.mask_dir, f"{index:05d}_combined.pt")
+            if os.path.exists(combined_path) and not self.force_reload:
+                # print("Loading precomputed mask")
+                try:
+                    return torch.load(combined_path).type(torch.float32)
+                except Exception:
+                    print(f"Failed to load mask {combined_path}, reloading")
 
         p = os.path.join(self.mask_dir, f"{index:05d}_*.png")
         mask_files = glob.glob(p)
@@ -140,8 +149,9 @@ class MMCelebA(Dataset):
         torch_mask = torch.from_numpy(mask)
 
         if self.single_label:
-            tvu.save_image(p.unsqueeze(0), combined_png_path)
-            return self.mask_to_single_labels(torch_mask)
+            label_mask = self.mask_to_single_labels(torch_mask)
+            tvu.save_image(label_mask.unsqueeze(0).float() / 255.0, combined_png_path)
+            return label_mask
         else:
             torch.save(torch_mask.type(torch.uint8), combined_path)
             return torch_mask

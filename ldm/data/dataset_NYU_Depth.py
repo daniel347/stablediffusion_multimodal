@@ -11,6 +11,8 @@ from torchvision.transforms.v2.functional import horizontal_flip
 from torchvision.transforms.v2 import ColorJitter
 import random
 from .register_datasets import register_dataset
+from pathlib import Path
+import glob
 
 
 @register_dataset("nyu_depth")
@@ -22,11 +24,28 @@ class NYUDepth(Dataset):
         self.split = split
         self.root_data_dir = root_data_dir
 
-        self.index_path = os.path.join(root_data_dir, "data/nyu2_train.csv" if split == "train" else "data/nyu2_test.csv")
-        self.index = pd.read_csv(self.index_path, names=["colour", "depth"])
+        self.scene_colour_paths = list(*(Path(root_data_dir) / "colour").iterdir())
+        self.scene_depth_paths = list(*(Path(root_data_dir) / "depth").iterdir())
+        self.scenes = [scene.name for scene in self.scene_colour_paths]
 
-        self.mode_types = {"colour": cv2.IMREAD_COLOR, "depth": cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH}
-        self.image_depths = {"colour": 255, "depth": 255} if split == "train" else {"colour": 255, "depth": 10000}
+        self.scenes = pd.DataFrame({"scene_class": [s.rsplit("_", 1)[0] for s in self.scenes],
+                                   "scene_ind": [s.rsplit("_", 1)[1] for s in self.scenes],
+                                   "scene_colour_path": self.scene_colour_paths,
+                                   "scene_depth_path": self.scene_depth_paths})
+
+        self.scenes = self.scenes.sort_values(by=["scene_class", "scene_ind"])
+
+        if self.split == "test":
+            self.scenes = self.scenes.groupby("scene_class").last()
+        elif self.split == "train":
+            self.scenes = self.scenes.groupby("scene_class").apply(lambda x: x.iloc[:-1])
+        else:
+            raise ValueError(f"Unknown split: {self.split}")
+
+        self.index = self.scenes.apply(lambda x: pd.DataFrame({"colour_path": list(*x["scene_colour_path"].iterdir()),
+                                                               "depth_path": list(*x["scene_depth_path"].iterdir()),
+                                                               "scene_class": x.scene_class,
+                                                               "scene_ind": x.scene_ind}), axis=1)
 
         if isinstance(modality, str):
             modality = [modality]
@@ -40,6 +59,8 @@ class NYUDepth(Dataset):
 
         self.return_index = return_index
 
+        self.mode_readers = {"colour": self.read_colour, "depth": self.read_depth}
+
     def __len__(self):
         return len(self.index.index)
 
@@ -48,15 +69,12 @@ class NYUDepth(Dataset):
 
         outs = []
         for mod in self.modality:
-            img = cv2.imread(os.path.join(self.root_data_dir, filepaths[mod]), self.mode_types[mod])
-            if len(img.shape) == 2:
-                img = np.expand_dims(img, axis=-1)
-            if img.shape[-1] == 3:
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            img = img.astype(np.float32) / self.image_depths[mod]  # Normalise
-            img = torch.Tensor(img).permute((2, 0, 1))
+            img = self.mode_readers[mod](filepaths[f"{mod}_path"])
             if self.transform is not None:
-                img = self.transform(img)
+                if isinstance(self.transform, dict):
+                    img = self.transform[mod](img)
+                else:
+                    img = self.transform(img)
             outs.append(img)
 
         flip = random.random() < self.p_hor_flip
@@ -71,11 +89,25 @@ class NYUDepth(Dataset):
 
         if self.return_index:
             return outs, idx
-
-        return outs
+        else:
+            return outs
 
     def depth_display(self, img):
-        return img.repeat(1, 1, 3, 1, 1)
+        return img.repeat(3, 1, 1)
 
     def colour_display(self, img):
         return img
+
+    def read_colour(self, path):
+        img = cv2.imread(path, cv2.IMREAD_COLOR)
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = img.astype(np.float32) / 255
+        return torch.from_numpy(img).permute((2, 0, 1))
+
+    def read_depth(self, path):
+        img = cv2.imread(path, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
+        if len(img.shape) == 2:
+            img = np.expand_dims(img, axis=-1)
+        img = img.astype(np.float32) / 65535
+        return torch.from_numpy(img).permute((2, 0, 1))
+

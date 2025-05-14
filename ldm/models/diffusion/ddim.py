@@ -22,7 +22,7 @@ class DDIMSampler(object):
                 attr = attr.to(self.device)
         setattr(self, name, attr)
 
-    def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True):
+    def make_schedule(self, ddim_num_steps, ddim_discretize="uniform", ddim_eta=0., verbose=True,):
         self.ddim_timesteps = make_ddim_timesteps(ddim_discr_method=ddim_discretize, num_ddim_timesteps=ddim_num_steps,
                                                   num_ddpm_timesteps=self.ddpm_num_timesteps,verbose=verbose)
         alphas_cumprod = self.model.alphas_cumprod
@@ -53,6 +53,7 @@ class DDIMSampler(object):
                         1 - self.alphas_cumprod / self.alphas_cumprod_prev))
         self.register_buffer('ddim_sigmas_for_original_num_steps', sigmas_for_original_sampling_steps)
 
+
     def sample(self,
                S,
                batch_size,
@@ -79,8 +80,13 @@ class DDIMSampler(object):
                return_intermediates=False,
                guidance=None,
                y=None,
+               manifold_proj_f=None,
+               timetravel_schedule=[],
                **kwargs
                ):
+
+        self.timetravel_schedule = timetravel_schedule
+
         if conditioning is not None:
             if isinstance(conditioning, dict):
                 ctmp = conditioning[list(conditioning.keys())[0]]
@@ -122,7 +128,8 @@ class DDIMSampler(object):
                                                         dynamic_threshold=dynamic_threshold,
                                                         ucg_schedule=ucg_schedule,
                                                         guidance=guidance,
-                                                        y=y
+                                                        y=y,
+                                                        manifold_proj_f=manifold_proj_f
                                                         )
         if return_intermediates:
             return samples, intermediates
@@ -135,7 +142,7 @@ class DDIMSampler(object):
                       mask=None, x0=None, img_callback=None, log_every_t=100,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None, dynamic_threshold=None,
-                      ucg_schedule=None, guidance=None, y=None):
+                      ucg_schedule=None, guidance=None, y=None, manifold_proj_f=None):
         device = self.model.betas.device
         b = shape[0]
         if x_T is None:
@@ -152,13 +159,19 @@ class DDIMSampler(object):
         assert (y is None) == (guidance is None), "require either guidance class and y to be supplied or none of them"
 
         intermediates = {'x_inter': [img], 'pred_x0': [img]}
-        time_range = reversed(range(0,timesteps)) if ddim_use_original_steps else np.flip(timesteps)
+        time_range = list(reversed(range(0,timesteps)) if ddim_use_original_steps else np.flip(timesteps))
         total_steps = timesteps if ddim_use_original_steps else timesteps.shape[0]
         print(f"Running DDIM Sampling with {total_steps} timesteps")
 
         iterator = tqdm(time_range, desc='DDIM Sampler', total=total_steps)
 
-        for i, step in enumerate(iterator):
+        tt_count = 0
+
+        # for i, step in enumerate(iterator):
+        i = 0
+
+        while i < len(time_range):
+            step = time_range[i]
             index = total_steps - i - 1
             ts = torch.full((b,), step, device=device, dtype=torch.long)
 
@@ -178,21 +191,38 @@ class DDIMSampler(object):
                                       unconditional_guidance_scale=unconditional_guidance_scale,
                                       unconditional_conditioning=unconditional_conditioning,
                                       dynamic_threshold=dynamic_threshold,
-                                      guidance=guidance, y=y)
+                                      guidance=guidance, y=y, manifold_proj_f=manifold_proj_f)
             img, pred_x0 = outs
             if callback: callback(i)
             if img_callback: img_callback(pred_x0, i)
 
+            if tt_count < len(self.timetravel_schedule):
+                tt_start, tt_end = self.timetravel_schedule[tt_count]
+                print(step)
+                if step == tt_start:
+                    tt_count += 1
+
+                    assert tt_end in time_range
+                    i = time_range.index(tt_end)
+
+                    tend = torch.full((b,), tt_end, device=device, dtype=torch.long)
+                    img = self.model.q_sample(pred_x0, tend)
+                    print(f"timetravelling from {tt_start} to {tt_end}")
+                    continue
+
+
             if index % log_every_t == 0 or index == total_steps - 1:
                 intermediates['x_inter'].append(img.detach())
                 intermediates['pred_x0'].append(pred_x0.detach())
+
+            i += 1
 
         return img, intermediates
 
     def p_sample_ddim(self, x, c, t, index, repeat_noise=False, use_original_steps=False, quantize_denoised=False,
                       temperature=1., noise_dropout=0., score_corrector=None, corrector_kwargs=None,
                       unconditional_guidance_scale=1., unconditional_conditioning=None,
-                      dynamic_threshold=None, guidance=None, y=None):
+                      dynamic_threshold=None, guidance=None, y=None, manifold_proj_f=None):
         b, *_, device = *x.shape, x.device
 
         if guidance is not None:
@@ -253,6 +283,9 @@ class DDIMSampler(object):
         if quantize_denoised:
             pred_x0, _, *_ = self.model.first_stage_model.quantize(pred_x0)
 
+        if manifold_proj_f is not None:
+            pred_x0 = manifold_proj_f(pred_x0, t)
+
         if dynamic_threshold is not None:
             raise NotImplementedError()
 
@@ -265,7 +298,7 @@ class DDIMSampler(object):
         x_prev = a_prev.sqrt() * pred_x0 + dir_xt + noise
 
         if guidance is not None:
-            x_prev = guidance(zprev=x_prev, zt=x, z0=pred_x0, y=y, t=t)
+            x_prev = guidance(zprev=x_prev, zt=x, z0=pred_x0, y=y, t=t, et=e_t)
             x_prev = x_prev.detach_()
 
         return x_prev, pred_x0

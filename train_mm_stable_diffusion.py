@@ -61,8 +61,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("We try to train diffusion with the original stable diffusion autoencoder. This repeats the past experiment with improved diffusion training.")
-name = "rgb_sd_ae"
+notes = ("We generate with DDIM sampling for 200 steps with eta=0.5 and reencoding (with correct rescaling) every 25 steps between t=400 and t=900")
+name = "ddim_eta0.5_reencode_400to900_every25"
 
 
 def setup(rank, world_size):
@@ -165,6 +165,28 @@ def create_dataloaders(train_dataset, test_dataset, conf, world_size=1, rank=0, 
     return train_loader, test_loader
 
 
+class DiffusionIntermediateLogger():
+    def __init__(self, save_freq, n_save=4):
+        self.save_freq = save_freq
+        self.n_save = n_save
+        self.x0t_imgs = []
+        self.ts = []
+
+    def save_intermediate_z0t_callback(self, pred_x0, t):
+        if t % self.save_freq == 0:
+            self.x0t_imgs.append(pred_x0[:self.n_save].detach().cpu())
+            self.ts.append(t)
+
+    def save_and_log(self, path, step, run, clear=True):
+        x0t_stack = torch.stack(self.x0t_imgs)
+        for n in range(self.n_save):
+            save_and_log_latents(x0t_stack[:, n], f"Generation/intermediate_z0t_img{n}", path, step, run)
+
+        if clear:
+            self.x0t_imgs = []
+            self.ts = []
+
+
 def initialise_model(conf):
     OmegaConf.to_container(conf["model_conf"]["model"])
     model = instantiate_from_config(conf["model_conf"]["model"])
@@ -172,47 +194,6 @@ def initialise_model(conf):
     if conf.init_from_stable_diffusion:
         # sd_state_dict = torch.load("checkpoints/sd-v1-4.ckpt")
         model.init_from_ckpt("checkpoints/v2-1_512-ema-pruned.ckpt")
-
-        """
-        u_net_dict = {}
-        for name, param in sd_state_dict["state_dict"].items():
-            if "model.diffusion_model." in name:
-                new_name = name.split("model.diffusion_model.")[1]
-                u_net_dict[new_name] = param
-
-        M, U = model.model.load_state_dict(u_net_dict, strict=False)
-        for m in M:
-            print(f"Missing key: {m}")
-        for u in U:
-            print(f"Unused key: {u}")
-
-        first_stage_dict = {}
-        for name, param in sd_state_dict["state_dict"].items():
-            if "first_stage_model" in name:
-                new_name = name.split("first_stage_model.")[1]
-                first_stage_dict[new_name] = param
-
-        for vae in model.vaes:
-            ignore_keys = ["encoder.conv_in", "decoder.conv_out"] if vae.is_semseg else []
-            ignore_keys += ["encoder.conv_out", "quant_conv", "decoder.conv_in", "post_quant_conv"] if \
-            vae.decoder.z_shape[1] != 4 else []
-            sd = copy.deepcopy(first_stage_dict)
-            keys = list(sd.keys())
-            for k in keys:
-                for ik in ignore_keys:
-                    if k.startswith(ik):
-                        print("Deleting key {} from state_dict.".format(k))
-                        del sd[k]
-
-            # If we have doubled the number of channels we must go though and double all the initialisation weight shapes
-            sd = duplicate_stable_diff_weights(sd, vae)
-
-            M, U = vae.load_state_dict(sd, strict=False)
-            for m in M:
-                print(f"Missing key: {m}")
-            for u in U:
-                print(f"Unused key: {u}")
-        """
 
     return model
 
@@ -523,7 +504,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             save_dir_class.mkdir(parents=True)
 
                         save_name = save_dir_class / Path(f"latent_{ind[j].item()}.pt")
-                        torch.save(latent.cpu(), save_name)
+                        torch.save(latent.contiguous().cpu(), save_name)
 
         def train_epoch(epoch):
             model.train()
@@ -609,7 +590,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             if enable_wandb and not log_iterations: wandb.log({"Loss/train": epoch_loss}, step=epoch)
             print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
 
-        def test_epoch(epoch, reencode_end=False):
+        def test_epoch(epoch, reencode_end=False, save_intermediate_z0t=False):
             step = (epoch+1) * len(train_loader) if log_iterations else epoch
             if "sampler" in conf:
                 run_params = conf.sampler.run_params
@@ -637,6 +618,26 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     if i == 0 and epoch % 1 == 0:
                         # Perform test generations
+                        if save_intermediate_z0t:
+                            saver = DiffusionIntermediateLogger(10, n_save=16)
+                            img_callback = saver.save_intermediate_z0t_callback
+                        else:
+                            img_callback = lambda x, t: None
+
+                        if reencode_end:
+                            def manifold_proj_f(z, t):
+                                if (t[0].item()-1)//5 % 5 == 0 and t[0].item() > 400 and t[0].item() < 900:
+                                    print("reencoding")
+                                    z_scaled = model_first_stage.scale_latents(z, reverse=True)
+                                    decs = [sx.mean for sx in model_first_stage.decode(z_scaled)]
+                                    encs = model_first_stage.encode(decs)
+                                    z_out = cat_dists_or_tensor_latents(encs)
+                                    z_out = model_first_stage.scale_latents(z_out)
+                                    return z_out
+                                else:
+                                    return z
+                        else:
+                            manifold_proj_f = lambda z, t: z
 
                         N_gen = 16
                         if return_class:
@@ -649,6 +650,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                                     batch_size=N_gen,
                                                     shape=model.module.input_shape if data_parallel else model.input_shape,
                                                     conditioning=(classes if return_class else None),
+                                                    img_callback=img_callback,
+                                                    manifold_proj_f=manifold_proj_f,
                                                     **run_params)
 
                         # print(f"Generated latent scale: {samples_zw.std(dim=(0, 2, 3))}   mean: {samples_zw.mean(dim=(0, 2, 3))}")
@@ -682,6 +685,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                         save_and_log_latents(samples_zw, f'Generation/latent',
                                          runPath, step, run, wandb_kwargs=wandb_kwargs)
+
+                        if save_intermediate_z0t:
+                            saver.save_and_log(runPath, step, run)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -903,6 +909,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             else:
                 pbar = enumerate(test_loader)
 
+            """
             for i, dataT in pbar:
                 if return_class:
                     data, classes = move_data_to_device(dataT, device=device)
@@ -916,6 +923,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                 if i*gen_batch_size >= n_samples:
                     raise ValueError
+            """
 
             model.eval()
             with ema.ema_scope("Epoch test"):
@@ -952,6 +960,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         print(f"sample modality {m} shape: {samples.mean.shape}")
                         for k, s in enumerate(samples.mean):
                             save_and_log_img(s.unsqueeze(0), f'Generation/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
+
+                    for m, (name, samples) in enumerate(zip(modalities, data)):
+                        for k, s in enumerate(samples):
+                            save_and_log_img(s.unsqueeze(0), f'GT/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
+
+                    for m, (name, samples) in enumerate(zip(modalities, y)):
+                        if samples is not None:
+                            for k, s in enumerate(samples):
+                                save_and_log_img(s.unsqueeze(0), f'y/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
 
                     if i * gen_batch_size >= n_samples:
                         break
@@ -1069,7 +1086,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_diffusion_train_only_rgb.yaml")
+@hydra.main(version_base=None, config_path="configs/testing/", config_name="celeba_semseg_diffusion_latent_dps_rgb_conditioned.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
