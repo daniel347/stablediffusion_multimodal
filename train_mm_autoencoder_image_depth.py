@@ -40,7 +40,7 @@ from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_
 
 import pyiqa
 
-enable_wandb = False
+enable_wandb = True
 
 notes = ("We train an autoencoder on NYU depth using a small subset of the new NYUv2 datset, with the new autoencoder loss and architecture.")
 name = "new_ae_arch_test"

@@ -165,3 +165,7 @@ cython_debug/
 # IDEs
 .idea/
 .vscode/
+
+
+# Other repositories we dont intent to modify
+BiSeNetFace/
