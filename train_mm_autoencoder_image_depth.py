@@ -41,6 +41,7 @@ from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_
 import pyiqa
 
 enable_wandb = False
+log_iterations = True
 
 notes = ("We train an autoencoder on NYU depth using a small subset of the new NYUv2 datset, with the new autoencoder loss and architecture.")
 name = "new_ae_arch_test"
@@ -344,23 +345,26 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 if i % scheduler_step_freq == 0:
                     scheduler.step()
 
+                step = epoch * len(train_loader) + i if log_iterations else epoch
+
                 if enable_wandb and i == 0:
                     for m, (name, dbatch) in enumerate(zip(modalities, data)):
                         dbatch = dbatch.detach().cpu()
                         dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
                         grid = make_grid(dbatch, nrow=8)
-                        wandb.log({f"Data/{name}": wandb.Image(grid)}, step=epoch)
+                        wandb.log({f"Data/{name}": wandb.Image(grid)}, step=step)
 
             # Epoch loss
             epoch_loss = b_loss / len(train_loader.dataset)
             loss_series = loss_series / len(train_loader.dataset)
             if enable_wandb:
-                wandb.log({"Loss/train": epoch_loss}, step=epoch)
-                wandb.log({f"Loss/train/breakdown/{key}": val for key, val in loss_series.items()}, step=epoch)
+                wandb.log({"Loss/train": epoch_loss}, step=step)
+                wandb.log({f"Loss/train/breakdown/{key}": val for key, val in loss_series.items()}, step=step)
             print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
             print(loss_series)
 
         def test(epoch):
+            step = (epoch + 1) * len(train_loader) if log_iterations else epoch
             b_loss = 0
             loss_series = None
 
@@ -397,7 +401,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             for i in range(NUM_VAES):
                                 for j in range(NUM_VAES):
                                     if enable_wandb:
-                                        wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=epoch)
+                                        wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=step)
                             del cg_imgs
 
                         # Also save some example latent vectors and example reconstructions (without averaging z)
@@ -409,8 +413,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 latent_w_img = latents[j]
                                 latent_z_img = latents[j + NUM_VAES]
 
-                                save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, epoch, run)
-                                save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, epoch, run)
+                                save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, step, run)
+                                save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, step, run)
 
                                 # Reconstructions with known w
                                 ws = latents[:NUM_VAES]
@@ -419,7 +423,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                                 for k in range(NUM_VAES):
                                     save_and_log_img(reconstructions[k], f'Reconstructions/z{j}/m{k}',
-                                                     runPath, display_data_fs[k], epoch, run)
+                                                     runPath, display_data_fs[k], step, run)
 
                                 # Reconstructions with random w
                                 W_random = []
@@ -433,19 +437,19 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                                 for k in range(NUM_VAES):
                                     save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
-                                                     runPath, display_data_fs[k], epoch, run)
+                                                     runPath, display_data_fs[k], step, run)
                         else:
                             reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
 
                             for k, rec in enumerate(reconstructions):
                                 save_and_log_img(rec, f'Reconstructions/m{k}',
-                                                 runPath, display_data_fs[k], epoch, run)
+                                                 runPath, display_data_fs[k], step, run)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
             if enable_wandb:
-                wandb.log({"Loss/test": epoch_loss}, step=epoch)
-                wandb.log({f"Loss/test/breakdown/{key}": val for key, val in loss_series.items()}, step=epoch)
+                wandb.log({"Loss/test": epoch_loss}, step=step)
+                wandb.log({f"Loss/test/breakdown/{key}": val for key, val in loss_series.items()}, step=step)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
             print(loss_series)
 
@@ -559,7 +563,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             test_worsening_count = 0
 
             with Timer('MMVAEplus') as t:
-                test(0)
+                test(-1)
 
                 for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
                     train(epoch)
