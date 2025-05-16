@@ -9,7 +9,7 @@ function:
 
 data:
   dataset_name: nyu_depth
-  datadir: "/rds/general/user/ds3119/ephemeral/nyuv2_processed"
+  datadir: "/rds/general/user/ds3119/ephemeral/nyuv2_processed" # "../../datasets/nyuv2_processed/" #
   input_size: 128
   modalities: ["colour", "depth"]
 

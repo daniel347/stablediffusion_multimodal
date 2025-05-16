@@ -43,8 +43,8 @@ import pyiqa
 enable_wandb = True
 log_iterations = True
 
-notes = ("We train an autoencoder on NYU depth using a small subset of the new NYUv2 datset, with the new autoencoder loss and architecture.")
-name = "new_ae_arch_test"
+notes = ("We train an autoencoder on the entire NYU depth dataset, with the new autoencoder loss and architecture.")
+name = "new_ae_arch"
 
 
 def setup(rank, world_size):
@@ -347,19 +347,24 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                 step = epoch * len(train_loader) + i if log_iterations else epoch
 
-                if enable_wandb and i == 0:
-                    for m, (name, dbatch) in enumerate(zip(modalities, data)):
-                        dbatch = dbatch.detach().cpu()
-                        dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
-                        grid = make_grid(dbatch, nrow=8)
-                        wandb.log({f"Data/{name}": wandb.Image(grid)}, step=step)
+                if enable_wandb:
+                    wandb.log({"Loss/train": loss}, step=step)
+                    wandb.log({f"Loss/train/breakdown/{key}": -val for key, val in loss_dict.items()}, step=step)
+                    if i == 0:
+                        for m, (name, dbatch) in enumerate(zip(modalities, data)):
+                            dbatch = dbatch.detach().cpu()
+                            dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                            grid = make_grid(dbatch, nrow=8)
+                            wandb.log({f"Data/{name}": wandb.Image(grid)}, step=step)
 
             # Epoch loss
-            epoch_loss = b_loss / len(train_loader.dataset)
-            loss_series = loss_series / len(train_loader.dataset)
+            epoch_loss = b_loss / len(train_loader)
+            loss_series = loss_series / len(train_loader)
+            """
             if enable_wandb:
                 wandb.log({"Loss/train": epoch_loss}, step=step)
                 wandb.log({f"Loss/train/breakdown/{key}": val for key, val in loss_series.items()}, step=step)
+            """
             print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
             print(loss_series)
 
