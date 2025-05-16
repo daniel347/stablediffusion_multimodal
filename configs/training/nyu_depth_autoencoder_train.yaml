@@ -9,7 +9,7 @@ function:
 
 data:
   dataset_name: nyu_depth
-  datadir: "/rds/general/user/ds3119/ephemeral/nyuv2_processed" # "../../datasets/nyuv2_processed/" #
+  datadir:  "/rds/general/user/ds3119/ephemeral/nyuv2_processed" # "../../datasets/nyuv2_processed/" #
   input_size: 128
   modalities: ["colour", "depth"]
 
@@ -55,5 +55,5 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm.yaml
-model_initialisation: # "../trained_models/model_8.rar"
+model_initialisation:  # "../trained_models/model_8.rar"
 init_from_stable_diffusion: True

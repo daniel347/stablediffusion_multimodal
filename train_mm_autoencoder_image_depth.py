@@ -17,6 +17,7 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 import wandb
+from pathlib import Path
 
 import torch
 from torch import optim
@@ -36,7 +37,7 @@ from objectives import get_objective, train_adversary
 from objectives.mmvae_objectives import m_dreg
 from ldm.data import get_dataset
 
-from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs, move_data_to_device
+from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs, move_data_to_device, save_checkpoint, load_checkpoint
 
 import pyiqa
 
@@ -100,11 +101,13 @@ def initialise_model(conf):
 
         return model
 
+    """"
     elif conf.model_initialisation is not None:
         print("Initialising with custom weights")
         model = MMVAEDataParallelWrapper(model)
         model.load_state_dict(torch.load(conf.model_initialisation), strict=False)
         return model
+    """
 
     return MMVAEDataParallelWrapper(model)
 
@@ -167,15 +170,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         if rank == 0 or not data_parallel:
             experiment_dir = Path(os.path.join(conf.data.outputdir, conf.experiment, "checkpoints"))
             experiment_dir.mkdir(parents=True, exist_ok=True)
-            runPath = os.path.join(str(experiment_dir), runId)
-            if os.path.exists(runPath):
-                shutil.rmtree(runPath)
-            os.makedirs(runPath)
+            runPath = experiment_dir / runId
+            if runPath.exists():
+                shutil.rmtree(str(runPath))
+            runPath.mkdir(parents=True, exist_ok=True)
             print('Expt:', runPath)
             print('RunID:', runId)
 
             # save args to run
-            with open('{}/args.json'.format(runPath), 'w') as fp:
+            with open('{}/args.json'.format(str(runPath)), 'w') as fp:
                 OmegaConf.save(config=conf, f=fp)
 
         # WandB
@@ -227,6 +230,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         scheduler_step_freq = 50
 
+        start_epoch = conf.training.start_epoch
+
+        if conf.model_initialisation is not None:
+            print("Initialising with custom weights")
+            mod = model.module if data_parallel else model
+            start_epoch = load_checkpoint(None, mod, optimizer, scheduler, conf.model_initialisation)
+
         use_mixed_precision = conf.training.use_mixed_precision
         if use_mixed_precision:
             print("Using mixed precision training")
@@ -271,7 +281,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             grad_clipper = GradAutoClipper(model, **conf.training.grad_clipper)
 
         # Set the learning rate forward to continue training after pause
-        if conf.training.start_epoch > 0:
+        if start_epoch > 0:
             for _ in range(len(train_loader)//scheduler_step_freq):
                 scheduler.step()
 
@@ -584,8 +594,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             break
 
                     if rank == 0 or not data_parallel:
-                        save_model_light(model.module if data_parallel else model,
-                                        runPath + '/model_' + str(epoch) + '.rar')
+                        mod = model.module if data_parallel else model
+                        save_checkpoint(None, mod, optimizer, scheduler, epoch, runPath / f"model_{epoch}.pt")
 
 
         if conf.function.name is not None:

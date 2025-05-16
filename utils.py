@@ -15,6 +15,8 @@ from torchvision.utils import make_grid, save_image
 from pathlib import Path
 import wandb
 from omegaconf import OmegaConf
+import logging
+logger = logging.getLogger(__name__)
 
 # Constants
 class Constants(object):
@@ -324,3 +326,39 @@ def override_config(conf, overrides):
             print(f"Could not override key: {key}")
 
     return conf
+
+def save_checkpoint(ema, model, optimiser, scheduler, iteration, path):
+    sd = {"ema": ema.state_dict() if ema is not None else None,
+          "model": model.state_dict() if model is not None else None,
+          "optimiser": optimiser.state_dict() if optimiser is not None else None,
+          "scheduler": scheduler.state_dict() if scheduler is not None else None,
+          "iteration": iteration if iteration is not None else None}
+
+    torch.save(sd, path)
+
+
+def load_checkpoint(ema, model, optimiser, scheduler, path):
+    sd = torch.load(path)
+
+    if "model" in sd:
+        model.load_state_dict(sd["model"])
+    else:
+        logger.warning(f"No model key found in checkpoint, assuming only the model is saved")
+        model.load_state_dict(sd)
+
+    if ("ema" in sd) and (ema is not None):
+        ema.load_state_dict(sd["ema"])
+    else:
+        logger.warning("No EMA state dict found in checkpoint")
+
+    if ("optimiser" in sd) and (optimiser is not None):
+        optimiser.load_state_dict(sd["optimiser"])
+    else:
+        logger.warning("No optimiser state dict found in checkpoint")
+
+    if ("scheduler" in sd) and (scheduler is not None):
+        scheduler.load_state_dict(sd["scheduler"])
+    else:
+        logger.warning("No scheduler state dict found in checkpoint")
+
+    return sd["iteration"]

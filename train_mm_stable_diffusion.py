@@ -38,12 +38,12 @@ import sys
 import glob
 import logging
 
-from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
+from ldm.util import instantiate_from_config, Timer, GradAutoClipper
 from ldm.data import get_dataset, MMCelebA
 from ldm.modules.ema import DummyEMA
 import pyiqa
 import cmmd_pytorch as cmmd
-from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, duplicate_stable_diff_weights, move_data_to_device, override_config
+from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config, save_checkpoint, load_checkpoint
 from reconstruct_model_phema import reconstruct_phema
 import ldm.models.diffusion as diffusion
 
@@ -84,16 +84,6 @@ def load_precomputed_datasets(conf):
     return train_dataset, test_dataset
 
 
-def save_checkpoint(ema, model, optimiser, scheduler, iteration, path):
-    sd = {"ema": ema.state_dict(),
-          "model": model.state_dict(),
-          "optimiser": optimiser.state_dict(),
-          "scheduler": scheduler.state_dict(),
-          "iteration": iteration}
-
-    torch.save(sd, path)
-
-
 def learning_rate_schedule(cur_nimg, batch_size, ref_lr=100e-4, ref_batches=70e3, rampup_Mimg=10):
     lr = ref_lr
     if ref_batches > 0:
@@ -101,27 +91,6 @@ def learning_rate_schedule(cur_nimg, batch_size, ref_lr=100e-4, ref_batches=70e3
     if rampup_Mimg > 0:
         lr *= min(cur_nimg / (rampup_Mimg * 1e6), 1)
     return lr
-
-
-def load_checkpoint(ema, model, optimiser, scheduler, path):
-    sd = torch.load(path)
-    model.load_state_dict(sd["model"])
-    if "ema" in sd:
-        ema.load_state_dict(sd["ema"])
-    else:
-        logger.warning("No EMA state dict found in checkpoint")
-
-    if "optimiser" in sd:
-        optimiser.load_state_dict(sd["optimiser"])
-    else:
-        logger.warning("No optimiser state dict found in checkpoint")
-
-    if "scheduler" in sd:
-        scheduler.load_state_dict(sd["scheduler"])
-    else:
-        logger.warning("No scheduler state dict found in checkpoint")
-
-    return sd["iteration"]
 
 
 def load_image_datasets(conf):
