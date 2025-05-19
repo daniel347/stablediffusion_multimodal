@@ -12,7 +12,7 @@ from torchvision.transforms.v2 import ColorJitter
 import random
 from .register_datasets import register_dataset
 from pathlib import Path
-import glob
+import pickle
 
 
 @register_dataset("nyu_depth")
@@ -60,6 +60,17 @@ class NYUDepth(Dataset):
         self.return_index = return_index
 
         self.mode_readers = {"colour": self.read_colour, "depth": self.read_depth}
+
+        self.bad_paths = []  # record the indices that dont load properly
+        try:
+            with (Path(root_data_dir) / "bad_paths.pkl").open("rb") as bpf:
+                self.bad_paths = pickle.load(bpf)
+        except FileNotFoundError:
+            pass
+
+        # Remove the bad paths from the index
+        self.index = self.index[~self.index.colour_path.isin(self.bad_paths)]
+        self.index = self.index[~self.index.depth_path.isin(self.bad_paths)]
 
     def make_scene_dataframe(self, x):
         colour_paths = list(x.scene_colour_path.iterdir())
@@ -118,16 +129,30 @@ class NYUDepth(Dataset):
 
     def read_colour(self, path):
         img = cv2.imread(path, cv2.IMREAD_COLOR)
+        if img is None:
+            print("Couldnt load rgb image", path)
+            self.bad_paths.append(img)
+            return torch.randn(3, 480, 640)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32) / 255
         return torch.from_numpy(img).permute((2, 0, 1))
 
     def read_depth(self, path):
         img = cv2.imread(path, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
+        if img is None:
+            print("Couldnt load depth image", path)
+            self.bad_paths.append(img)
+            return torch.randn(1, 480, 640)
+
         if len(img.shape) == 2:
             img = np.expand_dims(img, axis=-1)
         img = img.astype(np.float32) / 65535
         return torch.from_numpy(img).permute((2, 0, 1))
+
+    def save_bad_paths(self):
+        with (Path(self.root_data_dir) / "bad_paths.pkl").open("wb") as bpf:
+            pickle.dump(self.bad_paths, bpf)
+
 
 if __name__ == "__main__":
     train_dataset = NYUDepth("../../datasets/nyuv2_processed", None, "test", ["colour", "depth"], 0, 0, False)

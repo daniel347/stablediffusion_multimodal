@@ -1,20 +1,20 @@
 from ldm.data import get_dataset
-from torch.utils.data.distributed import DistributedSampler
 import torch
 from omegaconf import OmegaConf, DictConfig
 import torchvision.transforms as v2
 import hydra
 import pickle
 import tqdm
+from torch.utils.data import DataLoader
+import multiprocessing as mp
 
-def wrapper(gen):
-  while True:
+def safe_get_item(args):
+    idx, dataset, split = args
     try:
-      yield next(gen)
-    except StopIteration:
-      break
+        _ = dataset[idx]
+        return None  # No error
     except Exception as e:
-      print(e) # or whatever kind of logging you want
+        return (split, idx, str(e))  # Error info
 
 
 @hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train.yaml")
@@ -37,24 +37,32 @@ def main(conf: DictConfig) -> None:
                                split="test",
                                modality=["colour", "depth"])
 
+    train_args = [(i, train_dataset, "train") for i in range(len(train_dataset))]
+    test_args = [(i, test_dataset, "test") for i in range(len(test_dataset))]
+    all_args = train_args + test_args
+
     bad_train_inds = []
     bad_test_inds = []
 
-    for i in tqdm.tqdm(range(len(train_dataset))):
-        try:
-            # Get the data
-            imgs = train_dataset[i]
-        except Exception as e:
-            print(f"Could not load train image {i}, error: {e}")
-            bad_train_inds.append(i)
+    with mp.Pool(processes=1) as pool:
+        for result in tqdm.tqdm(pool.imap_unordered(safe_get_item, all_args), total=len(all_args)):
+            if result is not None:
+                split, idx, err = result
+                print(f"Could not load {split} image {idx}, error: {err}")
+                if split == "train":
+                    bad_train_inds.append(idx)
+                else:
+                    bad_test_inds.append(idx)
 
-    for i in tqdm.tqdm(range(len(test_dataset))):
-        try:
-            # Get the data
-            imgs = test_dataset[i]
-        except Exception as e:
-            print(f"Could not load test image {i}, error: {e}")
-            bad_test_inds.append(i)
+    print(bad_train_inds)
+    print(bad_test_inds)
+
+    train_dataset.save_bad_paths()
+    test_dataset.save_bad_paths()
+
+    print("Dataset saved bad paths:")
+    print(train_dataset.bad_paths)
+    print(test_dataset.bad_paths)
 
     bad_inds = {"test": bad_test_inds, "train": bad_train_inds}
     with open("bad_inds.pkl", "wb") as f:
