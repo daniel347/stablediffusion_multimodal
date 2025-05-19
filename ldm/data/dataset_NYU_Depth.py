@@ -63,10 +63,18 @@ class NYUDepth(Dataset):
 
         self.bad_paths = []  # record the indices that dont load properly
         try:
-            with (Path(root_data_dir) / "bad_paths.pkl").open("rb") as bpf:
+            with (Path(root_data_dir) / f"bad_paths_{split}.pkl").open("rb") as bpf:
                 self.bad_paths = pickle.load(bpf)
         except FileNotFoundError:
+            print("Could not load bad paths")
             pass
+
+        # add other modalities of the same index
+        self.bad_paths += [(p.replace("colour", "depth") if "colour" in p else p.replace("depth", "colour")) for p in self.bad_paths]
+
+        # Convert relative to absolute paths
+        self.bad_paths = [Path(self.root_data_dir) / p for p in self.bad_paths]
+
 
         # Remove the bad paths from the index
         self.index = self.index[~self.index.colour_path.isin(self.bad_paths)]
@@ -99,6 +107,9 @@ class NYUDepth(Dataset):
         outs = []
         for mod in self.modality:
             img = self.mode_readers[mod](str(filepaths[f"{mod}_path"]))
+            if img is None:
+                # Return the filepath so we can add it to bad_paths
+                return str(filepaths[f"{mod}_path"].relative_to(self.root_data_dir))
             if self.transform is not None:
                 if isinstance(self.transform, dict):
                     img = self.transform[mod](img)
@@ -131,8 +142,7 @@ class NYUDepth(Dataset):
         img = cv2.imread(path, cv2.IMREAD_COLOR)
         if img is None:
             print("Couldnt load rgb image", path)
-            self.bad_paths.append(img)
-            return torch.randn(3, 480, 640)
+            return None
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32) / 255
         return torch.from_numpy(img).permute((2, 0, 1))
@@ -141,17 +151,16 @@ class NYUDepth(Dataset):
         img = cv2.imread(path, cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH)
         if img is None:
             print("Couldnt load depth image", path)
-            self.bad_paths.append(img)
-            return torch.randn(1, 480, 640)
+            return None
 
         if len(img.shape) == 2:
             img = np.expand_dims(img, axis=-1)
         img = img.astype(np.float32) / 65535
         return torch.from_numpy(img).permute((2, 0, 1))
 
-    def save_bad_paths(self):
-        with (Path(self.root_data_dir) / "bad_paths.pkl").open("wb") as bpf:
-            pickle.dump(self.bad_paths, bpf)
+    def save_bad_paths(self, bad_paths):
+        with (Path(self.root_data_dir) / f"bad_paths_{self.split}.pkl").open("wb") as bpf:
+            pickle.dump(bad_paths, bpf)
 
 
 if __name__ == "__main__":
