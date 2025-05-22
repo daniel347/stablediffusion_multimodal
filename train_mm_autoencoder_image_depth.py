@@ -244,7 +244,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         # Load dataset
         modalities = conf.data.modalities
-        kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
+        kwargs = {'num_workers': 2, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
         tx = {"colour": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)]),
               "semseg": v2.Compose([v2.Resize(conf.data.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
                                     v2.CenterCrop(conf.data.input_size)]),

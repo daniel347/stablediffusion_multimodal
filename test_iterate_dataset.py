@@ -48,21 +48,46 @@ def main(conf: DictConfig) -> None:
 
     bad_train_paths = []
     bad_test_paths = []
+    
+    start = 0
 
-    """
-
-    for args in all_args:
+    try: 
+        with open("state.pkl", "rb") as f:
+            state = pickle.load(f)
+            start = state["all_args_ind"]
+            bad_test_inds = state["bad_test_inds"]
+            bad_train_inds = state["bad_train_inds"]
+            bad_train_paths = state["bad_train_paths"]
+            bad_test_paths = state["bad_test_paths"]
+    except Exception:
+        print("Could not relod state, starting fresh")
+    
+    for i in range(start, len(all_args)):
+        args = all_args[i]
         ret = safe_get_item(args)
         if ret is not None:
-            split, idx, err = ret
-            print(f"Could not load {split} image {idx}, error: {err}")
+            split, idx, err, fp = ret
+            print(f"Could not load {split} image {idx}, error: {err}, path {fp}")
             if split == "train":
                 bad_train_inds.append(idx)
+                if fp is not None:
+                    bad_train_paths.append(fp)
             else:
                 bad_test_inds.append(idx)
+                if fp is not None:
+                    bad_test_paths.append(fp)
+
+        if i % 100 == 0:    
+            state = {"bad_test_inds": bad_test_inds, 
+                     "bad_train_inds": bad_train_inds,
+                     "bad_test_paths": bad_test_paths,
+                     "bad_train_paths": bad_train_paths,
+                     "all_args_ind": i}
+            with open("state.pkl", "wb") as f:
+                pickle.dump(state, f)
     """
 
-    with mp.Pool(processes=8) as pool:
+    with mp.Pool(processes=4) as pool:
         for result in tqdm.tqdm(pool.imap_unordered(safe_get_item, all_args), total=len(all_args)):
             if result is not None:
                 split, idx, err, fp = result
@@ -75,6 +100,7 @@ def main(conf: DictConfig) -> None:
                     bad_test_inds.append(idx)
                     if fp is not None:
                         bad_test_paths.append(fp)
+    """
 
     print(bad_train_inds)
     print(bad_test_inds)
