@@ -41,11 +41,10 @@ from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_
 
 import pyiqa
 
-enable_wandb = True
-log_iterations = True
+enable_wandb = False
 
-notes = ("We train an autoencoder on the entire NYU depth dataset, with the new autoencoder loss and architecture.")
-name = "new_ae_arch"
+notes = ("We test the autoencoder after 2 epochs")
+name = "new_ae_arch_test_2epochs"
 
 
 def setup(rank, world_size):
@@ -230,12 +229,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         scheduler_step_freq = 50
 
-        start_epoch = conf.training.start_epoch
+        start_iter = conf.training.start_iter
 
         if conf.model_initialisation is not None:
             print("Initialising with custom weights")
             mod = model.module if data_parallel else model
-            start_epoch = load_checkpoint(None, mod, optimizer, scheduler, conf.model_initialisation)
+            start_iter = load_checkpoint(None, mod, optimizer, scheduler, conf.model_initialisation)
 
         use_mixed_precision = conf.training.use_mixed_precision
         if use_mixed_precision:
@@ -275,15 +274,23 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
                                                   sampler=test_sampler, **kwargs)
 
+        print(f"data loader lengths train: {len(train_loader)}, test: {len(test_loader)}")
+        raise ValueError("Hi its me")
 
         grad_clipper = None
         if "grad_clipper" in conf.training:
             grad_clipper = GradAutoClipper(model, **conf.training.grad_clipper)
 
-        # Set the learning rate forward to continue training after pause
-        if start_epoch > 0:
-            for _ in range(len(train_loader)//scheduler_step_freq):
+        if start_iter > 0 and start_iter < 50:
+            # this is almost certainly an epoch number
+            start_iter *= len(train_loader)
+
+            # Set the learning rate forward to continue training after pause
+        if start_iter > 0:
+            for _ in range(start_iter//scheduler_step_freq):
                 scheduler.step()
+
+        start_epoch = start_iter // len(train_loader)
 
         objective_opts = OmegaConf.to_container(conf.training.objective.params)
         if "channel_weighting" in objective_opts and objective_opts["channel_weighting"] is not None:
@@ -305,86 +312,105 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         t_objective = objective
 
-        def train(epoch):
+        def train(subepoch, itercount, epochcount, n_iter):
             model.train()
             b_loss = 0
             loss_series = None
 
-            if data_parallel:
-                train_loader.sampler.set_epoch(epoch)
+            n_stopiter = n_iter + itercount
 
-            pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader), position=rank if data_parallel else 0)
+            if enable_wandb:
+                wandb.log({"subepoch": subepoch}, step=itercount)
 
-            for i, dataT in pbar:
-                data = move_data_to_device(dataT, device=device)
-                # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
-                optimizer.zero_grad()
+            while itercount < n_stopiter:
+                if data_parallel:
+                    train_loader.sampler.set_epoch(epochcount)
 
-                if use_mixed_precision:
-                    with autocast(dtype=torch.float16, device_type="cuda"):
-                        loss, loss_dict = objective(model, data, K=conf.training.K)
-                        loss = -loss
-
-                    scaler.scale(loss).backward()
-                    if grad_clipper is not None:
-                        scaler.unscale_(optimizer)
-                        grad_clipper.autoclip_grad()
-                    scaler.step(optimizer)
-
-
-                else:
-                    loss, loss_dict = objective(model, data, K=conf.training.K)
-                    loss = -loss
-                    loss.backward()
-
-                    if grad_clipper is not None:
-                        grad_clipper.autoclip_grad()
-                    optimizer.step()
-
-                if loss_series is None:
-                    loss_series = -pd.Series(loss_dict)
-                else:
-                    loss_series -= pd.Series(loss_dict)
-
-                b_loss += loss.detach().item()
-                if conf.print_freq > 0 and i % conf.print_freq == 0:
-                    print("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
-                    print(f"loss breakdown: {loss_dict}")
-                pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
-
-                if i % scheduler_step_freq == 0:
-                    scheduler.step()
-
-                step = epoch * len(train_loader) + i if log_iterations else epoch
+                pbar = tqdm.tqdm(enumerate(train_loader), total=n_iter,
+                                 position=rank if data_parallel else 0)
 
                 if enable_wandb:
-                    wandb.log({"Loss/train": loss}, step=step)
-                    wandb.log({f"Loss/train/breakdown/{key}": -val for key, val in loss_dict.items()}, step=step)
-                    if i == 0:
-                        for m, (name, dbatch) in enumerate(zip(modalities, data)):
-                            dbatch = dbatch.detach().cpu()
-                            dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
-                            grid = make_grid(dbatch, nrow=8)
-                            wandb.log({f"Data/{name}": wandb.Image(grid)}, step=step)
+                    wandb.log({"epoch": epochcount}, step=itercount)
+
+                for i, dataT in pbar:
+                    data = move_data_to_device(dataT, device=device)
+                    # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
+                    optimizer.zero_grad()
+
+                    if use_mixed_precision:
+                        with autocast(dtype=torch.float16, device_type="cuda"):
+                            loss, loss_dict = objective(model, data, K=conf.training.K)
+                            loss = -loss
+
+                        scaler.scale(loss).backward()
+                        if grad_clipper is not None:
+                            scaler.unscale_(optimizer)
+                            grad_clipper.autoclip_grad()
+                        scaler.step(optimizer)
+
+
+                    else:
+                        loss, loss_dict = objective(model, data, K=conf.training.K)
+                        loss = -loss
+                        loss.backward()
+
+                        if grad_clipper is not None:
+                            grad_clipper.autoclip_grad()
+                        optimizer.step()
+
+                    if loss_series is None:
+                        loss_series = -pd.Series(loss_dict)
+                    else:
+                        loss_series -= pd.Series(loss_dict)
+
+                    b_loss += loss.detach().item()
+                    if conf.print_freq > 0 and i % conf.print_freq == 0:
+                        print("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
+                        print(f"loss breakdown: {loss_dict}")
+                    pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
+
+                    if i % scheduler_step_freq == 0:
+                        scheduler.step()
+
+                    if enable_wandb:
+                        wandb.log({"Loss/train": loss}, step=itercount)
+                        wandb.log({f"Loss/train/breakdown/{key}": -val for key, val in loss_dict.items()}, step=itercount)
+                        if i == 0:
+                            for m, (name, dbatch) in enumerate(zip(modalities, data)):
+                                dbatch = dbatch.detach().cpu()
+                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                                grid = make_grid(dbatch, nrow=8)
+                                wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
+
+                    itercount += 1
+                    if itercount >= n_stopiter:
+                        break
+
+                if itercount < n_stopiter:
+                    # dont increment the epoch if we are simply exiting the loop
+                    epochcount += 1
 
             # Epoch loss
-            epoch_loss = b_loss / len(train_loader)
-            loss_series = loss_series / len(train_loader)
+            subepoch_loss = b_loss / n_iter
+            loss_series = loss_series / n_iter
             """
             if enable_wandb:
                 wandb.log({"Loss/train": epoch_loss}, step=step)
                 wandb.log({f"Loss/train/breakdown/{key}": val for key, val in loss_series.items()}, step=step)
             """
-            print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
+            print('====> Subepoch: {:03d} Train loss: {:.4f}'.format(subepoch, subepoch_loss))
             print(loss_series)
+            return epochcount
 
-        def test(epoch):
-            step = (epoch + 1) * len(train_loader) if log_iterations else epoch
+        def test(subepoch, itercount, epochcount):
             b_loss = 0
             loss_series = None
 
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
             mod = model.module.module if data_parallel else model.module
+
+            if enable_wandb:
+                wandb.log({"epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
@@ -400,7 +426,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     else:
                         loss_series -= pd.Series(loss_dict)
 
-                    if i == 0 and epoch % 1 == 0:
+                    if i == 10:  # select a different scene
                         # Compute cross-generations
                         if mod.can_cross_generate:
                             N_gen = 3
@@ -416,7 +442,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             for i in range(NUM_VAES):
                                 for j in range(NUM_VAES):
                                     if enable_wandb:
-                                        wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=step)
+                                        wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=itercount)
                             del cg_imgs
 
                         # Also save some example latent vectors and example reconstructions (without averaging z)
@@ -428,8 +454,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 latent_w_img = latents[j]
                                 latent_z_img = latents[j + NUM_VAES]
 
-                                save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, step, run)
-                                save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, step, run)
+                                save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, itercount, run)
+                                save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, itercount, run)
 
                                 # Reconstructions with known w
                                 ws = latents[:NUM_VAES]
@@ -438,7 +464,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                                 for k in range(NUM_VAES):
                                     save_and_log_img(reconstructions[k], f'Reconstructions/z{j}/m{k}',
-                                                     runPath, display_data_fs[k], step, run)
+                                                     runPath, display_data_fs[k], itercount, run)
 
                                 # Reconstructions with random w
                                 W_random = []
@@ -452,19 +478,19 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                                 for k in range(NUM_VAES):
                                     save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
-                                                     runPath, display_data_fs[k], step, run)
+                                                     runPath, display_data_fs[k], itercount, run)
                         else:
                             reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
 
                             for k, rec in enumerate(reconstructions):
                                 save_and_log_img(rec, f'Reconstructions/m{k}',
-                                                 runPath, display_data_fs[k], step, run)
+                                                 runPath, display_data_fs[k], itercount, run)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
             if enable_wandb:
-                wandb.log({"Loss/test": epoch_loss}, step=step)
-                wandb.log({f"Loss/test/breakdown/{key}": val for key, val in loss_series.items()}, step=step)
+                wandb.log({"Loss/test": epoch_loss}, step=itercount)
+                wandb.log({f"Loss/test/breakdown/{key}": val for key, val in loss_series.items()}, step=itercount)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
             print(loss_series)
 
@@ -577,12 +603,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             best_test_loss = 1e20
             test_worsening_count = 0
 
-            with Timer('MMVAEplus') as t:
-                test(-1)
+            epochcount = 0
 
-                for epoch in range(conf.training.start_epoch + 1, conf.training.num_epochs + 1 + conf.training.start_epoch):
-                    train(epoch)
-                    test_loss = test(epoch)
+            n_iter = conf.training.test_every_iter if "test_every_iter" in conf.training else len(train_loader)
+
+            with Timer('MMVAEplus') as t:
+                test(0, 0, 0)
+
+                for subepoch, itercount in enumerate(range(conf.training.start_iter,
+                                                           conf.training.num_epochs * conf.training.test_every_iter + conf.training.start_iter,
+                                                           conf.training.test_every_iter)):
+                    epochcount = train(subepoch, itercount, epochcount, n_iter)
+                    test_loss = test(subepoch, itercount + n_iter, epochcount)
 
                     if test_loss < best_test_loss:
                         best_test_loss = test_loss
@@ -590,12 +622,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     else:
                         test_worsening_count += 1
                         if test_worsening_count > conf.training.patience:
-                            print(f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
+                            print(f"Early stopping. Best test loss attained in subepoch: {subepoch - conf.training.patience}")
                             break
 
                     if rank == 0 or not data_parallel:
                         mod = model.module if data_parallel else model
-                        save_checkpoint(None, mod, optimizer, scheduler, epoch, runPath / f"model_{epoch}.pt")
+                        save_checkpoint(None, mod, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt")
 
 
         if conf.function.name is not None:

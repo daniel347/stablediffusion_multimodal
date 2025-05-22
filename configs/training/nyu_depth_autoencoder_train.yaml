@@ -9,7 +9,7 @@ function:
 
 data:
   dataset_name: nyu_depth
-  datadir: "/rds/general/user/ds3119/ephemeral/nyuv2_processed" # ../../datasets/nyuv2_processed/" #
+  datadir: "/rds/general/user/ds3119/ephemeral/nyuv2_processed" # ../../datasets/nyuv2_processed/ #
   input_size: 128
   modalities: ["colour", "depth"]
 
@@ -24,17 +24,17 @@ training:
       wlpips: [5000, 5000]
       wadversary: 0
       beta: 1
-      z_close_weight: 500000 # 0.1
+      z_close_weight: 500000
       off_combination_weight: 0.0
-      mmd_zw_weight: 1000.0  # 1000.0
-      mmd_ww_weight: 1000.0  # 1000.0
+      mmd_zw_weight: 1000.0
+      mmd_ww_weight: 1000.0
 
   lr: 2.0e-4
   batch_size: 48
-  num_epochs: 20
-  patience: 4
+  num_epochs: 20  # this will be interpreted as subepochs if test_every_iter is specified
+  patience: 4     # this will be interpreted as subepochs if test_every_iter is specified
 
-  start_epoch: 0
+  start_iter: 0
   K: 1
 
   grad_clipper:
@@ -42,6 +42,8 @@ training:
     clip_update_freq: 10
     keep_history_upto: 5000
     start_clip: 10
+
+  test_every_iter: 3000  # test and save the model every so many iterations
 
   # discriminator:
   #   target: ldm.models.discriminator.MMDiscriminator
@@ -55,5 +57,5 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm.yaml
-model_initialisation:  # "../trained_models/model_8.rar"
-init_from_stable_diffusion: True
+model_initialisation: "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
+init_from_stable_diffusion: False

@@ -64,6 +64,7 @@ model:
               embed_dim: 4  #  = latent_channel_z + latent_channel_w
               monitor: val/rec_loss
               embed_spatial_dim: 16
+              llik_scaling: 1
               ddconfig:
                 #attn_type: "vanilla-xformers"
                 double_z: true
@@ -91,7 +92,7 @@ model:
               embed_spatial_dim: 16
               conform_to_3_channel: true  # perform deterministic repetition and averaging to
               # convert 1 channel to 3 channels and back, so we may start from pretrained encoder
-
+              llik_scaling: 5
               ddconfig:
                 #attn_type: "vanilla-xformers"
                 double_z: true
