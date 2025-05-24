@@ -41,10 +41,10 @@ from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_
 
 import pyiqa
 
-enable_wandb = False
+enable_wandb = True
 
-notes = ("We test the autoencoder after 2 epochs")
-name = "new_ae_arch_test_2epochs"
+notes = ("We continue training the autoencoder with increased weight to the depth likelihood, and test more frequently")
+name = "new_ae_arch"
 
 
 def setup(rank, world_size):
@@ -274,8 +274,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
                                                   sampler=test_sampler, **kwargs)
 
-        print(f"data loader lengths train: {len(train_loader)}, test: {len(test_loader)}")
-        raise ValueError("Hi its me")
+        # print(f"data loader lengths train: {len(train_loader)}, test: {len(test_loader)}")
+        # raise ValueError("Hi its me")
 
         grad_clipper = None
         if "grad_clipper" in conf.training:
