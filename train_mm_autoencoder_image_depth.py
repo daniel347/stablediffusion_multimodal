@@ -43,8 +43,8 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("We continue training the autoencoder with increased weight to the depth likelihood, and test more frequently")
-name = "new_ae_arch"
+notes = ("We train the z combiner network based on the most recent autoencoder model")
+name = "new_ae_arch_z_combiner_train"
 
 
 def setup(rank, world_size):
@@ -234,7 +234,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         if conf.model_initialisation is not None:
             print("Initialising with custom weights")
             mod = model.module if data_parallel else model
-            start_iter = load_checkpoint(None, mod, optimizer, scheduler, conf.model_initialisation)
+            if "resume_training" in conf and conf.resume_training:
+                start_iter = load_checkpoint(None, mod, optimizer, scheduler, conf.model_initialisation)
+            else:
+                # just load the model
+                start_iter = load_checkpoint(None, mod, None, None, conf.model_initialisation)
 
         use_mixed_precision = conf.training.use_mixed_precision
         if use_mixed_precision:
@@ -265,7 +269,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in modalities]
 
         train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
-                                           shuffle=True) if data_parallel else None
+                                           shuffle=False) if data_parallel else None
         test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,
                                           shuffle=False) if data_parallel else None
 
@@ -274,8 +278,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
                                                   sampler=test_sampler, **kwargs)
 
-        # print(f"data loader lengths train: {len(train_loader)}, test: {len(test_loader)}")
-        # raise ValueError("Hi its me")
+        print(f"data loader lengths train: {len(train_loader)}, test: {len(test_loader)}")
 
         grad_clipper = None
         if "grad_clipper" in conf.training:
@@ -312,7 +315,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         t_objective = objective
 
-        def train(subepoch, itercount, epochcount, n_iter):
+        def train(subepoch, itercount, epochcount, n_iter, train_pbar):
             model.train()
             b_loss = 0
             loss_series = None
@@ -326,13 +329,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 if data_parallel:
                     train_loader.sampler.set_epoch(epochcount)
 
-                pbar = tqdm.tqdm(enumerate(train_loader), total=n_iter,
-                                 position=rank if data_parallel else 0)
-
                 if enable_wandb:
                     wandb.log({"epoch": epochcount}, step=itercount)
 
-                for i, dataT in pbar:
+                for i, dataT in train_pbar:
                     data = move_data_to_device(dataT, device=device)
                     # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
@@ -367,7 +367,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if conf.print_freq > 0 and i % conf.print_freq == 0:
                         print("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
                         print(f"loss breakdown: {loss_dict}")
-                    pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
+                    train_pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
 
                     if i % scheduler_step_freq == 0:
                         scheduler.step()
@@ -387,6 +387,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         break
 
                 if itercount < n_stopiter:
+                    print("Finished one epoch")
+                    train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
+                                           position=rank if data_parallel else 0)
                     # dont increment the epoch if we are simply exiting the loop
                     epochcount += 1
 
@@ -400,7 +403,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             """
             print('====> Subepoch: {:03d} Train loss: {:.4f}'.format(subepoch, subepoch_loss))
             print(loss_series)
-            return epochcount
+            return epochcount, train_pbar
 
         def test(subepoch, itercount, epochcount):
             b_loss = 0
@@ -607,13 +610,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             n_iter = conf.training.test_every_iter if "test_every_iter" in conf.training else len(train_loader)
 
+            train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
+                                   position=rank if data_parallel else 0)
+
             with Timer('MMVAEplus') as t:
                 test(0, 0, 0)
 
                 for subepoch, itercount in enumerate(range(conf.training.start_iter,
                                                            conf.training.num_epochs * conf.training.test_every_iter + conf.training.start_iter,
                                                            conf.training.test_every_iter)):
-                    epochcount = train(subepoch, itercount, epochcount, n_iter)
+                    epochcount, train_pbar = train(subepoch, itercount, epochcount, n_iter, train_pbar)
                     test_loss = test(subepoch, itercount + n_iter, epochcount)
 
                     if test_loss < best_test_loss:
@@ -641,7 +647,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train_z_combiner.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
