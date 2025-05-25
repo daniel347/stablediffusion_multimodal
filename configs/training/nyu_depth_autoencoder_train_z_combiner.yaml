@@ -9,7 +9,7 @@ function:
 
 data:
   dataset_name: nyu_depth
-  datadir:  ../../datasets/nyuv2_processed/ # "/rds/general/user/ds3119/ephemeral/nyuv2_processed"
+  datadir: "/rds/general/user/ds3119/ephemeral/nyuv2_processed" # ../../datasets/nyuv2_processed/ #
   input_size: 128
   modalities: ["colour", "depth"]
 
@@ -29,7 +29,7 @@ training:
       mmd_ww_weight: 1000.0
 
   lr: 2.0e-4
-  batch_size: 8
+  batch_size: 48
   num_epochs: 20  # this will be interpreted as subepochs if test_every_iter is specified
   patience: 4     # this will be interpreted as subepochs if test_every_iter is specified
 
@@ -59,6 +59,6 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm.yaml
-model_initialisation: "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
+model_initialisation: "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_22__17_03_54_new_ae_arch/model_12000.pt" # "../trained_models/model_8.rar"
 resume_training: false
 init_from_stable_diffusion: False
