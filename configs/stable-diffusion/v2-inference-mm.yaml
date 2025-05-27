@@ -14,7 +14,7 @@ model:
     conditioning_key: crossattn
     monitor: val/loss_simple_ema
     scale_factor: 0.18215
-    use_ema: True
+    use_ema: False # we handle EMA ourselves
     reset_num_ema_updates: False
 
     unet_config:
@@ -43,7 +43,7 @@ model:
         latent_channel_z: 2
         latent_channel_w: 2
         cross_w_mode: "sample"
-        ckpt_path:
+        ckpt_path: "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_24__20_09_25_new_ae_arch_z_combiner_train/model_1900.pt"
         avg_z: False
         all_combinations: False
         stop_self_z_grad: False

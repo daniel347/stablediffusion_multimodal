@@ -16,7 +16,7 @@ import wandb
 
 import torch
 from torch import optim
-from torchvision.transforms import v2
+from torchvision.transforms import v2, InterpolationMode
 from torchvision.utils import make_grid
 from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR, CosineAnnealingWarmRestarts, LambdaLR
 import torch.distributed as dist
@@ -61,8 +61,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("We generate with DDIM sampling for 200 steps with eta=0.5 and reencoding (with correct rescaling) every 25 steps between t=400 and t=900")
-name = "ddim_eta0.5_reencode_400to900_every25"
+notes = ("We train a diffusion model based on the new autoencoder trained on the full NYU dataset")
+name = "new_ae_train"
 
 
 def setup(rank, world_size):
@@ -94,14 +94,21 @@ def learning_rate_schedule(cur_nimg, batch_size, ref_lr=100e-4, ref_batches=70e3
 
 
 def load_image_datasets(conf):
-    tx = v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])
+    tx = {"colour": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)]),
+          "semseg": v2.Compose([v2.Resize(conf.data.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
+                                v2.CenterCrop(conf.data.input_size)]),
+          "depth": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])}
+
     return_class = "return_class" in conf.data and conf.data.return_class
     return_index = conf.training.precompute_latents
 
-    train_opts = conf.data
+    train_opts = OmegaConf.to_container(conf.data)
     test_opts = copy.deepcopy(OmegaConf.to_container(conf.data))
     for key in ["p_hor_flip", "p_colour_jitter"]:
         test_opts.pop(key, None)
+        if conf.training.precompute_latents:
+            # Dont augment if precomputing latents
+            train_opts.pop(key, None)
 
     train_dataset = get_dataset(conf.data.dataset_name,
                                 transform=tx,
@@ -334,47 +341,45 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                       CosineAnnealingWarmRestarts(optimizer, 4000, 1, eta_min=0.1 * conf.training.lr)])
                                       # ExponentialLR(optimizer, conf.training.gamma)])
 
-
-        """
-        scheduler = LambdaLR(optimizer, lambda epoch: learning_rate_schedule(epoch * conf.training.batch_size,
-                                                                             conf.training.batch_size,
-                                                                             ref_lr=conf.training.lr,
-                                                                             ref_batches=1000,
-                                                                             rampup_Mimg=0.005))
-        """
-
         scheduler_step_freq = 1
 
-        start_epoch = None
-
+        start_iter = None
 
         if conf.model_initialisation is not None:
-            start_epoch = load_checkpoint(ema, model, optimizer, scheduler, conf.model_initialisation)
-
+            start_iter = load_checkpoint(ema, model, optimizer, scheduler, conf.model_initialisation)
 
         if ray_tune:
             checkpoint = get_checkpoint()
             if checkpoint:
                 with checkpoint.as_directory() as checkpoint_dir:
                     data_path = Path(checkpoint_dir) / "data.pkl"
-                    start_epoch = load_checkpoint(ema, model, optimizer, scheduler, data_path)
+                    start_iter = load_checkpoint(ema, model, optimizer, scheduler, data_path)
 
-        if start_epoch is None:
-            start_epoch = conf.training.start_epoch
+        if start_iter is None:
+            start_iter = conf.training.start_iter
 
         train_dataset, test_dataset = load_image_datasets(conf)
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
+        train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
+                               position=rank if data_parallel else 0)
 
         display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in conf.data.modality]
 
+        if start_iter > 0 and start_iter < 50:
+            # this is almost certainly an epoch number
+            start_iter *= len(train_loader)
+
         already_precomputed = False
         if conf.training.precompute_latents:
-            latents_path = Path(conf.data.root_data_dir) / Path(conf.training.precompute_latents_path)
-            if latents_path.exists() and not conf.training.force_recompute:
+            latents_train_path = Path(conf.data.root_data_dir) / Path(conf.training.precompute_latents_path) / "train"
+            latents_val_path = Path(conf.data.root_data_dir) / Path(conf.training.precompute_latents_path) / "val"
+            if latents_train_path.exists() and latents_val_path.exists() and not conf.training.force_recompute:
                 # We have already computed the latents
                 train_dataset, test_dataset = load_precomputed_datasets(conf)
                 train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
                                                                data_parallel)
+                train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
+                                       position=rank if data_parallel else 0)
                 already_precomputed = True
 
         return_class = "return_class" in conf.data and conf.data.return_class
@@ -387,13 +392,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if z_combiner:
             model_first_stage.use_z_comb_network = True
 
-        # Set the learning rate forward to continue training after pause
-        if conf.training.start_epoch > 0:
-            for _ in range((len(train_loader) * conf.training.start_epoch)//scheduler_step_freq):
-                scheduler.step()
+        dataloaders = {"train_dataset": train_dataset,
+                       "test_dataset": test_dataset,
+                       "train_loader": train_loader,
+                       "test_loader": test_loader}
 
-        def get_latent_scale_factor(split="train", n_batches=1, per_channel=True):
-            data_loader = train_loader if split == "train" else test_loader
+        def get_latent_scale_factor(dataloaders, split="train", n_batches=1, per_channel=True):
+
+            data_loader = dataloaders["train_loader" if split == "train" else "test_loader"]
 
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(data_loader), total=len(data_loader),
@@ -428,8 +434,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return channel_means, channel_stds
 
-        def precompute_latents(split="train", save_folder="latents"):
-            dataloader = train_loader if split == "train" else test_loader
+        def precompute_latents(dataloaders, split="train", save_folder="latents"):
+            dataloader = dataloaders["train_loader" if split == "train" else "test_loader"]
             model.eval()
 
             if data_parallel:
@@ -445,6 +451,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             with torch.no_grad():
                 for i, dataT in pbar:
+                    print(f"data len: {len(dataT)}, out len: {len(dataT[0])}")
                     if return_class:
                         data, classes, ind = move_data_to_device(dataT, device=device)
                     else:
@@ -475,101 +482,115 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         save_name = save_dir_class / Path(f"latent_{ind[j].item()}.pt")
                         torch.save(latent.contiguous().cpu(), save_name)
 
-        def train_epoch(epoch):
+        def train_epoch(dataloaders, subepoch, itercount, epochcount, n_iter, train_pbar):
             model.train()
             b_loss = 0
+            n_stopiter = n_iter + itercount
 
-            if data_parallel:
-                train_loader.sampler.set_epoch(epoch)
+            while itercount < n_stopiter:
+                if data_parallel:
+                    dataloaders["train_loader"].sampler.set_epoch(epochcount)
 
-            if enable_pbars:
-                pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader), position=rank if data_parallel else 0)
-            else:
-                pbar = enumerate(train_loader)
+                if enable_wandb:
+                    wandb.log({"epoch": epochcount}, step=itercount)
 
-            for i, dataT in pbar:
-                if return_class:
-                    data, classes = move_data_to_device(dataT, device=device)
-                else:
-                    data = move_data_to_device(dataT, device=device)
-                # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
-                optimizer.zero_grad()
-
-                latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
-                latents = model_first_stage.scale_latents(latents)
-
-                # print(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latents.mean(dim=(0, 2, 3))}")
-
-                if use_mixed_precision:
-                    with autocast(dtype=torch.float16, device_type="cuda"):
-                        loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
-
-                    scaler.scale(loss).backward()
-
-                    if grad_clipper is not None:
-                        scaler.unscale_(optimizer)
-                        grad_clipper.autoclip_grad()
-                    scaler.step(optimizer)
-                else:
-                    loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
-                    loss.backward()
-
-                    if grad_clipper is not None:
-                        grad_clipper.autoclip_grad()
-                    optimizer.step()
-
-                if torch.isnan(loss).item():
-                    if enable_wandb:
-                        wandb.alert(title="Loss is NaN", text=f"Halting training at epoch {epoch} and step {i}")
-                    raise ValueError("Loss has become NaN, halting training")
-
-                b_loss += loss.detach().item()
-                if conf.print_freq > 0 and i % conf.print_freq == 0 and enable_pbars:
-                    pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
-
-                if ema is not None:
-                    ema.update(conf.training.batch_size)
-
-                if i % scheduler_step_freq == 0:
-                    scheduler.step()
-                    # print(f"Learning rate: {scheduler.get_last_lr()}")
-
-                step = epoch * len(train_loader) + i if log_iterations else epoch
-
-                if enable_wandb and log_iterations:
-                    wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr()[0], "epoch": epoch}, step=step)
-
-                if i == 0:
-                    if conf.training.precompute_latents:
-                        if model_first_stage.factorised_latent_space and False:
-                            *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
-                            for j, latent in enumerate(latents_w):
-                                save_and_log_latents(latent, f'Latents/wm{j}', runPath, step, run)
-                            if latents_z.shape[1] > 0:
-                                save_and_log_latents(latents_z, f'Latents/z', runPath, step, run)
-                        else:
-                            save_and_log_latents(latents, f'Latents/u', runPath, step, run)
+                for i, dataT in train_pbar:
+                    if return_class:
+                        data, classes = move_data_to_device(dataT, device=device)
                     else:
-                        for m, (name, dbatch) in enumerate(zip(modalities, data)):
-                            save_and_log_img(dbatch, f"Data/{name}", runPath,
-                                             display_data_fs[m], step=step, wandb_run=run)
+                        data = move_data_to_device(dataT, device=device)
+                    # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
+                    optimizer.zero_grad()
+
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                    latents = model_first_stage.scale_latents(latents)
+
+                    # print(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latents.mean(dim=(0, 2, 3))}")
+
+                    if use_mixed_precision:
+                        with autocast(dtype=torch.float16, device_type="cuda"):
+                            loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
+
+                        scaler.scale(loss).backward()
+
+                        if grad_clipper is not None:
+                            scaler.unscale_(optimizer)
+                            grad_clipper.autoclip_grad()
+                        scaler.step(optimizer)
+                    else:
+                        loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
+                        loss.backward()
+
+                        if grad_clipper is not None:
+                            grad_clipper.autoclip_grad()
+                        optimizer.step()
+
+                    if torch.isnan(loss).item():
+                        if enable_wandb:
+                            wandb.alert(title="Loss is NaN", text=f"Halting training at epoch {epochcount} and step {i}")
+                        raise ValueError("Loss has become NaN, halting training")
+
+                    b_loss += loss.detach().item()
+                    if conf.print_freq > 0 and i % conf.print_freq == 0 and enable_pbars:
+                        train_pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
+
+                    if ema is not None:
+                        ema.update(conf.training.batch_size)
+
+                    if i % scheduler_step_freq == 0:
+                        scheduler.step()
+                        # print(f"Learning rate: {scheduler.get_last_lr()}")
+
+                    if enable_wandb and log_iterations:
+                        wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr()[0]}, step=itercount)
+
+                    if i == 0:
+                        if conf.training.precompute_latents:
+                            if model_first_stage.factorised_latent_space and False:
+                                *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
+                                for j, latent in enumerate(latents_w):
+                                    save_and_log_latents(latent, f'Latents/wm{j}', runPath, itercount, run)
+                                if latents_z.shape[1] > 0:
+                                    save_and_log_latents(latents_z, f'Latents/z', runPath, itercount, run)
+                            else:
+                                save_and_log_latents(latents, f'Latents/u', runPath, itercount, run)
+                        else:
+                            for m, (name, dbatch) in enumerate(zip(modalities, data)):
+                                save_and_log_img(dbatch, f"Data/{name}", runPath,
+                                                 display_data_fs[m], step=itercount, wandb_run=run)
+
+                    itercount += 1
+                    if itercount >= n_stopiter:
+                        break
+
+                if itercount < n_stopiter:
+                    print("Finished one epoch")
+                    train_pbar = tqdm.tqdm(enumerate(dataloaders["train_loader"]), total=len(dataloaders["train_loader"]),
+                                     position=rank if data_parallel else 0)
+                    epochcount += 1
 
             # Epoch loss
-            epoch_loss = b_loss / len(train_loader.dataset)
-            if enable_wandb and not log_iterations: wandb.log({"Loss/train": epoch_loss}, step=epoch)
-            print('====> Epoch: {:03d} Train loss: {:.4f}'.format(epoch, epoch_loss))
+            subepoch_loss = b_loss / n_iter
+            if enable_wandb and not log_iterations: wandb.log({"Loss/train": subepoch_loss}, step=itercount)
+            print('====> Subepoch: {:03d} Train loss: {:.4f}'.format(subepoch, subepoch_loss))
 
-        def test_epoch(epoch, reencode_end=False, save_intermediate_z0t=False):
-            step = (epoch+1) * len(train_loader) if log_iterations else epoch
+            return epochcount, train_pbar
+
+        def test_epoch(dataloaders, subepoch, itercount, epochcount, reencode_end=False, save_intermediate_z0t=False):
             if "sampler" in conf:
                 run_params = conf.sampler.run_params
             else:
                 run_params = {"S": 1000}  # For all but DDPM we must specify a number of timesteps, so we default to 1000
 
             if enable_pbars:
-                pbar = tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0)
+                pbar = tqdm.tqdm(enumerate(dataloaders["test_loader"]),
+                                 total=len(dataloaders["test_loader"]),
+                                 position=rank if data_parallel else 0)
             else:
-                pbar = enumerate(test_loader)
+                pbar = enumerate(dataloaders["test_loader"])
+
+            if enable_wandb:
+                wandb.log({"epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
             b_loss = 0
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
@@ -585,7 +606,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
                     b_loss += loss.detach().item()
 
-                    if i == 0 and epoch % 1 == 0:
+                    if i == 0:
                         # Perform test generations
                         if save_intermediate_z0t:
                             saver = DiffusionIntermediateLogger(10, n_save=16)
@@ -641,37 +662,35 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                             for m in range(len(samples_x)):
                                 save_and_log_img(samples_x_2[m], f'Generation/reencoded_m{m}',
-                                                 runPath, display_data_fs[m], step, run, wandb_kwargs=wandb_kwargs,
+                                                 runPath, display_data_fs[m], itercount, run, wandb_kwargs=wandb_kwargs,
                                                  save_kwargs={}, nrow=4)
                             save_and_log_latents(samples_zw_2, f'Generation/reencoded_latent',
-                                                 runPath, step, run, wandb_kwargs=wandb_kwargs)
+                                                 runPath, itercount, run, wandb_kwargs=wandb_kwargs)
 
 
 
                         for m in range(len(samples_x)):
                             save_and_log_img(samples_x[m], f'Generation/m{m}',
-                                             runPath, display_data_fs[m], step, run, wandb_kwargs=wandb_kwargs, save_kwargs={}, nrow=4)
+                                             runPath, display_data_fs[m], itercount, run, wandb_kwargs=wandb_kwargs, save_kwargs={}, nrow=4)
 
                         save_and_log_latents(samples_zw, f'Generation/latent',
-                                         runPath, step, run, wandb_kwargs=wandb_kwargs)
+                                         runPath, itercount, run, wandb_kwargs=wandb_kwargs)
 
                         if save_intermediate_z0t:
-                            saver.save_and_log(runPath, step, run)
+                            saver.save_and_log(runPath, itercount, run)
 
             # Epoch test loss
-            epoch_loss = b_loss / len(test_loader.dataset)
-            if enable_wandb: wandb.log({"Loss/test": epoch_loss}, step=step)
+            epoch_loss = b_loss / len(dataloaders["test_loader"].dataset)
+            if enable_wandb: wandb.log({"Loss/test": epoch_loss}, step=itercount)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
 
             return epoch_loss
 
-        def test_metrics(epoch, n_samples=32, use_diffusion=True, reencode_end=False, metrics=["fid", "kid", "cmmd"], log_to_wandb=False):
+        def test_metrics(dataaloaders, subepoch, itercount, epochcount, n_samples=32, use_diffusion=True, reencode_end=False, metrics=["fid", "kid", "cmmd"], log_to_wandb=False):
             if "sampler" in conf:
                 run_params = conf.sampler.run_params
             else:
                 run_params = {"S": 1000}  # For all but DDPM we must specify a number of timesteps, so we default to 1000
-
-            step = ((epoch+1) * len(train_loader)) if log_iterations else epoch
 
             gen_batch_size = 16
             n_batches = n_samples // gen_batch_size
@@ -721,7 +740,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             tvu.save_image(s_disp, os.path.join(tempdirs[name], f"sample_{name}_{n * gen_batch_size + i}.png"))
 
                             if log_to_wandb:
-                                step_num = ((n*gen_batch_size + i + 1) * len(train_loader)) if log_iterations else n*gen_batch_size + i
+                                step_num = ((n*gen_batch_size + i + 1) * len(dataloaders["train_loader"])) if log_iterations else n*gen_batch_size + i
                                 run.log({f"Generation/m{m}": wandb.Image(s_disp)}, step=step_num)
 
             metric_scores = {}
@@ -737,7 +756,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         split = "test" if conf.data.dataset_name == "nyu_depth" else "val"
                         score = metric(tempdirs[mod], dataset_name=f"{conf.data.dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
                         if enable_wandb:
-                            wandb.log({f"{met}_{mod}": score, "epoch": epoch}, step=step)
+                            wandb.log({f"{met}_{mod}": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
                         scores.append(score)
 
@@ -749,27 +768,25 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return metric_scores
 
-        def test_optimum_EMA(out_epochs, out_stds):
+        def test_optimum_EMA(out_nimgs, out_stds):
             saves_path = os.path.dirname(conf.model_initialisation)
 
-            out_epochs, out_stds = zip(*product(out_epochs, out_stds))
+            out_nimgs, out_stds = zip(*product(out_nimgs, out_stds))
 
-            model_names = [f"model_it{out_es}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_epochs, out_stds)]
+            model_names = [f"model_it{out_es}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_nimgs, out_stds)]
 
-            it = reconstruct_phema(saves_path, out_std=out_stds, out_nepoch=out_epochs, out_dir=saves_path, epoch_size=24000)
+            it = reconstruct_phema(saves_path, out_std=out_stds, out_nimg=out_nimgs, out_dir=saves_path, epoch_size=conf.training.batch_size)
             for _ in it:
                 pass
 
             for step, name in enumerate(model_names):
-                logging.info(f"Testing configuration with epochs:{out_epochs[step]} and std:{out_stds[step]}")
+                logging.info(f"Testing configuration with epochs:{out_nimgs[step]} and std:{out_stds[step]}")
                 load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
-                test_epoch(step)
-                test_metrics(step)
-
-                log_step = ((step + 1) * len(train_loader)) if log_iterations else step
+                test_epoch(dataloaders, step, step, step)
+                test_metrics(dataloaders, step, step, step)
 
                 if enable_wandb:
-                    wandb.log({"n_epochs": out_epochs[step], "ema_std": out_stds[step]}, step=log_step)
+                    wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)
 
 
         def plot_timestep_logvars():
@@ -781,13 +798,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             fig.savefig(os.path.join(runPath, "timestep_logvars.png"))
 
 
-        def test_compare_bisenet(epoch, n_samples=32):
-            step = ((epoch + 1) * len(train_loader)) if log_iterations else epoch
-
-            test_metrics(epoch, n_samples=n_samples, log_to_wandb=True)  # Generate images with our method
+        def test_compare_bisenet(dataloaders, step, n_samples=32):
+            test_metrics(dataloaders, step, step, step, n_samples=n_samples, log_to_wandb=True)  # Generate images with our method
             colour_input_folder = os.path.join(runPath, f'temp_fid_colour')
 
-            run_bisenet(epoch, colour_input_folder)
+            run_bisenet(step, colour_input_folder)
 
 
         def run_bisenet(epoch, img_dir=None, dataloader=None, out_folder_name="bisenet_output", n_imgs=32):
@@ -802,7 +817,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             out_folder_name = os.path.join(runPath, out_folder_name)
             if not os.path.exists(out_folder_name):
                 os.mkdir(out_folder_name)
-
 
             cp = '79999_iter.pth'
 
@@ -864,7 +878,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     if i*B >= n_imgs:
                         break
 
-        def generate_conditional(n_samples=32, run_bisenet_on_input=False):
+        def generate_conditional(dataloaders, n_samples=32, run_bisenet_on_input=False):
             if "sampler" in conf:
                 run_params = conf.sampler.run_params
             else:
@@ -874,25 +888,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             gen_batch_size = conf.training.batch_size  # Set this to control gen batch size
 
             if enable_pbars:
-                pbar = tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0)
+                pbar = tqdm.tqdm(enumerate(dataloaders["test_loader"]), total=len(dataloaders["test_loader"]), position=rank if data_parallel else 0)
             else:
-                pbar = enumerate(test_loader)
-
-            """
-            for i, dataT in pbar:
-                if return_class:
-                    data, classes = move_data_to_device(dataT, device=device)
-                else:
-                    data = move_data_to_device(dataT, device=device)
-
-                for m, (name, dbatch) in enumerate(zip(modalities, data)):
-                    for k, s in enumerate(dbatch):
-                        save_and_log_img(s.unsqueeze(0).detach().cpu(), f'Generation/m{m}_{i * gen_batch_size + k}', runPath,
-                                         display_data_fs[m], 0, run, save_kwargs={})
-
-                if i*gen_batch_size >= n_samples:
-                    raise ValueError
-            """
+                pbar = enumerate(dataloaders["test_loader"])
 
             model.eval()
             with ema.ema_scope("Epoch test"):
@@ -943,15 +941,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         break
 
             if run_bisenet_on_input:
-                # Reload the dataset - this is quite gross
-                _, _test_dataset = load_image_datasets(conf)
-                _, _test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
-                                                               data_parallel)
-
-                run_bisenet(0, dataloader=_test_loader)
+                run_bisenet(0, dataloader=dataloaders["test_loader"])
 
 
-        def training_loop():
+        def training_loop(dataloaders):
             best_test_loss = 10000
             test_worsening_count = 0
 
@@ -960,16 +953,21 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 if conf.training.precompute_latents and not already_precomputed:
                     # Compute the latents and reload the latent dataloader
                     print("Beginning latent computation and saving")
-                    precompute_latents("train", conf.training.precompute_latents_path)
-                    precompute_latents("val", conf.training.precompute_latents_path)
+                    precompute_latents(dataloaders, "train", conf.training.precompute_latents_path)
+                    precompute_latents(dataloaders, "val", conf.training.precompute_latents_path)
 
                     # Replace the dataloaders with the precomputed latent loaders
                     train_dataset, test_dataset = load_precomputed_datasets(conf)
-                    train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
+                    train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
+                                                                   data_parallel)
 
+                    dataloaders["train_dataset"] = train_dataset
+                    dataloaders["test_dataset"] = test_dataset
+                    dataloaders["train_loader"] = train_loader
+                    dataloaders["test_loader"] = test_loader
 
                 if conf.training.compute_latent_scale:
-                    latent_mean, latent_scale = get_latent_scale_factor(n_batches=100, per_channel=conf.training.latent_scale_per_channel)
+                    latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
                     model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
                     model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
                     print("resaving the fisrt stage model with latent mean and scale")
@@ -977,38 +975,38 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                 print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
 
-                # metrics = test_metrics(0)
-                # print(metrics)
-                # fid_scores = test_fid(0, n_samples=256)
-                # sys.exit()
+                epochcount = 0
+                n_iter = conf.training.test_every_iter if "test_every_iter" in conf.training else len(train_loader)
+                train_pbar = tqdm.tqdm(enumerate(dataloaders["train_loader"]), total=len(dataloaders["train_loader"]),
+                                       position=rank if data_parallel else 0)
 
-                # test_epoch(start_epoch)
-                # fid_scores = test_fid(start_epoch)
-                # print("   ".join([f"{mod} FID: {fid}" for mod, fid in zip(modalities, fid_scores)]))
-                for epoch in range(start_epoch + 1, conf.training.num_epochs + 1 + start_epoch):
+                for subepoch, itercount in enumerate(range(conf.training.start_iter,
+                                                           conf.training.num_epochs * conf.training.test_every_iter + conf.training.start_iter,
+                                                           conf.training.test_every_iter)):
                     print("============================ starting training =========================")
-                    train_epoch(epoch)
+                    epochcount, train_pbar = train_epoch(dataloaders, subepoch, itercount, epochcount, n_iter, train_pbar)
                     print("============================ finished one epoch =========================")
 
-                    test_loss = test_epoch(epoch)
+                    test_loss = test_epoch(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished testing =========================")
-                    metrics = test_metrics(epoch)
+                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished computing FID =========================")
 
                     if ray_tune:
+                        #todo make this work with iteration training
                         checkpoint_data = {
-                            "epoch": epoch,
+                            "epoch": itercount,
                             "net_state_dict": model.state_dict(),
                             "optimizer_state_dict": optimizer.state_dict(),
                         }
                         with tempfile.TemporaryDirectory(dir="/home/ds3119/ray_tmp") as checkpoint_dir:
                             print("Saving ray tune checkpoint and reporting")
                             data_path = Path(checkpoint_dir) / "data.pkl"
-                            save_checkpoint(ema, model, optimizer, scheduler, epoch, data_path)
+                            save_checkpoint(ema, model, optimizer, scheduler, itercount, data_path)
                             checkpoint = Checkpoint.from_directory(checkpoint_dir)
                             train.report({"loss": test_loss, **{f"{met}_{mod}": score for met, scores in metrics.items() for mod, score in zip(modalities, scores)}}, checkpoint=checkpoint)
                     else:
-                        save_checkpoint(ema, model, optimizer, scheduler, epoch, runPath / f"model_{epoch}.pt")
+                        save_checkpoint(ema, model, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt")
                         """
                         best_test_loss = test_loss
                         test_worsening_count = 0
@@ -1021,14 +1019,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             test_worsening_count += 1
                             if test_worsening_count > conf.training.patience and not ray_tune:
                                 print(
-                                    f"Early stopping. Best test loss attained in epoch: {epoch - conf.training.patience}")
+                                    f"Early stopping. Best test loss attained in epoch: {subepoch - conf.training.patience}")
                                 logger.info("saving last model")
-                                save_checkpoint(ema, model, optimizer, scheduler, epoch, runPath / "last_model.pt")
+                                save_checkpoint(ema, model, optimizer, scheduler, itercount, runPath / "last_model.pt")
 
                                 break
 
         if conf.function.name is not None:
-            locals()[conf.function.name](**conf.function.kwargs)
+            locals()[conf.function.name](dataloaders=dataloaders, **conf.function.kwargs)
         else:
             training_loop()
 
@@ -1055,7 +1053,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/testing/", config_name="celeba_semseg_diffusion_latent_dps_rgb_conditioned.yaml")
+@hydra.main(version_base=None, config_path="configs/training", config_name="nyu_depth_stable_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

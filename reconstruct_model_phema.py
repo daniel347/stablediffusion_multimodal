@@ -30,7 +30,7 @@ warnings.filterwarnings('ignore', 'You are using `torch.load` with `weights_only
 def reconstruct_phema(
     in_folder,                    # List of input pickles, expressed as dnnlib.EasyDict(path, nimg, std).
     out_std,                    # List of relative standard deviations to reconstruct.
-    out_nepoch=None,     # Training time of the snapshot to reconstruct. None = highest input time.
+    out_nimg=None,     # Training time of the snapshot to reconstruct. None = highest input time.
     out_dir=None,     # Where to save the reconstructed network pickles. None = do not save.
     epoch_size=24000,   # number of images per epoch
 ):
@@ -66,10 +66,8 @@ def reconstruct_phema(
 
         saves_iteration = [s * epoch_size for s in saves_iteration]
 
-    if out_nepoch is None:
+    if out_nimg is None:
         out_nimg = [max(saves_iteration)]
-    else:
-        out_nimg = [one * epoch_size for one in out_nepoch]
 
     for oni in out_nimg:
         if oni not in saves_iteration:
@@ -97,15 +95,17 @@ def reconstruct_phema(
                 for j in range(len(out)):
                     if out[j] is None:
                         out[j] = {"model": copy.deepcopy(sd["model"]), "iteration": out_nimg[j]}
-                        for _, pj in out[j]["model"].items():
-                            pj.zero_()
-                    for pi, pj in zip(in_net.values(), out[j]["model"].values()):
+                        for name, pj in out[j]["model"].items():
+                            if name in in_net:
+                                # zero the parameters for which we store EMAs for
+                                pj.zero_()
+                    for name, pi in in_net.items(): #, out[j]["model"].values()):
                         if isinstance(pi, torch.Tensor):
                             # logger.debug(f"Copying parameter of shape {pi.shape} to {pj.shape}")
-                            pj += pi.to(torch.float32) * coefs[i, j]
+                            out[j]["model"][name] += pi.to(torch.float32) * coefs[i, j]
                         else:
                             logger.debug(f"found non parameter of type {type(pi)}, copying without weighting")
-                            pj.copy_(pi.to(torch.float32))
+                            out[j]["model"][name].copy_(pi.to(torch.float32))
 
                 # Finalise outputs.
                 if i == len(save_path) - 1:

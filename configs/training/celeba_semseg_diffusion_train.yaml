@@ -61,7 +61,6 @@ sampler:
   run_params:
     S: 1000
 
-
 eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 

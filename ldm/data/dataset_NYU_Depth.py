@@ -35,7 +35,7 @@ class NYUDepth(Dataset):
 
         self.scenes = self.scenes.sort_values(by=["scene_class", "scene_ind"])
 
-        if self.split == "test":
+        if self.split == "test" or self.split == "val":
             self.scenes = self.scenes.groupby("scene_class", as_index=False).last()
         elif self.split == "train":
             self.scenes = self.scenes.groupby("scene_class", as_index=False).apply(lambda x: x.iloc[:-1])

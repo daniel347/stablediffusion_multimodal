@@ -73,8 +73,10 @@ class MMVAEplus(nn.Module):
 
 
         if ckpt_path is not None:
-            print("Loading MMVAE checkpoint from {params.ckpt_path}")
+            print(f"Loading MMVAE checkpoint from {ckpt_path}")
             ckpt = torch.load(ckpt_path)
+            if "model" in ckpt:
+                ckpt = ckpt["model"]
             ckpt = remove_module_prefix(ckpt)
             missing, unexpected = self.load_state_dict(ckpt, strict=False)
             if len(missing) > 0:

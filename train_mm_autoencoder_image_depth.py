@@ -288,11 +288,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             # this is almost certainly an epoch number
             start_iter *= len(train_loader)
 
-            # Set the learning rate forward to continue training after pause
-        if start_iter > 0:
-            for _ in range(start_iter//scheduler_step_freq):
-                scheduler.step()
-
         start_epoch = start_iter // len(train_loader)
 
         objective_opts = OmegaConf.to_container(conf.training.objective.params)
