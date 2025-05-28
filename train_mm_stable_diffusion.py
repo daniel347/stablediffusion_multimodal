@@ -127,7 +127,7 @@ def load_image_datasets(conf):
 
 
 def create_dataloaders(train_dataset, test_dataset, conf, world_size=1, rank=0, data_parallel=False):
-    kwargs = {'num_workers': 4, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
+    kwargs = {'num_workers': 2, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
                                        shuffle=True) if data_parallel else None
     test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,

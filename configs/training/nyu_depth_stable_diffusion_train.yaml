@@ -9,7 +9,7 @@ function:
 
 data:
   dataset_name: nyu_depth
-  root_data_dir: "/rds/general/user/ds3119/ephemeral/nyuv2_processed" # ../../datasets/nyuv2_processed/
+  root_data_dir: "/rds/general/user/ds3119/home/datasets/nyuv2_processed" # ../../datasets/nyuv2_processed/
   input_size: 128
   modality: ["colour", "depth"]
 
@@ -19,7 +19,7 @@ training:
   use_mixed_precision: False
 
   lr: 5.0e-4
-  batch_size: 2
+  batch_size: 24
   num_epochs: 20   # this will be interpreted as subepochs if test_every_iter is specified
   start_iter: 0
   patience: 10     # this will be interpreted as subepochs if test_every_iter is specified
@@ -48,7 +48,7 @@ training:
 ema:
   target: ldm.modules.ema.PowerFunctionEMA
   params:
-    stds: [0.10]
+    stds: [0.05, 0.10]
 
 sampler:
   target: ldm.models.diffusion.ddim.DDIMSampler
