@@ -275,7 +275,7 @@ class PowerFunctionEMA(nn.Module):
     def load_state_dict(self, state, **kwargs):
         self.stds = state['stds']
         for i, s_ema in enumerate(state['emas']):
-            self.emas[i] = s_ema:wq
+            self.emas[i] = s_ema
 
     @contextmanager
     def ema_scope(self, context=None, std_ind=0):
