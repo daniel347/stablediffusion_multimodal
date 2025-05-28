@@ -246,7 +246,8 @@ class PowerFunctionEMA(nn.Module):
     def reset(self):
         for name, param in self.net.parameters():
             for ema in self.emas:
-                ema[name].copu_(param)
+                if name in ema:
+                    ema[name].copu_(param)
 
     @torch.no_grad()
     def update(self, batch_size):
@@ -256,14 +257,16 @@ class PowerFunctionEMA(nn.Module):
         for std, ema in zip(self.stds, self.emas):
             beta = power_function_beta(std=std, t_next=self.cur_nimg, t_delta=batch_size)
             for name, p_net in self.net.named_parameters():
-                logger.debug(f"ema_device: {ema[name].device},  net_device: {p_net.device}")
-                ema[name].lerp_(p_net, 1 - beta)
+                if name in ema:
+                    logger.debug(f"ema_device: {ema[name].device},  net_device: {p_net.device}")
+                    ema[name].lerp_(p_net, 1 - beta)
 
     @torch.no_grad()
     def get(self):
         for ema in self.emas:
             for name, p_net in self.net.named_buffers():
-                ema[name].copy_(p_net)
+                if name in ema:
+                    ema[name].copy_(p_net)
         return [(ema, f'-{std:.3f}') for std, ema in zip(self.stds, self.emas)]
 
     def state_dict(self, **kwargs):
@@ -272,7 +275,7 @@ class PowerFunctionEMA(nn.Module):
     def load_state_dict(self, state, **kwargs):
         self.stds = state['stds']
         for i, s_ema in enumerate(state['emas']):
-            self.emas[i] = s_ema
+            self.emas[i] = s_ema:wq
 
     @contextmanager
     def ema_scope(self, context=None, std_ind=0):
