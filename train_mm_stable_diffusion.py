@@ -367,6 +367,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         if start_iter > 0 and start_iter < 50:
             # this is almost certainly an epoch number
+            print("converting start epoch to start iter")
             start_iter *= len(train_loader)
 
         already_precomputed = False
@@ -686,7 +687,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return epoch_loss
 
-        def test_metrics(dataaloaders, subepoch, itercount, epochcount, n_samples=32, use_diffusion=True, reencode_end=False, metrics=["fid", "kid", "cmmd"], log_to_wandb=False):
+        def test_metrics(dataloaders, subepoch, itercount, epochcount, n_samples=32, use_diffusion=True, reencode_end=False, metrics=["fid", "kid", "cmmd"], log_to_wandb=False):
             if "sampler" in conf:
                 run_params = conf.sampler.run_params
             else:
@@ -989,7 +990,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     test_loss = test_epoch(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished testing =========================")
-                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount)
+                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount, metrics=["fid"])
                     print("============================ finished computing FID =========================")
 
                     if ray_tune:
