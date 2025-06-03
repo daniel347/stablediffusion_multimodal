@@ -775,11 +775,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             out_nimgs, out_stds = zip(*product(out_nimgs, out_stds))
 
             model_names = [f"model_it{out_es//conf.training.batch_size}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_nimgs, out_stds)]
-            """
+            
             it = reconstruct_phema(saves_path, out_std=out_stds, out_nimg=out_nimgs, out_dir=saves_path, epoch_size=conf.training.batch_size)
             for _ in it:
                 pass
+
             """
+            
             for step, name in enumerate(model_names):
                 logging.info(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
                 load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
@@ -788,7 +790,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                 if enable_wandb:
                     wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)
-
+            """
 
         def plot_timestep_logvars():
             logvars = model.logvar.cpu().detach().numpy()

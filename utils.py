@@ -337,8 +337,8 @@ def save_checkpoint(ema, model, optimiser, scheduler, iteration, path):
     torch.save(sd, path)
 
 
-def load_checkpoint(ema, model, optimiser, scheduler, path):
-    sd = torch.load(path)
+def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu'):
+    sd = torch.load(path, map_location=map_location)
 
     if "model" in sd:
         model.load_state_dict(sd["model"])
