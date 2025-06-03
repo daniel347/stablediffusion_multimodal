@@ -769,22 +769,22 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return metric_scores
 
-        def test_optimum_EMA(out_nimgs, out_stds):
+        def test_optimum_EMA(dataloaders, out_nimgs, out_stds):
             saves_path = os.path.dirname(conf.model_initialisation)
 
             out_nimgs, out_stds = zip(*product(out_nimgs, out_stds))
 
-            model_names = [f"model_it{out_es}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_nimgs, out_stds)]
-
+            model_names = [f"model_it{out_es//conf.training.batch_size}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_nimgs, out_stds)]
+            """
             it = reconstruct_phema(saves_path, out_std=out_stds, out_nimg=out_nimgs, out_dir=saves_path, epoch_size=conf.training.batch_size)
             for _ in it:
                 pass
-
+            """
             for step, name in enumerate(model_names):
-                logging.info(f"Testing configuration with epochs:{out_nimgs[step]} and std:{out_stds[step]}")
+                logging.info(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
                 load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
                 test_epoch(dataloaders, step, step, step)
-                test_metrics(dataloaders, step, step, step)
+                test_metrics(dataloaders, step, step, step, metrics=["fid"])
 
                 if enable_wandb:
                     wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)
@@ -1054,7 +1054,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/training", config_name="nyu_depth_stable_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/testing", config_name="nyu_depth_diffusion_optimise_ema.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
