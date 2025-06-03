@@ -18,11 +18,26 @@ import pickle
 @register_dataset("nyu_depth")
 class NYUDepth(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_index=False, **kwargs):
+    def __init__(self,
+                 root_data_dir,
+                 transform,
+                 split,
+                 modality,
+                 p_hor_flip=0,
+                 p_colour_jitter=0,return_index=False,
+                 classes=False,return_row=False,
+                 modality_exts="png",
+                 **kwargs):
 
         super().__init__()
         self.split = split
         self.root_data_dir = root_data_dir
+
+        if isinstance(modality, str):
+            modality = [modality]
+        self.modality = modality
+        self.modality_exts = modality_exts if isinstance(modality_exts, dict) else {m: modality_exts for m in modality}
+        self.transform = transform
 
         self.scene_colour_paths = list((Path(root_data_dir) / "colour").iterdir())
         self.scene_depth_paths = [Path(str(p).replace("colour", "depth")) for p in self.scene_colour_paths]
@@ -39,18 +54,21 @@ class NYUDepth(Dataset):
             self.scenes = self.scenes.groupby("scene_class", as_index=False).last()
         elif self.split == "train":
             self.scenes = self.scenes.groupby("scene_class", as_index=False).apply(lambda x: x.iloc[:-1])
+        elif self.split == "all":
+            pass
         else:
             raise ValueError(f"Unknown split: {self.split}")
+
+        if classes is not None:
+            # Restrict to just the provided classes
+            self.scenes = self.scenes[self.scenes.scene_class.isin(classes)]
 
         index_dfs = []
         for _, scene in self.scenes.iterrows():
             index_dfs.append(self.make_scene_dataframe(scene))
         self.index = pd.concat(index_dfs, axis=0, ignore_index=True)
 
-        if isinstance(modality, str):
-            modality = [modality]
-        self.modality = modality
-        self.transform = transform
+
 
         self.p_hor_flip = p_hor_flip
         self.p_colour_jitter = p_colour_jitter
@@ -58,6 +76,7 @@ class NYUDepth(Dataset):
             self.colour_jitter = ColorJitter(0.1, 0.1, 0.1, 0.02)
 
         self.return_index = return_index
+        self.return_row = return_row
 
         self.mode_readers = {"colour": self.read_colour, "depth": self.read_depth}
 
@@ -75,28 +94,33 @@ class NYUDepth(Dataset):
         # Convert relative to absolute paths
         self.bad_paths = [Path(self.root_data_dir) / p for p in self.bad_paths]
 
-
         # Remove the bad paths from the index
-        self.index = self.index[~self.index.colour_path.isin(self.bad_paths)]
-        self.index = self.index[~self.index.depth_path.isin(self.bad_paths)]
+        for m in modality:
+            self.index = self.index[~self.index[f"{m}_path"].isin(self.bad_paths)]
 
     def make_scene_dataframe(self, x):
-        colour_paths = list(x.scene_colour_path.iterdir())
-        depth_paths = list(x.scene_depth_path.iterdir())
+        paths = []
+        inds = []
+        for m in self.modality:
+            paths.append(list(x[f"scene_{m}_path"].iterdir()))
+            inds.append(set([int(p.name.split(".")[0]) for p in paths[-1]]))
 
-        # Get only the files with the same index
-        colour_inds = [int(p.name.split(".")[0]) for p in colour_paths]
-        depth_inds = [int(p.name.split(".")[0]) for p in depth_paths]
+        combined_inds = list(set(inds[0]).intersection(*inds[1:]))
 
-        combined_inds = list(set(colour_inds).intersection(depth_inds))
-        colour_paths = [x.scene_colour_path / f"{i}.png" for i in combined_inds]
-        depth_paths = [x.scene_depth_path / f"{i}.png" for i in combined_inds]
+        combined_paths = []
+        for m in self.modality:
+            combined_paths.append([x[f"scene_{m}_path"] / f"{i}.{self.modality_exts[m]}" for i in combined_inds])
 
-        assert len(colour_paths) == len(depth_paths), f"paths {x.scene_colour_path} and {x.scene_depth_path} have different numbers of files!"
-        scene_class = [x.scene_class for _ in colour_paths]
-        scene_ind = [x.scene_ind for _ in colour_paths]
+        assert all([len(cp) == len(combined_paths[0]) for cp in combined_paths]), f"paths have different numbers of files!"
 
-        return pd.DataFrame({"colour_path": colour_paths, "depth_path": depth_paths, "scene_class": scene_class, "scene_ind": scene_ind})
+        scene_class = [x.scene_class for _ in combined_paths[0]]
+        scene_ind = [x.scene_ind for _ in combined_paths[0]]
+
+        out_dict = {"scene_class": scene_class, "scene_ind": scene_ind}
+        for i, m in enumerate(self.modality):
+            out_dict[f"{m}_path"] = combined_paths[i]
+
+        return pd.DataFrame(out_dict)
 
     def __len__(self):
         return len(self.index.index)
@@ -129,6 +153,8 @@ class NYUDepth(Dataset):
 
         if self.return_index:
             return outs, idx
+        elif self.return_row:
+            return outs, filepaths
         else:
             return outs
 
