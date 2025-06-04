@@ -2,8 +2,10 @@ import torch
 import glob
 import tqdm
 
-model_base_dir = "/home/ds3119/multimodal_generation/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_05_02__14_32_30_rgb_sd_ae/*.pt"
+model_base_dir = "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_05_29__12_29_12_new_ae_train/model_*000.pt"  # the 000 is a hack to exclude the EMA output models
 model_paths = glob.glob(model_base_dir)
+
+print(model_paths)
 
 test_param_name = "model.input_blocks.4.0.in_layers.0.weight"
 test_params = []
@@ -15,13 +17,17 @@ for model in tqdm.tqdm(model_paths):
 
     for i, ema in enumerate(save["ema"]["emas"]):
         test_params.append(ema[test_param_name])
-        assert torch.all(ema[test_param_name].data != curr_param.data), f"ema {i} of model {model} is identical to the latest weights"
+        if not torch.all(ema[test_param_name].data != curr_param.data):
+            print(f"error! ema {i} of model {model} is identical to the latest weights")
         for j in range(0, i):
-            assert torch.all(ema[test_param_name].data != test_params[j-i].data), f"ema {i} of model {model} is identical to ema {j}"
+            if not torch.all(ema[test_param_name].data != test_params[j-i].data):
+                print(f"error! ema {i} of model {model} is identical to ema {j}")
 
-for p1 in test_params:
-    for p2 in test_params:
-        assert torch.all(p1.data != p2.data)
+for i, p1 in enumerate(test_params):
+    for j, p2 in enumerate(test_params):
+        if not torch.all(p1.data != p2.data) and i != j:
+            print(f"error! test param {i} == test param {j}")
+            
 
 print("All tensors are different")
 

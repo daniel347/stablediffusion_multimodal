@@ -374,9 +374,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
         data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [Path(conf.data.root_data_dir)]
-        dataset_name = [cd.dataset_name for cd in conf.data].join("_") if isinstance(conf.data, ListConfig) else conf.data.dataset_name
-
-        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in data_conf_0.modality]
+        dataset_name = "_".join([cd.dataset_name for cd in conf.data]) if isinstance(conf.data, ListConfig) else conf.data.dataset_name
+        
+        if isinstance(train_dataset, torch.utils.data.ConcatDataset):
+            display_data_fs = [getattr(train_dataset._datasets[0], f"{mode}_display") for mode in data_conf_0.modality]
+        else:
+            display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in data_conf_0.modality]
 
         if start_iter > 0 and start_iter < 50:
             # this is almost certainly an epoch number
