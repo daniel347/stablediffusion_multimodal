@@ -24,8 +24,10 @@ class NYUDepth(Dataset):
                  split,
                  modality,
                  p_hor_flip=0,
-                 p_colour_jitter=0,return_index=False,
-                 classes=False,return_row=False,
+                 p_colour_jitter=0,
+                 return_index=False,
+                 classes=None,
+                 return_row=False,
                  modality_exts="png",
                  **kwargs):
 
@@ -139,6 +141,7 @@ class NYUDepth(Dataset):
                     img = self.transform[mod](img)
                 else:
                     img = self.transform(img)
+
             outs.append(img)
 
         flip = random.random() < self.p_hor_flip
@@ -190,7 +193,7 @@ class NYUDepth(Dataset):
 
 
 if __name__ == "__main__":
-    train_dataset = NYUDepth("../../datasets/nyuv2_processed", None, "test", ["colour", "depth"], 0, 0, False)
+    train_dataset = NYUDepth("../../datasets/lsun", None, "train", ["colour", "depth"], 0, 0, False, modality_exts={"colour": "jpg", "depth": "png"})
     rgb, depth = train_dataset[0]
 
     # NB depth is actually semseg for mm_celeba

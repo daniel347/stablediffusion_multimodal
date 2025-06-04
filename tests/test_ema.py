@@ -39,8 +39,8 @@ def test_ema_update(ema_opts={}):
     assert torch.all(model.param.data != orig_p1_weights)
 
     for i in range(len(ema.emas)):
-        assert torch.all(ema.emas[i].param.data != orig_p1_weights)
-        assert torch.all(ema.emas[i].param.data != model.param.data)
+        assert torch.all(ema.emas[i]["param"].data != orig_p1_weights)
+        assert torch.all(ema.emas[i]["param"].data != model.param.data)
 
 
 def test_no_initial_params(ema_opts={}):
@@ -62,9 +62,9 @@ def test_no_initial_params(ema_opts={}):
     assert torch.all(model.param.data != orig_p1_weights)
 
     for i in range(len(ema.emas)):
-        assert torch.all(ema.emas[i].param.data != orig_p1_weights)
+        assert torch.all(ema.emas[i]["param"].data != orig_p1_weights)
         # For 1 update we expect to not interpolate the initial state at all
-        assert torch.all(ema.emas[i].param.data == model.param.data)
+        assert torch.all(ema.emas[i]["param"].data == model.param.data)
 
 
 def test_power_ema_context(ema_opts={}):
@@ -77,7 +77,7 @@ def test_power_ema_context(ema_opts={}):
 
     rand_emas = [torch.randn(16) for _ in range(len(ema.emas))]
     for i in range(len(ema.emas)):
-        ema.emas[i].param = nn.Parameter(rand_emas[i])
+        ema.emas[i]["param"] = nn.Parameter(rand_emas[i])
 
     for i in range(len(ema.emas)):
         with ema.ema_scope(std_ind=i):

@@ -8,9 +8,13 @@ import torchvision.utils as tvu
 dataset_opts = {"imagenet": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
                              "modality": ["colour", "depth"],
                              "root_data_dir": "tests/imagenet_mock"},
-                "nyu_depth": {"transform": v2.Resize([256, 256]),
+                "nyu_depth": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
                               "modality": ["colour", "depth"],
                               "root_data_dir": "../../datasets/nyuv2_processed"},
+                "lsun": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
+                              "modality": ["colour", "depth"],
+                              "modality_exts": {"colour": "jpg", "depth": "png"},
+                              "root_data_dir": "../../datasets/lsun"},
                 "mm_celeba": {"transform": {"colour": v2.Resize([256, 256]), "semseg": lambda x: resize_semseg(x, (256, 256))},
                               "modality": ["colour", "semseg"],
                               "root_data_dir": "../../datasets/CelebAMask-HQ",
@@ -22,11 +26,11 @@ dataset_opts = {"imagenet": {"transform": v2.Compose([v2.Resize(256), v2.CenterC
                             "return_index": False}}
 
 
-@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "mm_celeba"), ("train", "mm_ffhq"),
-                                                ("test", "nyu_depth"), ("val", "imagenet"), ("val", "mm_celeba"), ("val", "mm_ffhq")])
+@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "mm_celeba"), ("train", "mm_ffhq"), ("train", "lsun"),
+                                                ("test", "nyu_depth"), ("val", "imagenet"), ("val", "mm_celeba"), ("val", "mm_ffhq"), ("val", "lsun")])
 def test_image_load(split, dataset_name):
-
-    train_dataset = get_dataset(dataset_name, **dataset_opts[dataset_name], split=split)
+    loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
+    train_dataset = get_dataset(loader_name, **dataset_opts[dataset_name], split=split)
     rgb, depth = train_dataset[0]
 
     # NB depth is actually semseg for mm_celeba
@@ -40,10 +44,11 @@ def test_image_load(split, dataset_name):
     assert depth_w > 0
 
 
-@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("test", "nyu_depth"), ("val", "imagenet")])
+@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "lsun"),
+                                                ("test", "nyu_depth"), ("val", "imagenet"), ("test", "lsun")])
 def test_transform(split, dataset_name):
-
-    train_dataset = get_dataset(dataset_name, **dataset_opts[dataset_name], split=split)
+    loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
+    train_dataset = get_dataset(loader_name, **dataset_opts[dataset_name], split=split)
     rgb, depth = train_dataset[0]
     assert rgb.shape == (3, 256, 256)
     assert depth.shape == (1, 256, 256)
@@ -56,6 +61,25 @@ def test_transform(split, dataset_name):
 
     assert depth.min() >= 0.0
     assert depth.max() <= 1.0
+
+@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "lsun"),
+                                                ("test", "nyu_depth"), ("test", "lsun")])
+def test_class_selection(split, dataset_name):
+    loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
+    dataset = get_dataset(loader_name, **dataset_opts[dataset_name], split=split, classes=["bedroom", "basement"])
+
+    df = dataset.index
+    assert (df.colour_path.apply(str).str.contains("bedroom") | df.colour_path.apply(str).str.contains("basement")).all()
+    assert df.scene_class.isin(["bedroom", "basement"]).all()
+
+
+@pytest.mark.parametrize("split,dataset_name,expected_len", [("train", "nyu_depth", 50688), ("train", "imagenet", 1300), ("train", "mm_celeba", 24183), ("train", "mm_ffhq", 50000), ("train", "lsun", 90000),
+                                                             ("test", "nyu_depth", 654), ("val", "imagenet", 50), ("val", "mm_celeba", 2993), ("val", "mm_ffhq", 10000), ("test", "lsun", 10000)])
+def test_len(split, dataset_name, expected_len):
+    loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
+    train_dataset = get_dataset(loader_name, **dataset_opts[dataset_name], split=split)
+
+    assert len(train_dataset) == expected_len
 
 
 @pytest.mark.parametrize("split,dataset_name,single_label", [("train", "mm_celeba", False), ("train", "mm_celeba", True), ("train", "mm_ffhq", True),
@@ -96,14 +120,6 @@ def test_semseg_to_rgb_display(split, dataset_name):
     assert rgb_display.dtype == torch.float32
     assert rgb_display.min() >= 0.0
     assert rgb_display.max() <= 1.0
-
-
-@pytest.mark.parametrize("split,dataset_name,expected_len", [("train", "nyu_depth", 50688), ("train", "imagenet", 1300), ("train", "mm_celeba", 24183), ("train", "mm_ffhq", 50000),
-                                                             ("test", "nyu_depth", 654), ("val", "imagenet", 50), ("val", "mm_celeba", 2993), ("val", "mm_ffhq", 10000)])
-def test_len(split, dataset_name, expected_len):
-    train_dataset = get_dataset(dataset_name, **dataset_opts[dataset_name], split=split)
-
-    assert len(train_dataset) == expected_len
 
 
 def test_celeba_simgle_label_compat_semseg():

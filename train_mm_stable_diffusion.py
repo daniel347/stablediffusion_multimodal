@@ -77,9 +77,9 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def load_precomputed_datasets(conf):
-    train_dataset = get_dataset("latents", latent_folder_name=conf.training.precompute_latents_path, split="train", **conf.data)
-    test_dataset = get_dataset("latents", latent_folder_name=conf.training.precompute_latents_path, split="val", **conf.data)
+def load_precomputed_datasets(conf_data, latent_path):
+    train_dataset = get_dataset("latents", latent_path=latent_path, split="train", **conf_data)
+    test_dataset = get_dataset("latents", latent_path=latent_path, split="val", **conf_data)
 
     return train_dataset, test_dataset
 
@@ -93,33 +93,42 @@ def learning_rate_schedule(cur_nimg, batch_size, ref_lr=100e-4, ref_batches=70e3
     return lr
 
 
-def load_image_datasets(conf):
-    tx = {"colour": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)]),
-          "semseg": v2.Compose([v2.Resize(conf.data.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
-                                v2.CenterCrop(conf.data.input_size)]),
-          "depth": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])}
+def load_image_datasets(data_conf, precompute_latents=False):
+    if isinstance(OmegaConf.to_container(data_conf), list):
+        # We have multiple datasets to concat
+        train_datasets, test_datasets = list(zip(*[load_image_datasets(dc, precompute_latents) for dc in data_conf]))
 
-    return_class = "return_class" in conf.data and conf.data.return_class
-    return_index = conf.training.precompute_latents
+        train_dataset = torch.utils.data.ConcatDataset(train_datasets)
+        test_dataset = torch.utils.data.ConcatDataset(test_datasets)
 
-    train_opts = OmegaConf.to_container(conf.data)
-    test_opts = copy.deepcopy(OmegaConf.to_container(conf.data))
+        return train_dataset, test_dataset
+
+
+    tx = {"colour": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)]),
+          "semseg": v2.Compose([v2.Resize(data_conf.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
+                                v2.CenterCrop(data_conf.input_size)]),
+          "depth": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)])}
+
+    return_class = "return_class" in data_conf and data_conf.return_class
+
+    train_opts = OmegaConf.to_container(data_conf)
+    test_opts = copy.deepcopy(OmegaConf.to_container(data_conf))
     for key in ["p_hor_flip", "p_colour_jitter"]:
         test_opts.pop(key, None)
-        if conf.training.precompute_latents:
+        if precompute_latents:
             # Dont augment if precomputing latents
             train_opts.pop(key, None)
 
-    train_dataset = get_dataset(conf.data.dataset_name,
+    train_dataset = get_dataset(data_conf.dataset_name,
                                 transform=tx,
                                 split="train",
-                                return_index=return_index,
+                                return_row=precompute_latents,
                                 return_class=return_class,
                                 **train_opts)
-    test_dataset = get_dataset(conf.data.dataset_name,
+    test_dataset = get_dataset(data_conf.dataset_name,
                                transform=tx,
                                split="val",
-                               return_index=return_index,
+                               return_row=precompute_latents,
                                return_class=return_class,
                                **test_opts)
 
@@ -298,7 +307,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             runId += f"_{name}"
 
         if rank == 0 or not data_parallel:
-            experiment_dir = Path(os.path.join(conf.data.outputdir, conf.experiment, "checkpoints"))
+            experiment_dir = Path(os.path.join(conf.outputdir, conf.experiment, "checkpoints"))
             experiment_dir.mkdir(parents=True, exist_ok=True)
             runPath = experiment_dir / runId
             if runPath.exists():
@@ -363,7 +372,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
                                position=rank if data_parallel else 0)
 
-        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in conf.data.modality]
+        data_conf_0 = conf.data[0] if isinstance(conf.data, Iterable) else conf.data
+        data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, Iterable) else [Path(conf.data.root_data_dir)]
+        dataset_name = [cd.dataset_name for cd in conf.data].join("_") if isinstance(conf.data, Iterable) else conf.data.dataset_name
+
+        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in data_conf_0.modality]
 
         if start_iter > 0 and start_iter < 50:
             # this is almost certainly an epoch number
@@ -372,20 +385,20 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         already_precomputed = False
         if conf.training.precompute_latents:
-            latents_train_path = Path(conf.data.root_data_dir) / Path(conf.training.precompute_latents_path) / "train"
-            latents_val_path = Path(conf.data.root_data_dir) / Path(conf.training.precompute_latents_path) / "val"
+            latents_train_path = Path(data_conf_0.root_data_dir) / Path(conf.training.precompute_latents_path) / "train"
+            latents_val_path = Path(data_conf_0.root_data_dir) / Path(conf.training.precompute_latents_path) / "val"
             if latents_train_path.exists() and latents_val_path.exists() and not conf.training.force_recompute:
                 # We have already computed the latents
-                train_dataset, test_dataset = load_precomputed_datasets(conf)
+                train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, conf.training.precompute_latents_path)
                 train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
                                                                data_parallel)
                 train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
                                        position=rank if data_parallel else 0)
                 already_precomputed = True
 
-        return_class = "return_class" in conf.data and conf.data.return_class
+        return_class = "return_class" in data_conf_0 and data_conf_0.return_class
         return_index = conf.training.precompute_latents
-        modalities = conf.data.modality
+        modality = data_conf_0.modality
         avg_z = conf.training.z_mode == "avg"
         random_z = conf.training.z_mode == "random"
         z_combiner = conf.training.z_mode == "z_combiner"
@@ -448,15 +461,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             else:
                 pbar = enumerate(dataloader)
 
-            save_dir = Path(conf.data.root_data_dir) / Path(f"{save_folder}/{split}")
+            out_base_folder = Path(f"{save_folder}_{split}")
 
             with torch.no_grad():
                 for i, dataT in pbar:
                     print(f"data len: {len(dataT)}, out len: {len(dataT[0])}")
                     if return_class:
-                        data, classes, ind = move_data_to_device(dataT, device=device)
+                        data, classes, row = move_data_to_device(dataT, device=device)
                     else:
-                        data, ind = move_data_to_device(dataT, device=device)
+                        data, row = move_data_to_device(dataT, device=device)
                     # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
@@ -471,17 +484,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     print(latents.shape)
 
-                    for j, latent in enumerate(latents):
-                        if return_class:
-                            save_dir_class = save_dir / Path(str(classes[j].item()))
-                        else:
-                            save_dir_class = save_dir / Path("all")
-
-                        if not save_dir_class.exists():
-                            save_dir_class.mkdir(parents=True)
-
-                        save_name = save_dir_class / Path(f"latent_{ind[j].item()}.pt")
-                        torch.save(latent.contiguous().cpu(), save_name)
+                    for latent, r in zip(latents, row):
+                        save_path = Path(str(r[f"{modality[0]}_path"]).replace(modality[0], "latent"))
+                        for root in data_root_dirs:
+                            if save_path.is_relative_to(root):
+                                save_path = out_base_folder / save_path.relative_to(root.parent)  # keep the dataset folder name
+                        save_path.parent.mkdir(parents=True, exist_ok=True)
+                        print(save_path)
+                        torch.save(latent.contiguous().cpu(), save_path.with_suffix(".pt"))
 
         def train_epoch(dataloaders, subepoch, itercount, epochcount, n_iter, train_pbar):
             model.train()
@@ -556,7 +566,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             else:
                                 save_and_log_latents(latents, f'Latents/u', runPath, itercount, run)
                         else:
-                            for m, (name, dbatch) in enumerate(zip(modalities, data)):
+                            for m, (name, dbatch) in enumerate(zip(modality, data)):
                                 save_and_log_img(dbatch, f"Data/{name}", runPath,
                                                  display_data_fs[m], step=itercount, wandb_run=run)
 
@@ -697,7 +707,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             n_batches = n_samples // gen_batch_size
 
             tempdirs = {}
-            for mod in modalities:
+            for mod in modality:
                 tempdir = os.path.join(runPath, f'temp_fid_{mod}')
                 os.makedirs(tempdir, exist_ok=True)
                 tempdirs[mod] = tempdir
@@ -735,7 +745,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         samples_zw = cat_dists_or_tensor_latents(samples_zw)
                         samples_x = model_first_stage.decode(samples_zw)
 
-                    for m, (name, samples) in enumerate(zip(modalities, samples_x)):
+                    for m, (name, samples) in enumerate(zip(modality, samples_x)):
                         for i, s in enumerate(samples.mean):
                             s_disp = display_data_fs[m](s.detach().cpu())
                             tvu.save_image(s_disp, os.path.join(tempdirs[name], f"sample_{name}_{n * gen_batch_size + i}.png"))
@@ -752,10 +762,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     metric = pyiqa.create_metric(met, device=device)
 
                 scores = []
-                for mod in modalities:
+                for mod in modality:
                     if mod in ["colour", "depth"]:
-                        split = "test" if conf.data.dataset_name == "nyu_depth" else "val"
-                        score = metric(tempdirs[mod], dataset_name=f"{conf.data.dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
+                        split = "test" if dataset_name == "nyu_depth" else "val"
+                        score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
                         if enable_wandb:
                             wandb.log({f"{met}_{mod}": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
@@ -926,16 +936,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     save_and_log_latents(latents, f'Generation/latent_{i*gen_batch_size}', runPath, 0,
                                          run)
 
-                    for m, (name, samples) in enumerate(zip(modalities, samples_x)):
+                    for m, (name, samples) in enumerate(zip(modality, samples_x)):
                         print(f"sample modality {m} shape: {samples.mean.shape}")
                         for k, s in enumerate(samples.mean):
                             save_and_log_img(s.unsqueeze(0), f'Generation/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
 
-                    for m, (name, samples) in enumerate(zip(modalities, data)):
+                    for m, (name, samples) in enumerate(zip(modality, data)):
                         for k, s in enumerate(samples):
                             save_and_log_img(s.unsqueeze(0), f'GT/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
 
-                    for m, (name, samples) in enumerate(zip(modalities, y)):
+                    for m, (name, samples) in enumerate(zip(modality, y)):
                         if samples is not None:
                             for k, s in enumerate(samples):
                                 save_and_log_img(s.unsqueeze(0), f'y/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
@@ -960,7 +970,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     precompute_latents(dataloaders, "val", conf.training.precompute_latents_path)
 
                     # Replace the dataloaders with the precomputed latent loaders
-                    train_dataset, test_dataset = load_precomputed_datasets(conf)
+                    train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, conf.training.precompute_latents_path)
                     train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
                                                                    data_parallel)
 
@@ -973,7 +983,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
                     model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
                     model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
-                    print("resaving the fisrt stage model with latent mean and scale")
+                    print("resaving the first stage model with latent mean and scale")
                     torch.save(model_first_stage.state_dict(), conf.model_conf.model.params.first_stage_config.params.ckpt_path)
 
                 print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
@@ -1007,15 +1017,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             data_path = Path(checkpoint_dir) / "data.pkl"
                             save_checkpoint(ema, model, optimizer, scheduler, itercount, data_path)
                             checkpoint = Checkpoint.from_directory(checkpoint_dir)
-                            train.report({"loss": test_loss, **{f"{met}_{mod}": score for met, scores in metrics.items() for mod, score in zip(modalities, scores)}}, checkpoint=checkpoint)
+                            train.report({"loss": test_loss, **{f"{met}_{mod}": score for met, scores in metrics.items() for mod, score in zip(modality, scores)}}, checkpoint=checkpoint)
                     else:
                         save_checkpoint(ema, model, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt")
-                        """
-                        best_test_loss = test_loss
-                        test_worsening_count = 0
-                        if (rank == 0 or not data_parallel) and not ray_tune:
-                            save_checkpoint(ema, model, optimizer, scheduler, epoch, runPath / f"model_{epoch}.pt")
-                        """
                         if test_loss < best_test_loss:
                             pass
                         else:
@@ -1056,7 +1060,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/testing", config_name="nyu_depth_diffusion_optimise_ema.yaml")
+@hydra.main(version_base=None, config_path="configs/training", config_name="nyu_depth_lsun_stable_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
@@ -1075,7 +1079,7 @@ def main(conf: DictConfig) -> None:
         max_num_epochs = 15
         gpus_per_trial = 1
 
-        output_dir = Path(os.path.join(conf.data.outputdir, conf.experiment, "ray_tune"))
+        output_dir = Path(os.path.join(conf.outputdir, conf.experiment, "ray_tune"))
         output_dir.mkdir(parents=True, exist_ok=True)
 
         assert isinstance(conf.device, str), "Hyperparameter optimisation only works with single GPU"

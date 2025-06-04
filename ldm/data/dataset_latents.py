@@ -18,10 +18,10 @@ from pathlib import Path
 @register_dataset("latents")
 class LatentDataset(Dataset):
 
-    def __init__(self, root_data_dir, split, modality, return_class=False, return_index=False, latent_folder_name="latents", **kwargs):
+    def __init__(self,  latent_path, split, modality, return_class=False, return_index=False, **kwargs):
         super().__init__()
 
-        latent_dir = Path(root_data_dir) / Path(f"{latent_folder_name}/{split}")
+        latent_dir = Path(f"{latent_path}_{split}")
         self.latents = list(latent_dir.glob("**/*.pt"))
 
         self.modality = modality
