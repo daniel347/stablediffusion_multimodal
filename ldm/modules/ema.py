@@ -240,14 +240,14 @@ class PowerFunctionEMA(nn.Module):
         self.latest_sd = None
 
     def move_to_device(self, device):
-        self.emas = [{p.to(device) for p in ema} for ema in self.emas]
+        self.emas = [{k: p.to(device) for k, p in ema.items()} for ema in self.emas]
 
     @torch.no_grad()
     def reset(self):
-        for name, param in self.net.parameters():
+        for name, param in self.net.named_parameters():
             for ema in self.emas:
                 if name in ema:
-                    ema[name].copu_(param)
+                    ema[name].copy_(param)
 
     @torch.no_grad()
     def update(self, batch_size):
@@ -264,7 +264,7 @@ class PowerFunctionEMA(nn.Module):
     @torch.no_grad()
     def get(self):
         for ema in self.emas:
-            for name, p_net in self.net.named_buffers():
+            for name, p_net in self.net.named_parameters():
                 if name in ema:
                     ema[name].copy_(p_net)
         return [(ema, f'-{std:.3f}') for std, ema in zip(self.stds, self.emas)]
@@ -275,7 +275,7 @@ class PowerFunctionEMA(nn.Module):
     def load_state_dict(self, state, **kwargs):
         self.stds = state['stds']
         for i, s_ema in enumerate(state['emas']):
-            self.emas[i] = s_ema
+            self.emas[i] = {k: v.clone().detach() for k, v in s_ema.items()}
 
     @contextmanager
     def ema_scope(self, context=None, std_ind=0):
