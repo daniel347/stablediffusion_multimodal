@@ -61,8 +61,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("We train a diffusion model based on the new autoencoder trained on the full NYU dataset")
-name = "new_ae_train"
+notes = ("We train a diffusion model based on the new autoencoder trained on the full NYU dataset and LSUN dataset (with synthetic depth)")
+name = "new_ae_train_lsun"
 
 
 def setup(rank, world_size):
@@ -367,7 +367,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if start_iter is None:
             start_iter = conf.training.start_iter
 
-        train_dataset, test_dataset = load_image_datasets(conf.data)
+        train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents)
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
         train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
                                position=rank if data_parallel else 0)
@@ -377,7 +377,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         dataset_name = "_".join([cd.dataset_name for cd in conf.data]) if isinstance(conf.data, ListConfig) else conf.data.dataset_name
         
         if isinstance(train_dataset, torch.utils.data.ConcatDataset):
-            display_data_fs = [getattr(train_dataset._datasets[0], f"{mode}_display") for mode in data_conf_0.modality]
+            display_data_fs = [getattr(train_dataset.datasets[0], f"{mode}_display") for mode in data_conf_0.modality]
         else:
             display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in data_conf_0.modality]
 
@@ -468,12 +468,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             with torch.no_grad():
                 for i, dataT in pbar:
-                    print(f"data len: {len(dataT)}, out len: {len(dataT[0])}")
                     if return_class:
                         data, classes, row = move_data_to_device(dataT, device=device)
                     else:
                         data, row = move_data_to_device(dataT, device=device)
-                    # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
+                    print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
+                    print(row)
                     optimizer.zero_grad()
 
                     if use_mixed_precision:
@@ -487,14 +487,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     print(latents.shape)
 
-                    for latent, r in zip(latents, row):
-                        save_path = Path(str(r[f"{modality[0]}_path"]).replace(modality[0], "latent"))
+                    for latent, r in zip(latents, row[f"{modality[0]}_path"]):
+                        save_path = Path(r.replace(modality[0], "latent"))
                         for root in data_root_dirs:
                             if save_path.is_relative_to(root):
                                 save_path = out_base_folder / save_path.relative_to(root.parent)  # keep the dataset folder name
                         save_path.parent.mkdir(parents=True, exist_ok=True)
                         print(save_path)
                         torch.save(latent.contiguous().cpu(), save_path.with_suffix(".pt"))
+
 
         def train_epoch(dataloaders, subepoch, itercount, epochcount, n_iter, train_pbar):
             model.train()

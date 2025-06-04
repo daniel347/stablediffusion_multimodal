@@ -50,6 +50,12 @@ class NYUDepth(Dataset):
                                    "scene_colour_path": self.scene_colour_paths,
                                    "scene_depth_path": self.scene_depth_paths})
 
+        #  Eliminiate empty folders
+        scene_dir_empty = self.scenes.scene_colour_path.apply(lambda x: len(list(x.iterdir())) == 0) | \
+                         self.scenes.scene_depth_path.apply(lambda x: len(list(x.iterdir())) == 0)
+
+        self.scenes = self.scenes[~scene_dir_empty]
+
         self.scenes = self.scenes.sort_values(by=["scene_class", "scene_ind"])
 
         if self.split == "test" or self.split == "val":
@@ -157,7 +163,11 @@ class NYUDepth(Dataset):
         if self.return_index:
             return outs, idx
         elif self.return_row:
-            return outs, filepaths
+            fp_dict = filepaths.to_dict()
+            for k in fp_dict.keys():
+                if isinstance(fp_dict[k], Path):
+                    fp_dict[k] = str(fp_dict[k])
+            return outs, fp_dict
         else:
             return outs
 
