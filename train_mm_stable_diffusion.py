@@ -3,7 +3,7 @@ import os
 import shutil
 from pathlib import Path
 import hydra
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import OmegaConf, DictConfig, ListConfig
 import tqdm
 from collections.abc import Iterable
 import copy
@@ -94,7 +94,7 @@ def learning_rate_schedule(cur_nimg, batch_size, ref_lr=100e-4, ref_batches=70e3
 
 
 def load_image_datasets(data_conf, precompute_latents=False):
-    if isinstance(OmegaConf.to_container(data_conf), list):
+    if isinstance(data_conf, ListConfig):
         # We have multiple datasets to concat
         train_datasets, test_datasets = list(zip(*[load_image_datasets(dc, precompute_latents) for dc in data_conf]))
 
@@ -103,7 +103,7 @@ def load_image_datasets(data_conf, precompute_latents=False):
 
         return train_dataset, test_dataset
 
-
+    print(data_conf)
     tx = {"colour": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)]),
           "semseg": v2.Compose([v2.Resize(data_conf.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
                                 v2.CenterCrop(data_conf.input_size)]),
@@ -367,14 +367,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if start_iter is None:
             start_iter = conf.training.start_iter
 
-        train_dataset, test_dataset = load_image_datasets(conf)
+        train_dataset, test_dataset = load_image_datasets(conf.data)
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
         train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
                                position=rank if data_parallel else 0)
 
-        data_conf_0 = conf.data[0] if isinstance(conf.data, Iterable) else conf.data
-        data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, Iterable) else [Path(conf.data.root_data_dir)]
-        dataset_name = [cd.dataset_name for cd in conf.data].join("_") if isinstance(conf.data, Iterable) else conf.data.dataset_name
+        data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
+        data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [Path(conf.data.root_data_dir)]
+        dataset_name = [cd.dataset_name for cd in conf.data].join("_") if isinstance(conf.data, ListConfig) else conf.data.dataset_name
 
         display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in data_conf_0.modality]
 
