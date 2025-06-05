@@ -295,6 +295,8 @@ def move_data_to_device(data, device="cuda"):
         return data.to(device)
     elif isinstance(data, tuple) or isinstance(data, list):
         return [move_data_to_device(d, device) for d in data]
+    else:
+        return data
 
 
 def override_config(conf, overrides):
