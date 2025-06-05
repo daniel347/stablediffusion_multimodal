@@ -29,7 +29,4 @@ generate_reference_statistics(dir=None,
                               model=fid.net.model,
                               device=device,
                               split="val",
-                              center_crop=True)                    
-
-
-
+                              center_crop=True)
