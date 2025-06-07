@@ -5,7 +5,7 @@ import glob
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-fid = pyiqa.create_metric("fid", device=device)
+fid = pyiqa.create_metric("kid", device=device)
 
 nyu_dir = "../../../datasets/nyuv2_processed"
 lsun_dir = "../../../datasets/lsun"
@@ -21,6 +21,7 @@ generate_reference_statistics(dir=None,
                               model=fid.net.model,
                               device=device,
                               split="val",
+                              metric="KID",
                               center_crop=True)
 
 generate_reference_statistics(dir=None,
@@ -29,4 +30,5 @@ generate_reference_statistics(dir=None,
                               model=fid.net.model,
                               device=device,
                               split="val",
+                              metric="KID",
                               center_crop=True)
