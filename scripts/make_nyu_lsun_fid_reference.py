@@ -31,7 +31,4 @@ generate_reference_statistics(dir=None,
                               device=device,
                               split="val",
                               metric="KID",
-                              center_crop=True)                    
-
-
-
+                              center_crop=True)

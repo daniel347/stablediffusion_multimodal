@@ -38,7 +38,7 @@ import sys
 import glob
 import logging
 
-from ldm.util import instantiate_from_config, Timer, GradAutoClipper
+from ldm.util import instantiate_from_config, Timer, GradAutoClipper, count_params
 from ldm.data import get_dataset, MMCelebA
 from ldm.modules.ema import DummyEMA
 import pyiqa
@@ -238,6 +238,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 conf.model_conf.model.params.first_stage_config.params.ckpt_path is None:
             logger.warning("No checkpoint path for first stage! This is could be unintentional")
         model = initialise_model(conf)
+        count_params(model)
         device = rank
         model = model.to(device)
 
@@ -374,7 +375,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
         data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [Path(conf.data.root_data_dir)]
-        dataset_name = "_".join([cd.dataset_name for cd in conf.data]) if isinstance(conf.data, ListConfig) else conf.data.dataset_name
+        dataset_name = conf.dataset_name # "_".join([cd.dataset_name for cd in conf.data]) if isinstance(conf.data, ListConfig) else conf.data.dataset_name
         
         if isinstance(train_dataset, torch.utils.data.ConcatDataset):
             display_data_fs = [getattr(train_dataset.datasets[0], f"{mode}_display") for mode in data_conf_0.modality]
@@ -388,8 +389,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         already_precomputed = False
         if conf.training.precompute_latents:
-            latents_train_path = Path(data_conf_0.root_data_dir) / Path(conf.training.precompute_latents_path) / "train"
-            latents_val_path = Path(data_conf_0.root_data_dir) / Path(conf.training.precompute_latents_path) / "val"
+            latents_train_path = Path(conf.training.precompute_latents_path + "_train")
+            latents_val_path = Path(conf.training.precompute_latents_path + "_val")
             if latents_train_path.exists() and latents_val_path.exists() and not conf.training.force_recompute:
                 # We have already computed the latents
                 train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, conf.training.precompute_latents_path)
@@ -473,7 +474,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         data, row = move_data_to_device(dataT, device=device)
                     print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
-                    print(row)
                     optimizer.zero_grad()
 
                     if use_mixed_precision:
@@ -493,7 +493,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             if save_path.is_relative_to(root):
                                 save_path = out_base_folder / save_path.relative_to(root.parent)  # keep the dataset folder name
                         save_path.parent.mkdir(parents=True, exist_ok=True)
-                        print(save_path)
+                        # print(save_path)
                         torch.save(latent.contiguous().cpu(), save_path.with_suffix(".pt"))
 
 
@@ -775,7 +775,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                         scores.append(score)
 
-                        print(f'====>             {met} {mod}: {score:.2f}')
+                        print(f'====> {met} {mod}: {score:.2f}')
                     else:
                         scores.append(None)
 
@@ -1006,7 +1006,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     test_loss = test_epoch(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished testing =========================")
-                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount, metrics=["fid"])
+                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount, metrics=["fid", "kid"])
                     print("============================ finished computing FID =========================")
 
                     if ray_tune:
