@@ -156,3 +156,24 @@ class MMDIndependenceLoss(nn.Module):
         XY = K[:X_size, X_size:].mean()
         YY = K[X_size:, X_size:].mean()
         return XX - 2 * XY + YY
+
+
+class MMDGaussianLoss(nn.Module):
+
+    def __init__(self, sigma=0.2):
+        super().__init__()
+        self.s = sigma
+
+    def forward(self, latents):
+        d = math.prod(latents.shape[1:])
+        Eyy = ((self.s ** 2) / math.sqrt((self.s ** 2 + 1) ** 2 - 1)) ** d
+
+        A = ((self.s ** 2) / (self.s ** 2 + 1)) ** d
+        k = ((self.s ** 2 + 1) - 1) / ((self.s ** 2) * (self.s ** 2 + 1))
+        Exy = A * torch.mean(torch.exp(-1 / 2 * k * torch.linalg.vector_norm(latents, dim=(1, 2, 3)) ** 2))
+
+        latents_reshape = latents.flatten(start_dim=1).unsqueeze(0)
+        L2_dists = torch.cdist(latents_reshape, latents_reshape) ** 2
+        K = torch.exp(-L2_dists / (2 * self.s**2))
+        Exx = K.mean()
+        return Exx - 2 * Exy + Eyy

@@ -2,21 +2,21 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Stable_Diffusion"
 print_freq: 50
-outputdir: /rds/general/user/ds3119/ephemeral/outputs # ../outputs #
+outputdir: ../outputs # /rds/general/user/ds3119/ephemeral/outputs # ../outputs #
 
 function:
-  name: training_loop
+  name: check_latent_quality
   kwargs: {}
 
 dataset_name: nyu_depth_lsun  # name used when searching for image metrics
 data:
   - dataset_name: nyu_depth
-    root_data_dir: "/rds/general/user/ds3119/home/datasets/nyuv2_processed" #  # ../../datasets/nyuv2_processed/ #
+    root_data_dir: ../../datasets/nyuv2_processed/ # "/rds/general/user/ds3119/home/datasets/nyuv2_processed" #
     input_size: 128
     modality: ["colour", "depth"]
     classes: ["bedroom"]
   - dataset_name: nyu_depth
-    root_data_dir: "/rds/general/user/ds3119/home/datasets/lsun" # # ../../datasets/lsun/ #
+    root_data_dir:  ../../datasets/lsun/ # "/rds/general/user/ds3119/home/datasets/lsun" #
     input_size: 128
     modality: ["colour", "depth"]
     modality_exts: {"colour": "jpg", "depth": "png"}  # specify extensions for each modality
@@ -24,19 +24,19 @@ data:
 training:
   use_mixed_precision: False
 
-  lr: 6.0e-5
-  batch_size: 72
+  lr: 6.0e-4
+  batch_size: 16
   num_epochs: 20   # this will be interpreted as subepochs if test_every_iter is specified
   start_iter: 0
   patience: 10     # this will be interpreted as subepochs if test_every_iter is specified
   test_only: False
 
-  test_every_iter: 3000
+  test_every_iter: 50
 
   precompute_latents: True
   force_recompute: False
-  precompute_latents_path: "/rds/general/user/ds3119/ephemeral/latents_precompute" # ../../datasets/lsun/
-  compute_latent_scale: True
+  precompute_latents_path: ../../datasets/lsun/ #  "/rds/general/user/ds3119/ephemeral/latents_precompute" # .
+  compute_latent_scale: False
   latent_scale_per_channel: False
 
   keep_intermediate_models: True  # With false only the best model and the last model is saved, otherwise all epochs showing improvement are saved.

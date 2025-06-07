@@ -270,16 +270,20 @@ class PowerFunctionEMA(nn.Module):
         return [(ema, f'-{std:.3f}') for std, ema in zip(self.stds, self.emas)]
 
     def state_dict(self, **kwargs):
-        return dict(stds=self.stds, emas=self.emas)
+        return dict(stds=self.stds, emas=self.emas, cur_nimg=self.cur_nimg)
 
     def load_state_dict(self, state, **kwargs):
         self.stds = state['stds']
+        if 'cur_nimg' not in state:
+            print("Warning: 'cur_nimg' not found in state, using 0. This will likely lead to incorrect EMA updates.")
+        else:
+            self.cur_nimg = state['cur_nimg']
         for i, s_ema in enumerate(state['emas']):
             self.emas[i] = {k: v.clone().detach() for k, v in s_ema.items()}
 
     @contextmanager
     def ema_scope(self, context=None, std_ind=0):
-        self.latest_sd = copy.deepcopy(self.net.state_dict())
+        latest_sd = copy.deepcopy(self.net.state_dict())
         self.net.load_state_dict(self.emas[std_ind], strict=False)
         if context is not None:
             logger.info(f"{context}: Switched to EMA weights")
@@ -287,7 +291,7 @@ class PowerFunctionEMA(nn.Module):
         try:
             yield None
         finally:
-            self.net.load_state_dict(self.latest_sd)
+            self.net.load_state_dict(latest_sd)
             if context is not None:
                 logger.info(f"{context}: Switched back to original weights")
 

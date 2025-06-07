@@ -40,6 +40,7 @@ import logging
 
 from ldm.util import instantiate_from_config, Timer, GradAutoClipper, count_params
 from ldm.data import get_dataset, MMCelebA
+from objectives.objective_util import MMDGaussianLoss
 from ldm.modules.ema import DummyEMA
 import pyiqa
 import cmmd_pytorch as cmmd
@@ -61,8 +62,9 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("We train a diffusion model based on the new autoencoder trained on the full NYU dataset and LSUN dataset (with synthetic depth)")
-name = "new_ae_train_lsun"
+notes = ("We run some checks on the latent quality from the new VAE. Note this uses a rather small subset of the data, "
+         "so should be repeated on hpc with more")
+name = "new_ae_check_latent"
 
 
 def setup(rank, world_size):
@@ -368,6 +370,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if start_iter is None:
             start_iter = conf.training.start_iter
 
+        test_param_name = "model.input_blocks.4.0.in_layers.0.weight"
+
         train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents)
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
         train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
@@ -551,6 +555,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     if ema is not None:
                         ema.update(conf.training.batch_size)
+
+                    for a in range(len(ema.emas)):
+                        print("Checking emas")
+                        if not torch.all(ema.emas[a][test_param_name].data != model.state_dict()[test_param_name].data):
+                            print(f"EMA {a} matches model parameters in iteration {i}.")
+                        for b in range(a):
+                            if not torch.all(ema.emas[b][test_param_name].data != ema.emas[a][test_param_name].data):
+                                print(f"EMA {b} matches EMA {a} parameters in iteration {i}.")
 
                     if i % scheduler_step_freq == 0:
                         scheduler.step()
@@ -961,6 +973,54 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 run_bisenet(0, dataloader=dataloaders["test_loader"])
 
 
+        def check_latent_quality(dataloaders, n_latents=5000):
+            if enable_pbars:
+                pbar = tqdm.tqdm(enumerate(dataloaders["train_loader"]),
+                                 total=len(dataloaders["train_loader"]),
+                                 position=rank if data_parallel else 0)
+            else:
+                pbar = enumerate(dataloaders["test_loader"])
+
+            b_loss = 0
+            all_latents = []
+
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
+                for i, dataT in pbar:
+                    if return_class:
+                        data, classes = move_data_to_device(dataT, device=device)
+                    else:
+                        data = move_data_to_device(dataT, device=device)
+
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                    latents = model_first_stage.scale_latents(latents)
+
+                    all_latents.append(latents.detach().cpu())
+                    if i * conf.training.batch_size >= n_latents:
+                        break
+
+            all_latents = torch.cat(all_latents, dim=0)
+
+            # Compute channel wise std
+            channel_stds = all_latents.std(dim=(0, 2, 3))
+            channel_means = all_latents.mean(dim=(0, 2, 3))
+
+            print(f"channel means: {channel_means} channel stds: {channel_stds}")
+
+            # And check for spatial uniformity
+            avg_latent = all_latents.mean(dim=0, keepdim=True)
+            avg_latent_std = all_latents.std(dim=0, keepdim=True)
+
+            save_and_log_latents(avg_latent, "Latents/latent_avg", runPath, 0, run)
+            save_and_log_latents(avg_latent_std, "Latents/latent_std", runPath, 0, run)
+
+            # check MMD with gaussian
+            mmd_dist = MMDGaussianLoss(sigma=0.3)
+            mmd_loss = mmd_dist(all_latents)
+            print(f"MMD loss of latents: {mmd_loss.item()}")
+
+            # check smoothness by perturbing latents
+
+
         def training_loop(dataloaders):
             best_test_loss = 10000
             test_worsening_count = 0
@@ -1006,7 +1066,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     test_loss = test_epoch(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished testing =========================")
-                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount)
+                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount, metrics=["fid", "kid"])
                     print("============================ finished computing FID =========================")
 
                     if ray_tune:
@@ -1023,6 +1083,20 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             checkpoint = Checkpoint.from_directory(checkpoint_dir)
                             train.report({"loss": test_loss, **{f"{met}_{mod}": score for met, scores in metrics.items() for mod, score in zip(modality, scores)}}, checkpoint=checkpoint)
                     else:
+                        print("Checking emas")
+                        for i in range(len(ema.emas)):
+                            print(i)
+                            assert torch.all(ema.emas[i][test_param_name].data != model.state_dict()[test_param_name].data)
+                            for j in range(i):
+                                assert torch.all(ema.emas[j][test_param_name].data != ema.emas[i][test_param_name].data)
+
+                        print("checking ema state dict")
+                        ema_sd = ema.state_dict()
+                        for i in range(len(ema.emas)):
+                            print(i)
+                            assert torch.all(ema_sd["emas"][i][test_param_name].data != model.state_dict()[test_param_name].data)
+                            for j in range(i):
+                                assert torch.all(ema_sd["emas"][j][test_param_name].data != ema_sd["emas"][i][test_param_name].data)
                         save_checkpoint(ema, model, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt")
                         if test_loss < best_test_loss:
                             pass

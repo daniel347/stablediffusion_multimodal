@@ -364,3 +364,5 @@ def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu'):
         logger.warning("No scheduler state dict found in checkpoint")
 
     return sd["iteration"]
+
+
