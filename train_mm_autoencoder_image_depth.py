@@ -235,10 +235,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print("Initialising with custom weights")
             mod = model.module if data_parallel else model
             if "resume_training" in conf and conf.resume_training:
-                start_iter = load_checkpoint(None, mod, optimizer, scheduler, conf.model_initialisation)
+                load_kwargs = {"discriminator": disc,
+                               "discriminator_optimizer": disc_optimizer} if train_adversary_f is not None else {}
+                start_iter = load_checkpoint(None, mod, optimizer, scheduler, conf.model_initialisation, **load_kwargs)
             else:
                 # just load the model
-                start_iter = load_checkpoint(None, mod, None, None, conf.model_initialisation)
+                load_kwargs = {"discriminator": disc,
+                               "discriminator_optimizer": disc_optimizer} if train_adversary_f is not None else {}
+                start_iter = load_checkpoint(None, mod, None, None, conf.model_initialisation, **load_kwargs)
 
         use_mixed_precision = conf.training.use_mixed_precision
         if use_mixed_precision:
@@ -336,6 +340,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         with autocast(dtype=torch.float16, device_type="cuda"):
                             loss, loss_dict = objective(model, data, K=conf.training.K)
                             loss = -loss
+                            if train_adversary_f is not None:
+                                loss_disc, loss_adv = train_adversary_f(loss, data)
+                                if itercount > conf.training.discriminator_start_iter:
+                                    loss = loss - loss_adv
 
                         scaler.scale(loss).backward()
                         if grad_clipper is not None:
@@ -348,10 +356,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         loss, loss_dict = objective(model, data, K=conf.training.K)
                         loss = -loss
                         loss.backward()
+                        if train_adversary_f is not None:
+                            loss_disc, loss_adv = train_adversary_f(loss, data)
+                            if itercount > conf.training.discriminator_start_iter:
+                                loss = loss - loss_adv
 
                         if grad_clipper is not None:
                             grad_clipper.autoclip_grad()
                         optimizer.step()
+
+                    if train_adversary_f is not None:
+                        loss_dict["adversary_loss"] = loss_adv.item()
+                        loss_dict["discriminator_loss"] = loss_disc.item()
 
                     if loss_series is None:
                         loss_series = -pd.Series(loss_dict)
@@ -414,10 +430,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
                     loss, loss_dict = t_objective(model, data, K=conf.training.K, test=True)
-
                     loss = -loss
+                    if train_adversary_f is not None:
+                        loss_disc, loss_adv = train_adversary_f(loss, data)
+                        loss = loss - loss_adv
 
                     b_loss += loss.detach().item()
+
+                    if train_adversary_f is not None:
+                        loss_dict["adversary_loss"] = loss_adv.item()
+                        loss_dict["discriminator_loss"] = loss_disc.item()
 
                     if loss_series is None:
                         loss_series = -pd.Series(loss_dict)
@@ -628,7 +650,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if rank == 0 or not data_parallel:
                         mod = model.module if data_parallel else model
-                        save_checkpoint(None, mod, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt")
+                        save_kwargs = {"discriminator": disc, "discriminator_optimizer": disc_optimizer} if train_adversary_f is not None else {}
+                        save_checkpoint(None, mod, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt", **save_kwargs)
 
 
         if conf.function.name is not None:

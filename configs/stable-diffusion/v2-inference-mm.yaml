@@ -25,7 +25,7 @@ model:
         image_size: 32 # unused
         in_channels: 6
         out_channels: 6
-        model_channels: 320
+        model_channels: 128  # used to be 320
         attention_resolutions: [ 4, 2, 1 ]
         num_res_blocks: 2
         channel_mult: [ 1, 2, 4, 4 ]

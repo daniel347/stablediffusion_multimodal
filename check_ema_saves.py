@@ -2,10 +2,10 @@ import torch
 import glob
 import tqdm
 
-model_base_dir = "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_05__18_00_06_new_ae_train_lsun/model_*.pt"  
+model_base_dir = "../outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_08__14_39_04_debug_ema/model_*.pt"
 model_paths = glob.glob(model_base_dir)
 
-#print(model_paths)
+# print(model_paths)
 
 test_param_name = "model.input_blocks.4.0.in_layers.0.weight"
 test_params = []

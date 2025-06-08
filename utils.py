@@ -329,17 +329,18 @@ def override_config(conf, overrides):
 
     return conf
 
-def save_checkpoint(ema, model, optimiser, scheduler, iteration, path):
+def save_checkpoint(ema, model, optimiser, scheduler, iteration, path, **kwargs):
     sd = {"ema": ema.state_dict() if ema is not None else None,
           "model": model.state_dict() if model is not None else None,
           "optimiser": optimiser.state_dict() if optimiser is not None else None,
           "scheduler": scheduler.state_dict() if scheduler is not None else None,
-          "iteration": iteration if iteration is not None else None}
+          "iteration": iteration if iteration is not None else None,
+          **kwargs}
 
     torch.save(sd, path)
 
 
-def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu'):
+def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu', **kwargs):
     sd = torch.load(path, map_location=map_location)
 
     if "model" in sd:
@@ -362,6 +363,10 @@ def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu'):
         scheduler.load_state_dict(sd["scheduler"])
     else:
         logger.warning("No scheduler state dict found in checkpoint")
+
+    for key, val in kwargs.items():
+        if key in sd:
+            val.load_state_dict(sd[key])
 
     return sd["iteration"]
 

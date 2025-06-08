@@ -5,7 +5,7 @@ print_freq: 50
 outputdir: ../outputs # /rds/general/user/ds3119/ephemeral/outputs # ../outputs #
 
 function:
-  name: check_latent_quality
+  name: training_loop
   kwargs: {}
 
 dataset_name: nyu_depth_lsun  # name used when searching for image metrics
@@ -24,9 +24,9 @@ data:
 training:
   use_mixed_precision: False
 
-  lr: 6.0e-4
-  batch_size: 16
-  num_epochs: 20   # this will be interpreted as subepochs if test_every_iter is specified
+  lr: 1.0e-4
+  batch_size: 2
+  num_epochs: 5   # this will be interpreted as subepochs if test_every_iter is specified
   start_iter: 0
   patience: 10     # this will be interpreted as subepochs if test_every_iter is specified
   test_only: False

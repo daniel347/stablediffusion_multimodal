@@ -225,29 +225,20 @@ class PowerFunctionEMA(nn.Module):
         super().__init__()
         self.net = net
         self.stds = stds
-        self.emas = [copy.deepcopy(net.state_dict()) for _std in stds]
-
-        # clear parameters which are not being updated
-        for name, param in net.named_parameters():
-            if not param.requires_grad:
-                for ema in self.emas:
-                    if name in ema:
-                        print(f"deleting {name}")
-                        del ema[name]
+        self.emas = [copy.deepcopy(net) for _std in stds]
 
         self.cur_nimg = 0
 
         self.latest_sd = None
 
     def move_to_device(self, device):
-        self.emas = [{k: p.to(device) for k, p in ema.items()} for ema in self.emas]
+        self.emas = [ema.to(device) for ema in self.emas]
 
     @torch.no_grad()
     def reset(self):
-        for name, param in self.net.named_parameters():
-            for ema in self.emas:
-                if name in ema:
-                    ema[name].copy_(param)
+        for ema in self.emas:
+            for p_net, p_ema in zip(self.net.parameters(), ema.parameters()):
+                p_ema.copy_(p_net)
 
     @torch.no_grad()
     def update(self, batch_size):
@@ -256,35 +247,32 @@ class PowerFunctionEMA(nn.Module):
         # forward
         for std, ema in zip(self.stds, self.emas):
             beta = power_function_beta(std=std, t_next=self.cur_nimg, t_delta=batch_size)
-            for name, p_net in self.net.named_parameters():
-                if name in ema:
-                    logger.debug(f"ema_device: {ema[name].device},  net_device: {p_net.device}")
-                    ema[name].lerp_(p_net, 1 - beta)
+            for p_net, p_ema in zip(self.net.parameters(), ema.parameters()):
+                logger.debug(f"ema_device: {p_ema.device},  net_device: {p_net.device}")
+                p_ema.lerp_(p_net, 1 - beta)
 
     @torch.no_grad()
     def get(self):
         for ema in self.emas:
-            for name, p_net in self.net.named_parameters():
-                if name in ema:
-                    ema[name].copy_(p_net)
+            for p_net, p_ema in zip(self.net.buffers(), ema.buffers()):
+                p_ema.copy_(p_net)
         return [(ema, f'-{std:.3f}') for std, ema in zip(self.stds, self.emas)]
 
     def state_dict(self, **kwargs):
-        return dict(stds=self.stds, emas=self.emas, cur_nimg=self.cur_nimg)
+        return dict(stds=self.stds, emas=[ema.state_dict() for ema in self.emas], cur_nimg=self.cur_nimg)
 
     def load_state_dict(self, state, **kwargs):
         self.stds = state['stds']
-        if 'cur_nimg' not in state:
-            print("Warning: 'cur_nimg' not found in state, using 0. This will likely lead to incorrect EMA updates.")
-        else:
-            self.cur_nimg = state['cur_nimg']
-        for i, s_ema in enumerate(state['emas']):
-            self.emas[i] = {k: v.clone().detach() for k, v in s_ema.items()}
+        self.cur_nimg = state.get("cur_nimg", 0)
+        if "cur_nimg" not in state:
+            print("Warning: 'cur_nimg' not found in state, using 0 as default. This likely results in inaccurate EMA updates")
+        for ema, s_ema in zip(self.emas, state['emas']):
+            ema.load_state_dict(s_ema)
 
     @contextmanager
     def ema_scope(self, context=None, std_ind=0):
         latest_sd = copy.deepcopy(self.net.state_dict())
-        self.net.load_state_dict(self.emas[std_ind], strict=False)
+        self.net.load_state_dict(self.emas[std_ind].state_dict())
         if context is not None:
             logger.info(f"{context}: Switched to EMA weights")
 

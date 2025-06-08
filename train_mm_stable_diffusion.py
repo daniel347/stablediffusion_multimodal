@@ -62,9 +62,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("We run some checks on the latent quality from the new VAE. Note this uses a rather small subset of the data, "
-         "so should be repeated on hpc with more")
-name = "new_ae_check_latent"
+notes = ("Trying to fix the EMA problem - we check the old EMA implementation!")
+name = "debug_ema"
 
 
 def setup(rank, world_size):
@@ -350,7 +349,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
 
         scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=200),
-                                      CosineAnnealingWarmRestarts(optimizer, 4000, 1, eta_min=0.1 * conf.training.lr)])
+                                      CosineAnnealingWarmRestarts(optimizer, 4000, 2, eta_min=0.1 * conf.training.lr)])
                                       # ExponentialLR(optimizer, conf.training.gamma)])
 
         scheduler_step_freq = 1
@@ -558,10 +557,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     for a in range(len(ema.emas)):
                         print("Checking emas")
-                        if not torch.all(ema.emas[a][test_param_name].data != model.state_dict()[test_param_name].data):
+                        if not torch.all(ema.emas[a].state_dict()[test_param_name].data != model.state_dict()[test_param_name].data):
                             print(f"EMA {a} matches model parameters in iteration {i}.")
                         for b in range(a):
-                            if not torch.all(ema.emas[b][test_param_name].data != ema.emas[a][test_param_name].data):
+                            if not torch.all(ema.emas[b].state_dict()[test_param_name].data != ema.emas[a].state_dict()[test_param_name].data):
                                 print(f"EMA {b} matches EMA {a} parameters in iteration {i}.")
 
                     if i % scheduler_step_freq == 0:
@@ -1086,17 +1085,21 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         print("Checking emas")
                         for i in range(len(ema.emas)):
                             print(i)
-                            assert torch.all(ema.emas[i][test_param_name].data != model.state_dict()[test_param_name].data)
+                            if torch.allclose(ema.emas[i].state_dict()[test_param_name].data, model.state_dict()[test_param_name].data):
+                                print(f"EMA {i} is equal to model parameters at the end of subepoch {subepoch}.")
                             for j in range(i):
-                                assert torch.all(ema.emas[j][test_param_name].data != ema.emas[i][test_param_name].data)
+                                if torch.allclose(ema.emas[j].state_dict()[test_param_name].data, ema.emas[i].state_dict()[test_param_name].data):
+                                    print(f"EMA {j} is equal to EMA {i} parameters at the end of subepoch {subepoch}.")
 
                         print("checking ema state dict")
                         ema_sd = ema.state_dict()
                         for i in range(len(ema.emas)):
                             print(i)
-                            assert torch.all(ema_sd["emas"][i][test_param_name].data != model.state_dict()[test_param_name].data)
+                            if torch.allclose(ema_sd["emas"][i][test_param_name].data, model.state_dict()[test_param_name].data):
+                                print(f"EMA {i} state dict is equal to model parameters at the end of subepoch {subepoch}.")
                             for j in range(i):
-                                assert torch.all(ema_sd["emas"][j][test_param_name].data != ema_sd["emas"][i][test_param_name].data)
+                                if torch.allclose(ema_sd["emas"][j][test_param_name].data, ema_sd["emas"][i][test_param_name].data):
+                                    print(f"EMA {j} state dict is equal to EMA {i} parameters at the end of subepoch {subepoch}.")
                         save_checkpoint(ema, model, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt")
                         if test_loss < best_test_loss:
                             pass

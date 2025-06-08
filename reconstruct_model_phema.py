@@ -95,17 +95,15 @@ def reconstruct_phema(
                 for j in range(len(out)):
                     if out[j] is None:
                         out[j] = {"model": copy.deepcopy(sd["model"]), "iteration": out_nimg[j]}
-                        for name, pj in out[j]["model"].items():
-                            if name in in_net:
-                                # zero the parameters for which we store EMAs for
-                                pj.zero_()
-                    for name, pi in in_net.items(): #, out[j]["model"].values()):
+                        for _, pj in out[j]["model"].items():
+                            pj.zero_()
+                    for pi, pj in zip(in_net.values(), out[j]["model"].values()):
                         if isinstance(pi, torch.Tensor):
                             # logger.debug(f"Copying parameter of shape {pi.shape} to {pj.shape}")
-                            out[j]["model"][name] += pi.to(torch.float32) * coefs[i, j]
+                            pj += pi.to(torch.float32) * coefs[i, j]
                         else:
                             logger.debug(f"found non parameter of type {type(pi)}, copying without weighting")
-                            out[j]["model"][name].copy_(pi.to(torch.float32))
+                            pj.copy_(pi.to(torch.float32))
 
                 # Finalise outputs.
                 if i == len(save_path) - 1:
