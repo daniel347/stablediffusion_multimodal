@@ -5,7 +5,7 @@ print_freq: 50
 outputdir: ../outputs # /rds/general/user/ds3119/ephemeral/outputs # ../outputs #
 
 function:
-  name: training_loop
+  name: count_params
   kwargs: {}
 
 dataset_name: nyu_depth_lsun  # name used when searching for image metrics

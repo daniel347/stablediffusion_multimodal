@@ -614,7 +614,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                    position=rank if data_parallel else 0)
 
             with Timer('MMVAEplus') as t:
-                test(0, 0, 0)
+                # test(0, 0, 0)
 
                 for subepoch, itercount in enumerate(range(conf.training.start_iter,
                                                            conf.training.num_epochs * n_iter + conf.training.start_iter,

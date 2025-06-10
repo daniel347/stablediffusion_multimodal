@@ -182,7 +182,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 conf.model_conf.model.params.first_stage_config.params.ckpt_path is None:
             logger.warning("No checkpoint path for first stage! This is could be unintentional")
         model = initialise_model(conf)
-        count_params(model)
+        n_param = count_params(model)
+        print(f"Full model has {n_param*1.e-6:.2f} M parameters")
+
+        if conf.function.name == "count_params":
+            sys.exit(0)
+
         device = rank
         model = model.to(device)
 
@@ -1077,7 +1082,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/training", config_name="nyu_depth_lsun_stable_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training", config_name="celeba_semseg_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
