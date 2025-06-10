@@ -108,8 +108,10 @@ def reconstruct_phema(
                 # Finalise outputs.
                 if i == len(save_path) - 1:
                     for j in range(len(out)):
+                        """
                         for _, pj in out[j]["model"].items():
                             pj.to(torch.float16)
+                        """
                         out_path = os.path.join(out_dir, f"model_it{out_nimg[j]//epoch_size}_ema_{out_std_batch[j]:.3f}.pt")
                         torch.save(out[j], out_path)
 

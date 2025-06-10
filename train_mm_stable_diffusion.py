@@ -744,8 +744,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             for _ in it:
                 pass
 
-            """
-            
             for step, name in enumerate(model_names):
                 logging.info(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
                 load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
@@ -754,7 +752,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                 if enable_wandb:
                     wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)
-            """
 
         def plot_timestep_logvars():
             logvars = model.logvar.cpu().detach().numpy()
