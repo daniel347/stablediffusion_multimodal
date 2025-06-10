@@ -61,8 +61,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("We train a diffusion model based on the new autoencoder trained on the full NYU dataset and LSUN dataset (with synthetic depth)")
-name = "new_ae_train_lsun"
+notes = ("We optimise EMA for the model trained on the NYU dataset and LSUN dataset (with synthetic depth)")
+name = "nyu_lsun_optimise_ema"
 
 
 def setup(rank, world_size):
@@ -789,13 +789,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             out_nimgs, out_stds = zip(*product(out_nimgs, out_stds))
 
             model_names = [f"model_it{out_es//conf.training.batch_size}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_nimgs, out_stds)]
-            
+            """ 
             it = reconstruct_phema(saves_path, out_std=out_stds, out_nimg=out_nimgs, out_dir=saves_path, epoch_size=conf.training.batch_size)
             for _ in it:
                 pass
-
             """
-            
+
             for step, name in enumerate(model_names):
                 logging.info(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
                 load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
@@ -804,7 +803,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                 if enable_wandb:
                     wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)
-            """
+
 
         def plot_timestep_logvars():
             logvars = model.logvar.cpu().detach().numpy()
@@ -1064,7 +1063,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/training", config_name="nyu_depth_lsun_stable_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/testing", config_name="nyu_depth_diffusion_optimise_ema.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
