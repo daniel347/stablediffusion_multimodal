@@ -4,7 +4,7 @@ import os
 import shutil
 from pathlib import Path
 import hydra
-from omegaconf import OmegaConf, DictConfig
+from omegaconf import OmegaConf, DictConfig, ListConfig
 import tqdm
 from collections.abc import Iterable
 import copy
@@ -33,18 +33,19 @@ import pandas as pd
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
-from objectives import get_objective, train_adversary
+from objectives import get_objective, get_adversarial_loss, train_discriminator
 from objectives.mmvae_objectives import m_dreg
 from ldm.data import get_dataset
 
-from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs, move_data_to_device, save_checkpoint, load_checkpoint
+from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs, move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders
 
 import pyiqa
 
 enable_wandb = True
+torch.autograd.set_detect_anomaly(True)
 
-notes = ("We train the z combiner network based on the most recent autoencoder model")
-name = "new_ae_arch_z_combiner_train"
+notes = ("We try training the celebA autoencoder with an adversarial patch discriminator for each modality")
+name = "patch_disc_train"
 
 
 def setup(rank, world_size):
@@ -167,7 +168,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         # Set up run path
         runId = str(datetime.now().strftime("%Y_%m_%d__%H_%M_%S")) + "_" + name
         if rank == 0 or not data_parallel:
-            experiment_dir = Path(os.path.join(conf.data.outputdir, conf.experiment, "checkpoints"))
+            experiment_dir = Path(os.path.join(conf.outputdir, conf.experiment, "checkpoints"))
             experiment_dir.mkdir(parents=True, exist_ok=True)
             runPath = experiment_dir / runId
             if runPath.exists():
@@ -218,13 +219,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=10),
                                       ExponentialLR(optimizer, 0.99)])
 
-        if "discriminator" in conf.training and conf.training.discriminator is not None:
-            disc = instantiate_from_config(conf.training.discriminator)
+        use_adversary = ("discriminator" in conf.training and conf.training.discriminator is not None)
+        if use_adversary:
+            disc = instantiate_from_config(conf.training.discriminator).to(device)
             disc_optimizer = optim.Adam(disc.parameters(), lr=conf.training.discriminator_lr, amsgrad=True)
 
-            train_adversary_f = partial(train_adversary, discriminator=disc, optimiser=disc_optimizer, device=device)
+            get_adversarial_loss_f = partial(get_adversarial_loss, discriminator=disc, device=device)
+            train_discriminator_f = partial(train_discriminator, discriminator=disc, optimiser=disc_optimizer, device=device)
         else:
-            train_adversary_f = None
+            get_adversarial_loss_f = None
+            train_discriminator_f = None
             assert conf.training.objective.params.wadversary == 0.0
 
         scheduler_step_freq = 50
@@ -236,12 +240,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             mod = model.module if data_parallel else model
             if "resume_training" in conf and conf.resume_training:
                 load_kwargs = {"discriminator": disc,
-                               "discriminator_optimizer": disc_optimizer} if train_adversary_f is not None else {}
+                               "discriminator_optimizer": disc_optimizer} if use_adversary else {}
                 start_iter = load_checkpoint(None, mod, optimizer, scheduler, conf.model_initialisation, **load_kwargs)
             else:
                 # just load the model
                 load_kwargs = {"discriminator": disc,
-                               "discriminator_optimizer": disc_optimizer} if train_adversary_f is not None else {}
+                               "discriminator_optimizer": disc_optimizer} if use_adversary else {}
                 start_iter = load_checkpoint(None, mod, None, None, conf.model_initialisation, **load_kwargs)
 
         use_mixed_precision = conf.training.use_mixed_precision
@@ -250,37 +254,20 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             scaler = GradScaler()
 
         # Load dataset
-        modalities = conf.data.modalities
-        kwargs = {'num_workers': 2, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
-        tx = {"colour": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)]),
-              "semseg": v2.Compose([v2.Resize(conf.data.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
-                                    v2.CenterCrop(conf.data.input_size)]),
-              "depth": v2.Compose([v2.Resize(conf.data.input_size), v2.CenterCrop(conf.data.input_size)])}
+        train_dataset, test_dataset = load_image_datasets(conf.data)
+        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank, data_parallel)
 
-        train_dataset = get_dataset(conf.data.dataset_name,
-                                    root_data_dir=conf.data.datadir,
-                                    transform=tx,
-                                    split="train",
-                                    modality=modalities,
-                                    p_hor_flip=0.5,
-                                    p_colour_jitter=0.1)
-        test_dataset = get_dataset(conf.data.dataset_name,
-                                   root_data_dir=conf.data.datadir,
-                                   transform=tx,
-                                   split="test",
-                                   modality=modalities)
+        data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
+        data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [
+            Path(conf.data.root_data_dir)]
+        dataset_name = conf.dataset_name
+        modality = data_conf_0.modality
 
-        display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in modalities]
+        if isinstance(train_dataset, torch.utils.data.ConcatDataset):
+            display_data_fs = [getattr(train_dataset.datasets[0], f"{mode}_display") for mode in data_conf_0.modality]
+        else:
+            display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in data_conf_0.modality]
 
-        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
-                                           shuffle=False) if data_parallel else None
-        test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,
-                                          shuffle=False) if data_parallel else None
-
-        train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=conf.training.batch_size,
-                                                   shuffle=not data_parallel, sampler=train_sampler, **kwargs)
-        test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
-                                                  sampler=test_sampler, **kwargs)
 
         print(f"data loader lengths train: {len(train_loader)}, test: {len(test_loader)}")
 
@@ -297,22 +284,26 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         objective_opts = OmegaConf.to_container(conf.training.objective.params)
         if "channel_weighting" in objective_opts and objective_opts["channel_weighting"] is not None:
             print("using inverse class frequency weighting for semantic segmentation loss")
-            class_freqs = torch.load(os.path.join(conf.data.datadir, objective_opts["channel_weighting"]))
+            class_freqs = torch.load(os.path.join(data_conf_0.root_data_dir, objective_opts["channel_weighting"]))
             class_weights = 1.0 / class_freqs
             class_weights /= class_weights.sum()
             class_weights = class_weights.to(device)
 
-            class_weights = [class_weights if m == "semseg" else None for m in modalities]
+            class_weights = [class_weights if m == "semseg" else None for m in modality]
             objective_opts["channel_weighting"] = class_weights
         else:
-            objective_opts["channel_weighting"] = [None for _ in modalities]
+            objective_opts["channel_weighting"] = [None for _ in modality]
 
+        objective_opts["get_adversarial_loss_f"] = get_adversarial_loss_f
         objective_opts["model"] = model
         objective_opts["device"] = device
-
         objective = get_objective(conf.training.objective.name, **objective_opts)
-
         t_objective = objective
+        
+        dataloaders = {"train_dataset": train_dataset,
+                       "test_dataset": test_dataset,
+                       "train_loader": train_loader,
+                       "test_loader": test_loader}
 
         def train(subepoch, itercount, epochcount, n_iter, train_pbar):
             model.train()
@@ -338,12 +329,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if use_mixed_precision:
                         with autocast(dtype=torch.float16, device_type="cuda"):
-                            loss, loss_dict = objective(model, data, K=conf.training.K)
+                            loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount)
                             loss = -loss
-                            if train_adversary_f is not None:
-                                loss_disc, loss_adv = train_adversary_f(loss, data)
-                                if itercount > conf.training.discriminator_start_iter:
-                                    loss = loss - loss_adv
 
                         scaler.scale(loss).backward()
                         if grad_clipper is not None:
@@ -353,21 +340,19 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
 
                     else:
-                        loss, loss_dict = objective(model, data, K=conf.training.K)
+                        loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount)
                         loss = -loss
                         loss.backward()
-                        if train_adversary_f is not None:
-                            loss_disc, loss_adv = train_adversary_f(loss, data)
-                            if itercount > conf.training.discriminator_start_iter:
-                                loss = loss - loss_adv
 
                         if grad_clipper is not None:
                             grad_clipper.autoclip_grad()
                         optimizer.step()
 
-                    if train_adversary_f is not None:
-                        loss_dict["adversary_loss"] = loss_adv.item()
-                        loss_dict["discriminator_loss"] = loss_disc.item()
+                    if use_adversary:
+                        disc_loss = 0
+                        for px_u in model_outs[1]:
+                            disc_loss = disc_loss + train_discriminator_f(data, px_u)
+                        loss_dict["discriminator_loss"] = disc_loss.detach().cpu().sum().item()
 
                     if loss_series is None:
                         loss_series = -pd.Series(loss_dict)
@@ -387,7 +372,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         wandb.log({"Loss/train": loss}, step=itercount)
                         wandb.log({f"Loss/train/breakdown/{key}": -val for key, val in loss_dict.items()}, step=itercount)
                         if i == 0:
-                            for m, (name, dbatch) in enumerate(zip(modalities, data)):
+                            for m, (name, dbatch) in enumerate(zip(modality, data)):
                                 dbatch = dbatch.detach().cpu()
                                 dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
                                 grid = make_grid(dbatch, nrow=8)
@@ -401,7 +386,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     print("Finished one epoch")
                     train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
                                            position=rank if data_parallel else 0)
-                    # dont increment the epoch if we are simply exiting the loop
                     epochcount += 1
 
             # Epoch loss
@@ -429,27 +413,26 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
-                    loss, loss_dict = t_objective(model, data, K=conf.training.K, test=True)
+                    loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount)
                     loss = -loss
-                    if train_adversary_f is not None:
-                        loss_disc, loss_adv = train_adversary_f(loss, data)
-                        loss = loss - loss_adv
+
+                    if use_adversary:
+                        disc_loss = 0
+                        for px_u in model_outs[1]:
+                            disc_loss = disc_loss + train_discriminator_f(data, px_u, test=True)
+                        loss_dict["discriminator_loss"] = disc_loss.detach().cpu().sum().item()
 
                     b_loss += loss.detach().item()
-
-                    if train_adversary_f is not None:
-                        loss_dict["adversary_loss"] = loss_adv.item()
-                        loss_dict["discriminator_loss"] = loss_disc.item()
 
                     if loss_series is None:
                         loss_series = -pd.Series(loss_dict)
                     else:
                         loss_series -= pd.Series(loss_dict)
 
-                    if i == 10:  # select a different scene
+                    if i == 0:  # select a different scene
                         # Compute cross-generations
                         if mod.can_cross_generate:
-                            N_gen = 3
+                            N_gen = 1
                             n_samples = conf.training.batch_size // N_gen
                             limited_data = [d[:n_samples] for d in data]
 
@@ -517,14 +500,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             return epoch_loss
 
 
-        def run_grad_check(model):
+        def run_grad_check(model, **kwargs):
             x = (torch.randn(1, 3, 32, 32, dtype=torch.float32, requires_grad=True, device=device),
                  (torch.randn(1, 18, 32,32, dtype=torch.float32, requires_grad=True, device=device) > 0.0).float())
 
             model.train()
 
             def obj_grad_check(t1, t2):
-                loss, loss_dict = t_objective(model, [t1, t2], K=conf.training.K, test=False)
+                loss, loss_dict, model_outs = t_objective(model, [t1, t2], K=conf.training.K, test=False)
                 return loss
 
             grad_check = torch.autograd.gradcheck(obj_grad_check, x, eps=1e-6, atol=1e-4, fast_mode=True)
@@ -568,7 +551,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     wandb.log({'z_mse': wandb.Histogram(z_mses, num_bins=20)}, step=i+1)
 
 
-        def check_learned_prior_params(epoch):
+        def check_learned_prior_params(epoch, **kwargs):
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
 
             def save_log_print_params(params, name):
@@ -634,8 +617,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 test(0, 0, 0)
 
                 for subepoch, itercount in enumerate(range(conf.training.start_iter,
-                                                           conf.training.num_epochs * conf.training.test_every_iter + conf.training.start_iter,
-                                                           conf.training.test_every_iter)):
+                                                           conf.training.num_epochs * n_iter + conf.training.start_iter,
+                                                           n_iter)):
                     epochcount, train_pbar = train(subepoch, itercount, epochcount, n_iter, train_pbar)
                     test_loss = test(subepoch, itercount + n_iter, epochcount)
 
@@ -650,7 +633,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if rank == 0 or not data_parallel:
                         mod = model.module if data_parallel else model
-                        save_kwargs = {"discriminator": disc, "discriminator_optimizer": disc_optimizer} if train_adversary_f is not None else {}
+                        save_kwargs = {"discriminator": disc, "discriminator_optimizer": disc_optimizer} if use_adversary else {}
                         save_checkpoint(None, mod, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt", **save_kwargs)
 
 
@@ -665,7 +648,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train_z_combiner.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train_adv.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

@@ -44,7 +44,7 @@ from objectives.objective_util import MMDGaussianLoss
 from ldm.modules.ema import DummyEMA
 import pyiqa
 import cmmd_pytorch as cmmd
-from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config, save_checkpoint, load_checkpoint
+from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders
 from reconstruct_model_phema import reconstruct_phema
 import ldm.models.diffusion as diffusion
 
@@ -62,8 +62,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("Trying to fix the EMA problem - we check the old EMA implementation!")
-name = "debug_ema"
+notes = ("Trying to fix the EMA problem - we check the new one again since the old seems to work despite failing the check!")
+name = "debug_ema_new"
 
 
 def setup(rank, world_size):
@@ -92,63 +92,6 @@ def learning_rate_schedule(cur_nimg, batch_size, ref_lr=100e-4, ref_batches=70e3
     if rampup_Mimg > 0:
         lr *= min(cur_nimg / (rampup_Mimg * 1e6), 1)
     return lr
-
-
-def load_image_datasets(data_conf, precompute_latents=False):
-    if isinstance(data_conf, ListConfig):
-        # We have multiple datasets to concat
-        train_datasets, test_datasets = list(zip(*[load_image_datasets(dc, precompute_latents) for dc in data_conf]))
-
-        train_dataset = torch.utils.data.ConcatDataset(train_datasets)
-        test_dataset = torch.utils.data.ConcatDataset(test_datasets)
-
-        return train_dataset, test_dataset
-
-    print(data_conf)
-    tx = {"colour": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)]),
-          "semseg": v2.Compose([v2.Resize(data_conf.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
-                                v2.CenterCrop(data_conf.input_size)]),
-          "depth": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)])}
-
-    return_class = "return_class" in data_conf and data_conf.return_class
-
-    train_opts = OmegaConf.to_container(data_conf)
-    test_opts = copy.deepcopy(OmegaConf.to_container(data_conf))
-    for key in ["p_hor_flip", "p_colour_jitter"]:
-        test_opts.pop(key, None)
-        if precompute_latents:
-            # Dont augment if precomputing latents
-            train_opts.pop(key, None)
-
-    train_dataset = get_dataset(data_conf.dataset_name,
-                                transform=tx,
-                                split="train",
-                                return_row=precompute_latents,
-                                return_class=return_class,
-                                **train_opts)
-    test_dataset = get_dataset(data_conf.dataset_name,
-                               transform=tx,
-                               split="val",
-                               return_row=precompute_latents,
-                               return_class=return_class,
-                               **test_opts)
-
-    return train_dataset, test_dataset
-
-
-def create_dataloaders(train_dataset, test_dataset, conf, world_size=1, rank=0, data_parallel=False):
-    kwargs = {'num_workers': 2, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
-    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
-                                       shuffle=True) if data_parallel else None
-    test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,
-                                      shuffle=False) if data_parallel else None
-
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=conf.training.batch_size,
-                                               shuffle=not data_parallel, sampler=train_sampler, **kwargs)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=conf.training.batch_size, shuffle=False,
-                                              sampler=test_sampler, **kwargs)
-
-    return train_loader, test_loader
 
 
 class DiffusionIntermediateLogger():
@@ -372,9 +315,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         test_param_name = "model.input_blocks.4.0.in_layers.0.weight"
 
         train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents)
-        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank, data_parallel)
-        train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
-                               position=rank if data_parallel else 0)
+        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.dataloader, world_size, rank, data_parallel)
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
         data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [Path(conf.data.root_data_dir)]
@@ -399,8 +340,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, conf.training.precompute_latents_path)
                 train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
                                                                data_parallel)
-                train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
-                                       position=rank if data_parallel else 0)
                 already_precomputed = True
 
         return_class = "return_class" in data_conf_0 and data_conf_0.return_class
@@ -557,10 +496,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     for a in range(len(ema.emas)):
                         print("Checking emas")
-                        if not torch.all(ema.emas[a].state_dict()[test_param_name].data != model.state_dict()[test_param_name].data):
+                        if not torch.all(ema.emas[a][test_param_name].data != model.state_dict()[test_param_name].data):
                             print(f"EMA {a} matches model parameters in iteration {i}.")
                         for b in range(a):
-                            if not torch.all(ema.emas[b].state_dict()[test_param_name].data != ema.emas[a].state_dict()[test_param_name].data):
+                            if not torch.all(ema.emas[b][test_param_name].data != ema.emas[a][test_param_name].data):
                                 print(f"EMA {b} matches EMA {a} parameters in iteration {i}.")
 
                     if i % scheduler_step_freq == 0:
@@ -1085,10 +1024,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         print("Checking emas")
                         for i in range(len(ema.emas)):
                             print(i)
-                            if torch.allclose(ema.emas[i].state_dict()[test_param_name].data, model.state_dict()[test_param_name].data):
+                            if torch.allclose(ema.emas[i][test_param_name].data, model.state_dict()[test_param_name].data):
                                 print(f"EMA {i} is equal to model parameters at the end of subepoch {subepoch}.")
                             for j in range(i):
-                                if torch.allclose(ema.emas[j].state_dict()[test_param_name].data, ema.emas[i].state_dict()[test_param_name].data):
+                                if torch.allclose(ema.emas[j][test_param_name].data, ema.emas[i][test_param_name].data):
                                     print(f"EMA {j} is equal to EMA {i} parameters at the end of subepoch {subepoch}.")
 
                         print("checking ema state dict")

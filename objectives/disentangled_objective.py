@@ -15,6 +15,8 @@ class DisentanglingObjective(torch.nn.Module):
                 data_parallel=False,
                 wlpips=0.0,
                 wadversary=0.0,
+                get_adversarial_loss_f=None,
+                start_adv_iter=0,
                 beta=1.0,
                 channel_weighting=None,
                 z_close_weight=50000,
@@ -28,8 +30,13 @@ class DisentanglingObjective(torch.nn.Module):
         self.mod = model.module.module if data_parallel else model.module
         self.all_combinations = self.mod.all_combinations
 
+        self.get_adversarial_loss_f = get_adversarial_loss_f
+        if wadversary > 0.0:
+            assert self.get_adversarial_loss_f is not None
+
         self.wlpips = wlpips
         self.wadversary = wadversary
+        self.start_adv_iter = start_adv_iter
         self.beta = beta
         self.channel_weighting = channel_weighting
         self.z_close_weight = z_close_weight
@@ -37,7 +44,7 @@ class DisentanglingObjective(torch.nn.Module):
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
 
-    def _m_dreg(self, model, x, K=1, test=False, train_z_combiner=False):
+    def _m_dreg(self, model, x, K=1, test=False, train_z_combiner=False, iteration=0):
 
 
         qu_xs, px_us, uss = model("self_and_cross_modal_generation_forward", x, K) if test else model("forward", x, K)
@@ -60,7 +67,9 @@ class DisentanglingObjective(torch.nn.Module):
 
         lws = []
 
-        loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0, "mmd_zw": 0, "mmd_ww": 0, "z_dist_normed_euclidean": 0}
+        loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0,
+                     "mmd_zw": 0, "mmd_ww": 0, "z_dist_normed_euclidean": 0,
+                     "discriminator_loss": 0, "adversarial_loss": 0}
 
         # reconstruction loss
         for r, qu_x in enumerate(qu_xs):
@@ -79,7 +88,13 @@ class DisentanglingObjective(torch.nn.Module):
 
             lws.append(lpx_u)
 
-        # print(f"lws len: {len(lws)}  lws shapes: {[l.shape for l in lws]}")
+        # Adversarial loss
+        if self.wadversary > 0:
+            for r, px_u in enumerate(px_us):
+                if iteration > self.start_adv_iter:
+                    al = self.get_adversarial_loss_f(px_u)
+                    lws[r] = lws[r] - al * self.wadversary
+                    loss_dict["adversarial_loss"] += al.detach().cpu().sum().item() * self.wadversary
 
         # KL divergence loss for w
         for r, qw_x in enumerate(qw_xs):
@@ -153,22 +168,23 @@ class DisentanglingObjective(torch.nn.Module):
             lws[r] = lws[r] - lmmd_zw_r * self.mmd_ww_weight
             lws[r] = lws[r] - lmmd_ww_r * self.mmd_zw_weight
 
-        return torch.stack(lws), torch.stack(uss), loss_dict
+        return torch.stack(lws), torch.stack(uss), loss_dict, (qu_xs, px_us, uss)
 
     def forward(self, model, x, K=1, test=False, **kwargs):
-        S = compute_microbatch_split(x, K)
+        S = 1  # compute_microbatch_split(x, K)
         x_split = zip(*[_x.split(S) for _x in x])
 
-        lw, uss, loss_dicts = zip(*[self._m_dreg(model, _x, K, test, **kwargs) for _x in x_split])
+        lw, uss, loss_dicts, model_outs = zip(*[self._m_dreg(model, _x, K, test, **kwargs) for _x in x_split])
         combined_loss_dict = {key: sum([loss_dict[key] for loss_dict in loss_dicts]) for key in loss_dicts[0].keys()}
 
         lw = torch.cat(lw, 2)  # concat on batch
         uss = torch.cat(uss, 2)  # concat on batch
+        model_outs = model_outs[0]  # doing this concatenation is hard but I reckon S can always be 1
         with torch.no_grad():
             grad_wt = (lw - torch.logsumexp(lw, 1, keepdim=True)).exp()
             if uss.requires_grad:
                 uss.register_hook(lambda grad: grad_wt.unsqueeze(-1) * grad)
-        return (grad_wt * lw).mean(0).sum(), combined_loss_dict
+        return (grad_wt * lw).mean(0).sum(), combined_loss_dict, model_outs
 
 
 

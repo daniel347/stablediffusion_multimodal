@@ -2,7 +2,7 @@ import torch
 import glob
 import tqdm
 
-model_base_dir = "../outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_08__14_39_04_debug_ema/model_*.pt"
+model_base_dir = "../outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_08__15_26_37_debug_ema_new/model_*.pt"
 model_paths = glob.glob(model_base_dir)
 
 # print(model_paths)

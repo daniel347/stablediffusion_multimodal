@@ -48,7 +48,7 @@ class PatchDiscriminator(nn.Module):
             n_layers (int)  -- the number of conv layers in the discriminator
             norm_layer      -- normalization layer
         """
-        super(Discriminator, self).__init__()
+        super(PatchDiscriminator, self).__init__()
         kw = 4
         padw = 1
         sequence = [nn.Conv2d(input_nc, ndf, kernel_size=kw,
@@ -92,8 +92,24 @@ class MMDiscriminator(nn.Module):
         self.discriminators = nn.ModuleList([instantiate_from_config(params) for params in disc_params])
 
     def forward(self, X):
+        print(X)
         Y = []
         for m, x in enumerate(X):
+            if isinstance(x, torch.distributions.Distribution):
+                x = x.mode
             Y.append(self.discriminators[m](x))
 
-        return
+        return Y
+
+class MMJointDiscriminator(nn.Module):
+    def __init__(self, disc_params) -> None:
+        super(MMJointDiscriminator, self).__init__()
+        self.discriminator = instantiate_from_config(disc_params)
+
+    def forward(self, X):
+        if isinstance(X[0], torch.distributions.Distribution):
+            X = [x.mode for x in X]
+        x_concat = torch.cat(X, dim=-3)
+        if len(x_concat.shape) == 5:
+            x_concat = x_concat.squeeze(0)
+        return [self.discriminator(x_concat)]

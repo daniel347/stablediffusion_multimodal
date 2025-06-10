@@ -14,9 +14,13 @@ from scipy.optimize import linear_sum_assignment as linear_assignment
 from torchvision.utils import make_grid, save_image
 from pathlib import Path
 import wandb
-from omegaconf import OmegaConf
+from omegaconf import OmegaConf, ListConfig, DictConfig
+from torchvision.transforms import v2, InterpolationMode
+from ldm.data import get_dataset, MMCelebA
+import copy
 import logging
 logger = logging.getLogger(__name__)
+from torch.utils.data import DistributedSampler
 
 # Constants
 class Constants(object):
@@ -371,3 +375,58 @@ def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu', 
     return sd["iteration"]
 
 
+def load_image_datasets(data_conf, precompute_latents=False):
+    if isinstance(data_conf, ListConfig):
+        # We have multiple datasets to concat
+        train_datasets, test_datasets = list(zip(*[load_image_datasets(dc, precompute_latents) for dc in data_conf]))
+
+        train_dataset = torch.utils.data.ConcatDataset(train_datasets)
+        test_dataset = torch.utils.data.ConcatDataset(test_datasets)
+
+        return train_dataset, test_dataset
+
+    print(data_conf)
+    tx = {"colour": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)]),
+          "semseg": v2.Compose([v2.Resize(data_conf.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
+                                v2.CenterCrop(data_conf.input_size)]),
+          "depth": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)])}
+
+    return_class = "return_class" in data_conf and data_conf.return_class
+
+    train_opts = OmegaConf.to_container(data_conf)
+    test_opts = copy.deepcopy(OmegaConf.to_container(data_conf))
+    for key in ["p_hor_flip", "p_colour_jitter"]:
+        test_opts.pop(key, None)
+        if precompute_latents:
+            # Dont augment if precomputing latents
+            train_opts.pop(key, None)
+
+    train_dataset = get_dataset(data_conf.dataset_name,
+                                transform=tx,
+                                split="train",
+                                return_row=precompute_latents,
+                                return_class=return_class,
+                                **train_opts)
+    test_dataset = get_dataset(data_conf.dataset_name,
+                               transform=tx,
+                               split="val",
+                               return_row=precompute_latents,
+                               return_class=return_class,
+                               **test_opts)
+
+    return train_dataset, test_dataset
+
+
+def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, rank=0, data_parallel=False):
+    kwargs = {'num_workers': 2, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
+    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
+                                       shuffle=True) if data_parallel else None
+    test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,
+                                      shuffle=False) if data_parallel else None
+
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
+                                               shuffle=not data_parallel, sampler=train_sampler, **kwargs)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+                                              sampler=test_sampler, **kwargs)
+
+    return train_loader, test_loader
