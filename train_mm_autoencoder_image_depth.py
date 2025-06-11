@@ -44,8 +44,8 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("We test that the z combiner training runs")
-name = "test_ae_z_comb_obj"
+notes = ("We try training the celebA autoencoder with a combined modality adversarial patch discriminator")
+name = "patch_disc_train"
 
 
 def setup(rank, world_size):

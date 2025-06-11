@@ -70,41 +70,8 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, lpips, chann
     return lpx_u_elem
 
 
-def train_adversary(real_data, px_u, discriminator, optimiser, device, test=False):
-    # Note we ignore K here - not doing this would require some reshaping instead of the unsqueezes
-    optimiser.zero_grad()
-
-    print(f"nans in real data: {[torch.any(torch.isnan(rd)) for rd in real_data]}")
-    print(f"nans in px_u: {[torch.any(torch.isnan(px.mode)) for px in px_u]}")
-
-    px_u_fill = [torch.nan_to_num(t.mode, 0.0) for t in px_u]
-    px_u_detach_fill = [px_u_f.detach() for px_u_f in px_u_fill]
-
-    real_output = torch.stack(discriminator(real_data), dim=1)
-    fake_outputs_detach = torch.stack(discriminator(px_u_detach_fill), dim=1)
-
-    real_labels = torch.ones(real_output.shape).to(device)
-    fake_labels = torch.zeros(fake_outputs_detach.shape).to(device)
-
-    weight_real = 1.0
-    weight_fake = 1.0
-
-    real_loss = torch.nn.functional.binary_cross_entropy(real_output, real_labels) * weight_real
-    fake_loss = torch.nn.functional.binary_cross_entropy(fake_outputs_detach, fake_labels) * weight_fake
-
-    disc_loss = real_loss + fake_loss
-    if not test:
-        disc_loss.backward()
-        optimiser.step()
-
-    fake_outputs = torch.stack(discriminator(px_u_fill), dim=1)
-    autoencoder_loss = torch.nn.functional.binary_cross_entropy(fake_outputs, real_labels) * weight_fake
-
-    return disc_loss, autoencoder_loss
-
-
 def get_adversarial_loss(px_u, discriminator, device):
-    print(f"nans in px_u: {[torch.any(torch.isnan(px.mode)) for px in px_u]}")
+    # print(f"nans in px_u: {[torch.any(torch.isnan(px.mode)) for px in px_u]}")
 
     px_u_fill = [torch.nan_to_num(t.mode, 0.0) for t in px_u]
 
@@ -119,8 +86,8 @@ def train_discriminator(real_data, px_u, discriminator, optimiser, device, test=
     # Note we ignore K here - not doing this would require some reshaping instead of the unsqueezes
     optimiser.zero_grad()
 
-    print(f"nans in real data: {[torch.any(torch.isnan(rd)) for rd in real_data]}")
-    print(f"nans in px_u: {[torch.any(torch.isnan(px.mode)) for px in px_u]}")
+    # print(f"nans in real data: {[torch.any(torch.isnan(rd)) for rd in real_data]}")
+    # print(f"nans in px_u: {[torch.any(torch.isnan(px.mode)) for px in px_u]}")
 
     px_u_fill = [torch.nan_to_num(t.mode, 0.0) for t in px_u]
     px_u_detach_fill = [px_u_f.detach() for px_u_f in px_u_fill]
