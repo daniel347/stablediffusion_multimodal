@@ -144,6 +144,9 @@ class MMCelebA(Dataset):
         for mask_file in mask_files:
             submask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
             mask_class = "_".join(os.path.basename(mask_file).split(".")[0].split("_")[1:])
+            if mask_class not in self.semseg_labels:
+                print(f"Error: key {mask_class} not in semseg labels. loading from {mask_file}")
+                continue
             mask[self.semseg_labels[mask_class], :, :] = submask // 255
 
         torch_mask = torch.from_numpy(mask)
