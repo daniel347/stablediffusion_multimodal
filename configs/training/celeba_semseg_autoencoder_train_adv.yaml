@@ -23,7 +23,7 @@ training:
     params:
       wlpips: [1000, 0.0]
       wadversary: 1
-      start_adv_iter: 20
+      start_adv_iter: 200
       beta: 1
       channel_weighting: # semseg_class_freqs.pt
       z_close_weight: 500000 # 0.1
