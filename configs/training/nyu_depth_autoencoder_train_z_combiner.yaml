@@ -2,18 +2,18 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
 print_freq: 50
+outputdir: ../outputs
 
 function:
   name: training_loop
   params: {}
 
+dataset_name: nyu_depth
 data:
   dataset_name: nyu_depth
-  datadir: "/rds/general/user/ds3119/ephemeral/nyuv2_processed" # ../../datasets/nyuv2_processed/ #
+  root_data_dir: ../../datasets/nyuv2_processed/
   input_size: 128
-  modalities: ["colour", "depth"]
-
-  outputdir: ../outputs
+  modality: ["colour", "depth"]
 
 
 training:
@@ -29,7 +29,7 @@ training:
       mmd_ww_weight: 1000.0
 
   lr: 2.0e-4
-  batch_size: 48
+  batch_size: 64
   num_epochs: 20  # this will be interpreted as subepochs if test_every_iter is specified
   patience: 4     # this will be interpreted as subepochs if test_every_iter is specified
 
@@ -42,18 +42,10 @@ training:
     keep_history_upto: 5000
     start_clip: 10
 
-  test_every_iter: 100  # test and save the model every so many iterations
-
-  # discriminator:
-  #   target: ldm.models.discriminator.MMDiscriminator
-  #   params:
-  #     disc_params:
-  #       - in_size: 128
-  #       - in_size: 128
-  # discriminator_lr: 1.0e-4
+  test_every_iter: 200  # test and save the model every so many iterations
 
   objective_is_z_combiner: True
-  lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
+  lr_decoder: 0 # Smaller rate for decoders in z_combiner_training
 
 eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth

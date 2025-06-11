@@ -14,6 +14,8 @@ class ZCombinerObj(torch.nn.Module):
                 data_parallel=False,
                 wlpips=0.0,
                 wadversary=0.0,
+                get_adversarial_loss_f=None,
+                start_adv_iter=0,
                 beta=1.0,
                 channel_weighting=None,
                 off_combination_weight=0.2,
@@ -27,15 +29,20 @@ class ZCombinerObj(torch.nn.Module):
         self.mod = model.module.module if data_parallel else model.module
         self.all_combinations = self.mod.all_combinations
 
+        self.get_adversarial_loss_f = get_adversarial_loss_f
+        if wadversary > 0.0:
+            assert self.get_adversarial_loss_f is not None
+
         self.wlpips = wlpips
         self.wadversary = wadversary
+        self.start_adv_iter = start_adv_iter
         self.beta = beta
         self.channel_weighting = channel_weighting
         self.off_combination_weight = off_combination_weight
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
 
-    def _m_dreg(self, model, x, K=1, test=False):
+    def _m_dreg(self, model, x, K=1, test=False, iteration=0, **kwargs):
 
         posteriors, recons, us = model("forward_z_comb_net", x, sample=not test)
         *qw_xs, qz_x = posteriors
@@ -48,13 +55,22 @@ class ZCombinerObj(torch.nn.Module):
         lws = []
 
         # reconstruction loss
+        lpx_u = 0
         for r, px_u in enumerate(recons):
             wlpips_d = self.wlpips[r] if hasattr(self.wlpips, "__getitem__") else self.wlpips
-            lpx_u = reconstruction_loss(px_u, x[r], self.mod.vaes[r].llik_scaling, loss_dict, wlpips_d, self.lpips,
+            lpx_u = lpx_u + reconstruction_loss(px_u, x[r], self.mod.vaes[r].llik_scaling, loss_dict, wlpips_d, self.lpips,
                                         self.channel_weighting[r],
                                         fail_on_nan=True)
 
-            lws.append(lpx_u)
+        lws.append(lpx_u)
+
+        # Adversarial loss
+
+        if self.wadversary > 0:
+            if iteration > self.start_adv_iter:
+                al = self.get_adversarial_loss_f(px_u)
+                lws = [lws_val - al * self.wadversary for lws_val in lws]
+                loss_dict["adversarial_loss"] -= al.detach().cpu().sum().item() * self.wadversary
 
         # print(f"lws len: {len(lws)}  lws shapes: {[l.shape for l in lws]}")
 
@@ -64,7 +80,7 @@ class ZCombinerObj(torch.nn.Module):
         pz = self.mod.pz(*self.mod.pz_params)
         kl_div = torch.distributions.kl.kl_divergence(qz_x, pz).sum(dim=(-1, -2, -3)).unsqueeze(0)  # unsqueeze for K
         # print("kldiv z shape: ", kl_div.shape)
-        lws[r] = lws[r] - kl_div * self.beta
+        lws = [lws_val - kl_div * self.beta for lws_val in lws]
         loss_dict["prior"] -= kl_div.detach().cpu().sum().item() * self.beta
 
 
@@ -74,21 +90,22 @@ class ZCombinerObj(torch.nn.Module):
         for r, qw_x_r in enumerate(qw_xs):
             lmmd_zw_r = mmd_loss(qz_x.mean, qw_x_r.mean)
             loss_dict["mmd_zw"] -= lmmd_zw_r.detach().cpu().sum().item()
-            lws[r] = lws[r] - lmmd_zw_r * self.mmd_ww_weight
+            lws[0] = lws[0] - lmmd_zw_r * self.mmd_ww_weight
 
-        return torch.stack(lws), torch.stack(us), loss_dict
+        return torch.stack(lws), torch.stack(us), loss_dict, (posteriors, recons, us)
 
     def forward(self, model, x, K=1, test=False, **kwargs):
-        S = compute_microbatch_split(x, K)
+        S = x[0].shape[0] # compute_microbatch_split(x, K)
         x_split = zip(*[_x.split(S) for _x in x])
 
-        lw, uss, loss_dicts = zip(*[self._m_dreg(model, _x, K, test, **kwargs) for _x in x_split])
+        lw, uss, loss_dicts, model_outs = zip(*[self._m_dreg(model, _x, K, test, **kwargs) for _x in x_split])
         combined_loss_dict = {key: sum([loss_dict[key] for loss_dict in loss_dicts]) for key in loss_dicts[0].keys()}
 
         lw = torch.cat(lw, 2)  # concat on batch
         uss = torch.cat(uss, 2)  # concat on batch
+        model_outs = model_outs[0]
         with torch.no_grad():
             grad_wt = (lw - torch.logsumexp(lw, 1, keepdim=True)).exp()
             if uss.requires_grad:
                 uss.register_hook(lambda grad: grad_wt.unsqueeze(-1) * grad)
-        return (grad_wt * lw).mean(0).sum(), combined_loss_dict
+        return (grad_wt * lw).mean(0).sum(), combined_loss_dict, model_outs

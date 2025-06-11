@@ -44,8 +44,8 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("We try training the celebA autoencoder with an adversarial patch discriminator for each modality")
-name = "patch_disc_train"
+notes = ("We test that the z combiner training runs")
+name = "test_ae_z_comb_obj"
 
 
 def setup(rank, world_size):
@@ -351,9 +351,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if use_adversary:
                         disc_loss = 0
-                        for px_u in model_outs[1]:
-                            disc_loss = disc_loss + train_discriminator_f(data, px_u)
-                        loss_dict["discriminator_loss"] = disc_loss.detach().cpu().sum().item()
+                        if "objective_is_z_combiner" in conf.training and conf.training.objective_is_z_combiner:
+                            disc_loss = train_discriminator(data, px_u)
+                        else:
+                            for px_u in model_outs[1]:
+                                disc_loss = disc_loss + train_discriminator_f(data, px_u)
+                        loss_dict["discriminator_loss"] = -disc_loss.detach().cpu().sum().item()
 
                     if loss_series is None:
                         loss_series = -pd.Series(loss_dict)
@@ -419,9 +422,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if use_adversary:
                         disc_loss = 0
-                        for px_u in model_outs[1]:
-                            disc_loss = disc_loss + train_discriminator_f(data, px_u, test=True)
-                        loss_dict["discriminator_loss"] = disc_loss.detach().cpu().sum().item()
+                        if "objective_is_z_combiner" in conf.training and conf.training.obsjective_is_z_combiner:
+                            disc_loss = train_discriminator_f(data, px_u, test=True)
+                        else:
+                            for px_u in model_outs[1]:
+                                disc_loss = disc_loss + train_discriminator_f(data, px_u, test=True)
+                        loss_dict["discriminator_loss"] = -disc_loss.detach().cpu().sum().item()
 
                     b_loss += loss.detach().item()
 
@@ -662,7 +668,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train_adv.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train_z_combiner.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

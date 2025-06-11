@@ -23,7 +23,8 @@ class DisentanglingObjective(torch.nn.Module):
                 z_close_weight=50000,
                 off_combination_weight=0.2,
                 mmd_zw_weight=1,
-                mmd_ww_weight=1):
+                mmd_ww_weight=1,
+                **kwargs):
         super(DisentanglingObjective, self).__init__()
 
         self.lpips = pyiqa.create_metric("lpips", device=device, as_loss=True)
@@ -45,7 +46,7 @@ class DisentanglingObjective(torch.nn.Module):
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
 
-    def _m_dreg(self, model, x, K=1, test=False, train_z_combiner=False, iteration=0):
+    def _m_dreg(self, model, x, K=1, test=False, iteration=0):
 
         qu_xs, px_us, uss = model("self_and_cross_modal_generation_forward", x, K) if test else model("forward", x, K)
 
