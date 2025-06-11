@@ -44,7 +44,7 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("We try training the celebA autoencoder with an adversarial patch discriminator for each modality")
+notes = ("We try training the celebA autoencoder with a combined modality adversarial patch discriminator")
 name = "patch_disc_train"
 
 
