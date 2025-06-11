@@ -602,6 +602,19 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if i > 5:
                         break
 
+        def profile_train():
+            from torch.profiler import profile, record_function, ProfilerActivity
+
+            train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
+                                   position=rank if data_parallel else 0)
+
+            with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=False) as prof:
+                train(0, 0, 0, 5, train_pbar)
+
+            print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
+            prof.export_chrome_trace(str(runPath / "train_trace.json"))
+
+
         def training_loop():
             best_test_loss = 1e20
             test_worsening_count = 0
