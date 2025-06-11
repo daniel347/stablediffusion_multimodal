@@ -1,5 +1,6 @@
 # Objectives
 import torch
+from torch.profiler import record_function
 from numpy import prod
 from .objective_util import compute_microbatch_split, reconstruction_loss, register_objective, log_mean_exp, MMDIndependenceLoss
 import pyiqa
@@ -45,7 +46,6 @@ class DisentanglingObjective(torch.nn.Module):
         self.mmd_ww_weight = mmd_ww_weight
 
     def _m_dreg(self, model, x, K=1, test=False, train_z_combiner=False, iteration=0):
-
 
         qu_xs, px_us, uss = model("self_and_cross_modal_generation_forward", x, K) if test else model("forward", x, K)
 
@@ -171,7 +171,7 @@ class DisentanglingObjective(torch.nn.Module):
         return torch.stack(lws), torch.stack(uss), loss_dict, (qu_xs, px_us, uss)
 
     def forward(self, model, x, K=1, test=False, **kwargs):
-        S = 1  # compute_microbatch_split(x, K)
+        S = x[0].shape[0]  # compute_microbatch_split(x, K)
         x_split = zip(*[_x.split(S) for _x in x])
 
         lw, uss, loss_dicts, model_outs = zip(*[self._m_dreg(model, _x, K, test, **kwargs) for _x in x_split])
@@ -179,7 +179,7 @@ class DisentanglingObjective(torch.nn.Module):
 
         lw = torch.cat(lw, 2)  # concat on batch
         uss = torch.cat(uss, 2)  # concat on batch
-        model_outs = model_outs[0]  # doing this concatenation is hard but I reckon S can always be 1
+        model_outs = model_outs[0]  # doing this concatenation is hard but I reckon ill always fit a batch in memory
         with torch.no_grad():
             grad_wt = (lw - torch.logsumexp(lw, 1, keepdim=True)).exp()
             if uss.requires_grad:

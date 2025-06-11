@@ -30,6 +30,7 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 from torch.amp import GradScaler, autocast
 import pandas as pd
+from torch.profiler import record_function
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
@@ -42,7 +43,6 @@ from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_
 import pyiqa
 
 enable_wandb = True
-torch.autograd.set_detect_anomaly(True)
 
 notes = ("We try training the celebA autoencoder with an adversarial patch discriminator for each modality")
 name = "patch_disc_train"
@@ -221,6 +221,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         use_adversary = ("discriminator" in conf.training and conf.training.discriminator is not None)
         if use_adversary:
+            print("Initialising discriminator for adversarial loss ...")
             disc = instantiate_from_config(conf.training.discriminator).to(device)
             disc_optimizer = optim.Adam(disc.parameters(), lr=conf.training.discriminator_lr, amsgrad=True)
 
