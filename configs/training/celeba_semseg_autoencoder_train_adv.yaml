@@ -2,7 +2,7 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Autoencoder"
 print_freq: 50
-outputdir: ../outputs
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
 
 function:
   name: training_loop
@@ -13,6 +13,7 @@ data:
   dataset_name: mm_celeba
   root_data_dir:  ../../datasets/CelebAMask-HQ # ../mmvaeplus/data/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
   input_size: 128
+  force_reload: True
   modality: ["colour", "semseg"]
 
 
@@ -36,6 +37,7 @@ training:
   batch_size: 64
   num_epochs: 20  # Will be interpreted as subepochs if test_every_iter is set
   patience: 4  # Will be interpreted as subepochs if test_every_iter is set
+  test_every_iter: 200
 
   start_iter: 0
   K: 1

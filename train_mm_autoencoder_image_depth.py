@@ -416,6 +416,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
+                    if i > 60: break
                     data = move_data_to_device(dataT, device=device)
                     loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount)
                     loss = -loss
@@ -668,7 +669,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train_z_combiner.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train_adv.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

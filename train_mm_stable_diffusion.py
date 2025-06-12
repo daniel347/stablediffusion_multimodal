@@ -62,8 +62,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("Trying to fix the EMA problem - we check the new one again since the old seems to work despite failing the check!")
-name = "debug_ema_new"
+notes = ("We check the quality of the joint autoencoder latent space")
+name = "joint_ae_latent_quality"
 
 
 def setup(rank, world_size):
@@ -320,7 +320,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         test_param_name = "model.input_blocks.4.0.in_layers.0.weight"
 
         train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents)
-        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.dataloader, world_size, rank, data_parallel)
+        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank, data_parallel)
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
         data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [Path(conf.data.root_data_dir)]
@@ -913,7 +913,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 run_bisenet(0, dataloader=dataloaders["test_loader"])
 
 
-        def check_latent_quality(dataloaders, n_latents=5000):
+        def check_latent_quality(dataloaders, n_latents=64):
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(dataloaders["train_loader"]),
                                  total=len(dataloaders["train_loader"]),
@@ -923,6 +923,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             b_loss = 0
             all_latents = []
+
+            if conf.training.precompute_latents and not already_precomputed:
+                conf.training.precompute_latents = False  # we want to compute latents on the fly
+
+            if conf.training.compute_latent_scale:
+                latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100,
+                                                                    per_channel=conf.training.latent_scale_per_channel)
+                model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
+                model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
+                print("resaving the first stage model with latent mean and scale")
+                torch.save(model_first_stage.state_dict(),
+                           conf.model_conf.model.params.first_stage_config.params.ckpt_path)
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in pbar:

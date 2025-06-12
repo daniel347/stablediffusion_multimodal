@@ -134,10 +134,11 @@ class MMCelebA(Dataset):
             if os.path.exists(combined_path) and not self.force_reload:
                 # print("Loading precomputed mask")
                 try:
-                    return torch.load(combined_path).type(torch.float32)
+                    return self.decode_compressed_semseg(torch.load(combined_path))
                 except Exception:
                     print(f"Failed to load mask {combined_path}, reloading")
 
+        # print("Loading mask from separate pngs")
         p = os.path.join(self.mask_dir, f"{index:05d}_*.png")
         mask_files = glob.glob(p)
         mask = np.zeros((len(self.semseg_labels), 512, 512), dtype=np.float32)
@@ -156,8 +157,22 @@ class MMCelebA(Dataset):
             tvu.save_image(label_mask.unsqueeze(0).float() / 255.0, combined_png_path)
             return label_mask
         else:
-            torch.save(torch_mask.type(torch.uint8), combined_path)
+            # print("saving compressed mask to disk")
+            # torch.save(self.encode_compressed_semseg(torch_mask), combined_path)
             return torch_mask
+
+    def decode_compressed_semseg(self, compressed_mask):
+        mask = torch.zeros((len(self.semseg_labels), *compressed_mask.shape), dtype=torch.float32)
+        for i in range(len(self.semseg_labels)):
+            bool_mask = (compressed_mask & (2**i)) > 0
+            mask[i, :, :] = bool_mask.float()
+        return mask
+
+    def encode_compressed_semseg(self, mask):
+        bool_mask = mask > 0.5
+        shift_mask = torch.ones_like(bool_mask, dtype=torch.uint32) * torch.tensor([2**i for i in range(bool_mask.shape[0])], dtype=torch.uint32)[:, None, None]
+        compressed_mask = torch.sum(bool_mask.to(torch.uint32) * shift_mask, dim=0).to(torch.uint32)
+        return compressed_mask
 
     def read_colour(self, index):
         img = cv2.imread(os.path.join(self.img_dir, f"{index}.jpg"), cv2.IMREAD_COLOR)
