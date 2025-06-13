@@ -2,7 +2,7 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Autoencoder"
 print_freq: 50
-outputdir: /rds/general/user/ds3119/ephemeral/outputs
+outputdir: /rds/general/user/ds3119/ephemeral/outputs  # ../outputs  #
 
 function:
   name: training_loop
@@ -23,7 +23,7 @@ training:
     name: disentangling_objective
     params:
       wlpips: [1000, 0.0]
-      wadversary: 1
+      wadversary: 3
       start_adv_iter: 200
       beta: 1
       channel_weighting: # semseg_class_freqs.pt
@@ -61,5 +61,6 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg.yaml
-model_initialisation: # "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_03_21__23_27_35_new_obj_z_dist_mmd/model_10.rar"
-init_from_stable_diffusion: True
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_12__14_54_29_patch_disc_train/model_200.pt
+resume_training: True
+init_from_stable_diffusion: False

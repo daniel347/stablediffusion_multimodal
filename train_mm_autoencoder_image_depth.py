@@ -38,14 +38,14 @@ from objectives import get_objective, get_adversarial_loss, train_discriminator
 from objectives.mmvae_objectives import m_dreg
 from ldm.data import get_dataset
 
-from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs, move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders
+from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs, move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders, cat_dists_or_tensor_latents
 
 import pyiqa
 
 enable_wandb = True
 
-notes = ("We try training the celebA autoencoder with a combined modality adversarial patch discriminator")
-name = "patch_disc_train"
+notes = ("We show the output of the discriminator after 200 iterations training - hopefully it will be something sensible")
+name = "test_show_discriminator_outputs"
 
 
 def setup(rank, world_size):
@@ -352,7 +352,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if use_adversary:
                         disc_loss = 0
                         if "objective_is_z_combiner" in conf.training and conf.training.objective_is_z_combiner:
-                            disc_loss = train_discriminator(data, px_u)
+                            disc_loss = train_discriminator(data, model_outs[1])
                         else:
                             for px_u in model_outs[1]:
                                 disc_loss = disc_loss + train_discriminator_f(data, px_u)
@@ -416,7 +416,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
-                    if i > 60: break
                     data = move_data_to_device(dataT, device=device)
                     loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount)
                     loss = -loss
@@ -424,7 +423,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if use_adversary:
                         disc_loss = 0
                         if "objective_is_z_combiner" in conf.training and conf.training.obsjective_is_z_combiner:
-                            disc_loss = train_discriminator_f(data, px_u, test=True)
+                            disc_loss = train_discriminator_f(data, model_outs[1], test=True)
                         else:
                             for px_u in model_outs[1]:
                                 disc_loss = disc_loss + train_discriminator_f(data, px_u, test=True)
@@ -496,6 +495,22 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             for k, rec in enumerate(reconstructions):
                                 save_and_log_img(rec, f'Reconstructions/m{k}',
                                                  runPath, display_data_fs[k], itercount, run)
+
+                        if use_adversary:
+                            # Log discriminator outputs
+                            real_disc_outs = torch.cat(disc(data), dim=0)
+                            save_and_log_img(real_disc_outs.detach().cpu(), f"Discriminator/real", runPath, None, itercount,
+                                             run)
+                            if "objective_is_z_combiner" in conf.training and conf.training.obsjective_is_z_combiner:
+                                fake_disc_out = torch.cat(disc(model_outs[1]), dim=0)
+                                save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake", runPath, None, itercount,
+                                                 run)
+                            else:
+                                for m, px_u in enumerate(model_outs[1]):
+                                    fake_disc_out = torch.cat(disc(px_u), dim=0)
+                                    save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake_m{m}", runPath, None, itercount, run)
+
+
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -623,6 +638,43 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             prof.export_chrome_trace(str(runPath / "train_trace.json"))
 
 
+        def check_decoder_scaling():
+            """We do a test to see if the decoder is more sensitive to low-std channels or if the low-std channels are ignored"""
+
+            itercount = 0
+
+            vaes = model.module.module.vaes if data_parallel else model.module.vaes
+            mod = model.module.module if data_parallel else model.module
+            mod.use_z_comb_network = True  # Default to using the z combiner when encoding
+
+            with torch.no_grad():
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
+                                          position=rank if data_parallel else 0):
+                    data = move_data_to_device(dataT, device=device)
+
+                    latents = mod("encode", data)
+                    latents = cat_dists_or_tensor_latents(latents)
+                    print(latents.shape)
+
+                    for c in range(latents.shape[1]):
+                        print(f"Normalising channel {c}")
+                        wandb.log({"channel": c}, step=itercount)
+                        channel_std = torch.ones(latents.shape[1]).to(device)
+                        channel_mean = torch.zeros(latents.shape[1]).to(device)
+
+                        channel_std[c] = torch.std(latents[:, c, ...], dim=(0, 1, 2))
+                        channel_mean[c] = torch.mean(latents[:, c, ...], dim=(0, 1, 2))
+                        latent_norm = (latents - channel_mean[None, :, None, None]) / channel_std[None, :, None, None]
+
+                        reconstructions = mod("decode", latent_norm)
+
+                        for k, rec in enumerate(reconstructions):
+                            save_and_log_img(rec, f'Reconstructions/m{k}',
+                                             runPath, display_data_fs[k], itercount, run)
+
+                        itercount += 1
+                    break
+
         def training_loop():
             best_test_loss = 1e20
             test_worsening_count = 0
@@ -635,7 +687,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                    position=rank if data_parallel else 0)
 
             with Timer('MMVAEplus') as t:
-                # test(0, 0, 0)
+                # test(0, conf.training.start_iter, 0)
 
                 for subepoch, itercount in enumerate(range(conf.training.start_iter,
                                                            conf.training.num_epochs * n_iter + conf.training.start_iter,

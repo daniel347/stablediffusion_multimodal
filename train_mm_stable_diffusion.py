@@ -44,7 +44,7 @@ from objectives.objective_util import MMDGaussianLoss
 from ldm.modules.ema import DummyEMA
 import pyiqa
 import cmmd_pytorch as cmmd
-from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders
+from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders, cat_dists_or_tensor_latents
 from reconstruct_model_phema import reconstruct_phema
 import ldm.models.diffusion as diffusion
 
@@ -62,8 +62,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("We check the quality of the joint autoencoder latent space")
-name = "joint_ae_latent_quality"
+notes = ("We check the mean and std of our celeba autoencoder latent space. We use only 800 samples so could be dubious")
+name = "our_ae_latent_quality"
 
 
 def setup(rank, world_size):
@@ -125,16 +125,6 @@ def initialise_model(conf):
         model.init_from_ckpt("checkpoints/v2-1_512-ema-pruned.ckpt")
 
     return model
-
-
-def cat_dists_or_tensor_latents(latents):
-    if all([isinstance(l, torch.Tensor) for l in latents]):
-        # Tensors
-        latents = torch.cat(latents, dim=1)
-    else:
-        # Distributions
-        latents = torch.cat([l.mean for l in latents], dim=1)
-    return latents
 
 
 def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode):
@@ -913,7 +903,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 run_bisenet(0, dataloader=dataloaders["test_loader"])
 
 
-        def check_latent_quality(dataloaders, n_latents=64):
+        def check_latent_quality(dataloaders, n_latents=800):
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(dataloaders["train_loader"]),
                                  total=len(dataloaders["train_loader"]),
@@ -932,6 +922,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                                                     per_channel=conf.training.latent_scale_per_channel)
                 model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
                 model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
+                print(f"found latent mean of: {latent_mean} and std of {latent_scale}")
                 print("resaving the first stage model with latent mean and scale")
                 torch.save(model_first_stage.state_dict(),
                            conf.model_conf.model.params.first_stage_config.params.ckpt_path)

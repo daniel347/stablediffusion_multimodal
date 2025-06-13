@@ -339,7 +339,7 @@ def save_checkpoint(ema, model, optimiser, scheduler, iteration, path, **kwargs)
           "optimiser": optimiser.state_dict() if optimiser is not None else None,
           "scheduler": scheduler.state_dict() if scheduler is not None else None,
           "iteration": iteration if iteration is not None else None,
-          **kwargs}
+          **{name: val.state_dict() for name, val in kwargs.items()}}
 
     torch.save(sd, path)
 
@@ -370,7 +370,11 @@ def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu', 
 
     for key, val in kwargs.items():
         if key in sd:
-            val.load_state_dict(sd[key])
+            if hasattr(sd[key], "state_dict"):
+                # We accidentally saved the whole model!
+                val.load_state_dict(sd[key].state_dict())
+            else:
+                val.load_state_dict(sd[key])
 
     return sd["iteration"]
 
@@ -430,3 +434,13 @@ def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, ra
                                               sampler=test_sampler, **kwargs)
 
     return train_loader, test_loader
+
+
+def cat_dists_or_tensor_latents(latents):
+    if all([isinstance(l, torch.Tensor) for l in latents]):
+        # Tensors
+        latents = torch.cat(latents, dim=1)
+    else:
+        # Distributions
+        latents = torch.cat([l.mean for l in latents], dim=1)
+    return latents

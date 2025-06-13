@@ -66,6 +66,6 @@ sampler:
 eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
-model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg-non-disentangled-non-seperable.yaml
+model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg.yaml
 model_initialisation: # "/home/ds3119/multimodal_generation/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_04_28__11_18_27_32_latents/model_13.pt"
 init_from_stable_diffusion: False
