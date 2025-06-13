@@ -65,7 +65,6 @@ class ZCombinerObj(torch.nn.Module):
         lws.append(lpx_u)
 
         # Adversarial loss
-
         if self.wadversary > 0:
             if iteration > self.start_adv_iter:
                 al = self.get_adversarial_loss_f(px_u)

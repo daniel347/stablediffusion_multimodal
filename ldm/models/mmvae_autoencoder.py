@@ -133,8 +133,6 @@ class MMVAEplus(nn.Module):
             print("Averaging z")
             z_avg = torch.stack(zs, dim=0).mean(dim=0)
 
-
-
         # Loop over unimodal vaes and compute cross-modal reconstructions
         for e, us in enumerate(uss):
             for d, vae in enumerate(self.vaes):
@@ -257,6 +255,7 @@ class MMVAEplus(nn.Module):
 
         return recons
 
+
     def forward_z_comb_net(self, data, sample=False):
         *w_dists, z_comb_dist = self.encode(data, return_dist=True, use_z_combnet=True)
 
@@ -270,6 +269,28 @@ class MMVAEplus(nn.Module):
         recons = self.decode(torch.cat([*W, z], dim=2), use_kdim=True)
 
         return [*w_dists, z_comb_dist], recons, [*W, z]
+
+    def forward_z_comb_4way(self, data, sample=False, test=False):
+        *w_dists, z_comb_dist = self.encode(data, return_dist=True, use_z_combnet=True)
+        px_us = [[None for _ in range(len(self.vaes))] for _ in range(len(self.vaes))]
+        us_shape = [1, w_dists[0].mean.shape[0], w_dists[0].mean.shape[1] + z_comb_dist.mean.shape[1], *w_dists[0].mean.shape[2:]]
+        print(f"z_comb_dist: {z_comb_dist.mean.shape}, us_shape: {us_shape}, w_dists[0].mean.shape: {w_dists[0].mean.shape}")
+
+        for e in range(len(self.vaes)):
+            for d, vae in enumerate(self.vaes):
+                if e == d:
+                    if sample:
+                        us = torch.cat([w_dists[d].sample(squeeze=False), z_comb_dist.sample(squeeze=False)], dim=2)
+                    else:
+                        us = torch.cat([w_dists[d].mean.unsqueeze(0), z_comb_dist.mean.unsqueeze(0)], dim=2)
+                else:
+                    latents_w = self.sample_w(d, "pw_params" if test else "pw_params_aux", us_shape, data[0].device)
+                    print(f"latents_w: {latents_w.shape}")
+                    us = torch.cat([latents_w, z_comb_dist.mean.unsqueeze(0)], dim=2)
+
+                px_us[e][d] = vae.decode(us)
+
+        return [*w_dists, z_comb_dist], px_us, [*[w.mean.unsqueeze(0) for w in w_dists], z_comb_dist.mean.unsqueeze(0)]
 
     def encode(self, data, avg_z=None, return_dist=False, use_z_combnet=None):
         if avg_z is None: avg_z = self.avg_z

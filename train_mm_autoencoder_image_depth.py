@@ -351,11 +351,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if use_adversary:
                         disc_loss = 0
-                        if "objective_is_z_combiner" in conf.training and conf.training.objective_is_z_combiner:
-                            disc_loss = train_discriminator(data, model_outs[1])
-                        else:
+                        if isinstance(model_outs[1][0], list):
                             for px_u in model_outs[1]:
                                 disc_loss = disc_loss + train_discriminator_f(data, px_u)
+                        else:
+                            disc_loss = train_discriminator(data, model_outs[1])
                         loss_dict["discriminator_loss"] = -disc_loss.detach().cpu().sum().item()
 
                     if loss_series is None:
@@ -422,11 +422,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if use_adversary:
                         disc_loss = 0
-                        if "objective_is_z_combiner" in conf.training and conf.training.obsjective_is_z_combiner:
-                            disc_loss = train_discriminator_f(data, model_outs[1], test=True)
-                        else:
+                        if isinstance(model_outs[1][0], list):
                             for px_u in model_outs[1]:
                                 disc_loss = disc_loss + train_discriminator_f(data, px_u, test=True)
+                        else:
+                            disc_loss = train_discriminator(data, model_outs[1], test=True)
                         loss_dict["discriminator_loss"] = -disc_loss.detach().cpu().sum().item()
 
                     b_loss += loss.detach().item()
@@ -436,8 +436,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     else:
                         loss_series -= pd.Series(loss_dict)
 
-                    if i == 0:  # select a different scene
-                        # Compute cross-generations
+                    if i == 0 and not mod.use_z_comb_network:  # select a different scene
+                        # Compute cross-generations, unless we are using z combiner in which case it will be computed below
                         if mod.can_cross_generate:
                             N_gen = 1
                             n_samples = conf.training.batch_size // N_gen
@@ -501,16 +501,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             real_disc_outs = torch.cat(disc(data), dim=0)
                             save_and_log_img(real_disc_outs.detach().cpu(), f"Discriminator/real", runPath, None, itercount,
                                              run)
-                            if "objective_is_z_combiner" in conf.training and conf.training.obsjective_is_z_combiner:
-                                fake_disc_out = torch.cat(disc(model_outs[1]), dim=0)
-                                save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake", runPath, None, itercount,
-                                                 run)
-                            else:
+                            if isinstance(model_outs[1][0], list):
                                 for m, px_u in enumerate(model_outs[1]):
                                     fake_disc_out = torch.cat(disc(px_u), dim=0)
                                     save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake_m{m}", runPath, None, itercount, run)
-
-
+                            else:
+                                fake_disc_out = torch.cat(disc(model_outs[1]), dim=0)
+                                save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake", runPath, None,
+                                                 itercount,
+                                                 run)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader.dataset)
@@ -721,7 +720,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="celeba_semseg_autoencoder_train_adv.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train_z_combiner_4way.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 
