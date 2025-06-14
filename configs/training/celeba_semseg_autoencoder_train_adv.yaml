@@ -39,7 +39,7 @@ training:
   patience: 4  # Will be interpreted as subepochs if test_every_iter is set
   test_every_iter: 200
 
-  start_iter: 0
+  start_iter: 200
   K: 1
 
   grad_clipper:

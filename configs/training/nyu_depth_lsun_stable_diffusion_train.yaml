@@ -26,16 +26,16 @@ training:
 
   lr: 1.0e-4
   batch_size: 64
-  num_epochs: 5   # this will be interpreted as subepochs if test_every_iter is specified
+  num_epochs: 10   # this will be interpreted as subepochs if test_every_iter is specified
   start_iter: 0
   patience: 10     # this will be interpreted as subepochs if test_every_iter is specified
   test_only: False
 
-  test_every_iter: 50
+  test_every_iter: 3000
 
   precompute_latents: True
   force_recompute: True
-  precompute_latents_path: "/rds/general/user/ds3119/ephemeral/latents_precompute" # . ../../datasets/lsun/ #
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute" # ". ../../datasets/lsun" #
   compute_latent_scale: True
   latent_scale_per_channel: True
 

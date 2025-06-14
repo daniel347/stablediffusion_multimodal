@@ -62,8 +62,8 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("We check the mean and std of our celeba autoencoder latent space. We use only 800 samples so could be dubious")
-name = "our_ae_latent_quality"
+notes = ("We try training diffusion with our new z combiner 4 way training.")
+name = "4way_z_comb_channel_norm"
 
 
 def setup(rank, world_size):
@@ -166,6 +166,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if use_mixed_precision:
             print("Using mixed precision training")
             scaler = GradScaler()
+
+        if conf.training.latent_scale_per_channel:
+            conf.model_conf.model.params.first_stage_config.params.scale_per_channel = True
 
         # Initialise the model
         if "ckpt_path" not in conf.model_conf.model.params.first_stage_config.params or \
@@ -333,7 +336,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             if latents_train_path.exists() and latents_val_path.exists() and not conf.training.force_recompute:
                 # We have already computed the latents
                 train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, conf.training.precompute_latents_path)
-                train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
+                train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank,
                                                                data_parallel)
                 already_precomputed = True
 
@@ -489,6 +492,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     if ema is not None:
                         ema.update(conf.training.batch_size)
 
+                    """
                     for a in range(len(ema.emas)):
                         print("Checking emas")
                         if not torch.all(ema.emas[a][test_param_name].data != model.state_dict()[test_param_name].data):
@@ -496,6 +500,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         for b in range(a):
                             if not torch.all(ema.emas[b][test_param_name].data != ema.emas[a][test_param_name].data):
                                 print(f"EMA {b} matches EMA {a} parameters in iteration {i}.")
+                    """
 
                     if i % scheduler_step_freq == 0:
                         scheduler.step()
@@ -978,7 +983,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     # Replace the dataloaders with the precomputed latent loaders
                     train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, conf.training.precompute_latents_path)
-                    train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf, world_size, rank,
+                    train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank,
                                                                    data_parallel)
 
                     dataloaders["train_dataset"] = train_dataset
@@ -1026,6 +1031,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             checkpoint = Checkpoint.from_directory(checkpoint_dir)
                             train.report({"loss": test_loss, **{f"{met}_{mod}": score for met, scores in metrics.items() for mod, score in zip(modality, scores)}}, checkpoint=checkpoint)
                     else:
+                        """
                         print("Checking emas")
                         for i in range(len(ema.emas)):
                             print(i)
@@ -1044,6 +1050,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             for j in range(i):
                                 if torch.allclose(ema_sd["emas"][j][test_param_name].data, ema_sd["emas"][i][test_param_name].data):
                                     print(f"EMA {j} state dict is equal to EMA {i} parameters at the end of subepoch {subepoch}.")
+                        """
                         save_checkpoint(ema, model, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt")
                         if test_loss < best_test_loss:
                             pass
@@ -1085,7 +1092,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/training", config_name="celeba_semseg_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs/training", config_name="nyu_depth_lsun_stable_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

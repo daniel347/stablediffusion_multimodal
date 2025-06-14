@@ -236,6 +236,7 @@ class AutoencoderOrigWrapper(AutoencoderKL):
         self.w_channels = kwargs.get("ddconfig", {"z_channels": 0})["z_channels"]
         self.u_channels = self.w_channels
         self.z_channels = 0
+        self.all_combinations = False
 
         self.vaes = [self]  # I hate it
         self.llik_scales = [1.0]
