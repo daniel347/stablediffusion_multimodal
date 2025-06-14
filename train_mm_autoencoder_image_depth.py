@@ -44,8 +44,8 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("We show the output of the discriminator after 200 iterations training - hopefully it will be something sensible")
-name = "test_show_discriminator_outputs"
+notes = ("We run the test code again because for some reason nothing logged on wandb")
+name = "test_4way_autoencoder"
 
 
 def setup(rank, world_size):
@@ -436,9 +436,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     else:
                         loss_series -= pd.Series(loss_dict)
 
-                    if i == 0 and not mod.use_z_comb_network:  # select a different scene
+                    if i == 0:  # select a different scene
                         # Compute cross-generations, unless we are using z combiner in which case it will be computed below
-                        if mod.can_cross_generate:
+                        if mod.can_cross_generate and not mod.use_z_comb_network:
                             N_gen = 1
                             n_samples = conf.training.batch_size // N_gen
                             limited_data = [d[:n_samples] for d in data]
@@ -643,27 +643,37 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             itercount = 0
 
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
-            mod = model.module.module if data_parallel else model.module
-            mod.use_z_comb_network = True  # Default to using the z combiner when encoding
+            mod = model.module if data_parallel else model
+            mod.module.use_z_comb_network = True  # Default to using the z combiner when encoding
 
-            with torch.no_grad():
+            with ((torch.no_grad())):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    # print(f"data shapes: {data[0].shape}, {data[1].shape}")
+
+                    for m, (name, dbatch) in enumerate(zip(modality, data)):
+                        dbatch = dbatch.detach().cpu()
+                        dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                        grid = make_grid(dbatch, nrow=8)
+                        wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
                     latents = mod("encode", data)
-                    latents = cat_dists_or_tensor_latents(latents)
-                    print(latents.shape)
+                    if isinstance(latents, list):
+                        latents = cat_dists_or_tensor_latents(latents)
+                        print(latents.shape)
 
                     for c in range(latents.shape[1]):
                         print(f"Normalising channel {c}")
-                        wandb.log({"channel": c}, step=itercount)
                         channel_std = torch.ones(latents.shape[1]).to(device)
                         channel_mean = torch.zeros(latents.shape[1]).to(device)
 
                         channel_std[c] = torch.std(latents[:, c, ...], dim=(0, 1, 2))
                         channel_mean[c] = torch.mean(latents[:, c, ...], dim=(0, 1, 2))
-                        latent_norm = (latents - channel_mean[None, :, None, None]) / channel_std[None, :, None, None]
+                        latent_norm = ((latents - channel_mean[None, :, None, None]) / channel_std[None, :, None, None]) + channel_mean[None, :, None, None]
+                        wandb.log({"channel": c,
+                                   "orig_channel_std": channel_std[c].detach().cpu(),
+                                   "orig_channel_mean": channel_mean[c].detach().cpu()}, step=itercount)
 
                         reconstructions = mod("decode", latent_norm)
 
@@ -672,6 +682,29 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                              runPath, display_data_fs[k], itercount, run)
 
                         itercount += 1
+
+                    # add a fixed amount of noise to each channel and measure the reconstruction error
+                    baseline_recon = mod("decode", latents)
+                    baseline_error = [torch.nn.functional.mse_loss(d, b.mean) for d, b in zip(data, baseline_recon)]
+                    noise = torch.randn_like(latents)
+
+                    wandb.log({f"noiseless_recon_error_mode{m}": baseline_error[m] for m in range(len(modality))}, step=itercount)
+
+                    for c in range(latents.shape[1]):
+                        latent_noised = copy.deepcopy(latents)
+                        latent_noised[:, c] += 0.2 * noise[:, 0]  # we add the same noise to all channels incase there is a "black hole"
+
+                        recons = mod("decode", latent_noised)
+                        error = [torch.nn.functional.mse_loss(d, r.mean) for d, r in zip(data, recons)]
+
+                        wandb.log({"channel": c, **{f"recon_error_mode{m}": error[m].detach().cpu() for m in range(len(modality))}}, step=itercount)
+
+                        for k, rec in enumerate(recons):
+                            save_and_log_img(rec, f'NoisyReconstructions/m{k}',
+                                             runPath, display_data_fs[k], itercount, run)
+
+                        itercount += 1
+
                     break
 
         def training_loop():
@@ -688,8 +721,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             with Timer('MMVAEplus') as t:
                 # test(0, conf.training.start_iter, 0)
 
-                for subepoch, itercount in enumerate(range(conf.training.start_iter,
-                                                           conf.training.num_epochs * n_iter + conf.training.start_iter,
+                for subepoch, itercount in enumerate(range(start_iter,
+                                                           conf.training.num_epochs * n_iter + start_iter,
                                                            n_iter)):
                     epochcount, train_pbar = train(subepoch, itercount, epochcount, n_iter, train_pbar)
                     test_loss = test(subepoch, itercount + n_iter, epochcount)
@@ -720,7 +753,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train_z_combiner_4way.yaml")
+@hydra.main(version_base=None, config_path="configs/testing/", config_name="nyu_depth_lsun_autoencoder_test.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

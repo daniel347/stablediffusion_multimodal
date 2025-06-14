@@ -23,7 +23,7 @@ training:
     name: disentangling_objective
     params:
       wlpips: [1000, 0.0]
-      wadversary: 3
+      wadversary: 6
       start_adv_iter: 200
       beta: 1
       channel_weighting: # semseg_class_freqs.pt
@@ -39,7 +39,7 @@ training:
   patience: 4  # Will be interpreted as subepochs if test_every_iter is set
   test_every_iter: 200
 
-  start_iter: 0
+  start_iter: 200
   K: 1
 
   grad_clipper:
@@ -55,7 +55,7 @@ training:
         target: ldm.models.discriminator.PatchDiscriminator
         params:
           input_nc: 21
-  discriminator_lr: 5.0e-5
+  discriminator_lr: 2e-4
 
 eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth

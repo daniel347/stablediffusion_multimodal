@@ -19,7 +19,7 @@ data:
 training:
   use_mixed_precision: False
   objective:
-    name: z_combiner_objective
+    name: z_combiner_objective_4way
     params:
       wlpips: [5000, 5000]
       wadversary: 0
