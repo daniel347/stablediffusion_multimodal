@@ -29,6 +29,7 @@ class NYUDepth(Dataset):
                  classes=None,
                  return_row=False,
                  modality_exts="png",
+                 shuffle=False,
                  **kwargs):
 
         super().__init__()
@@ -105,6 +106,11 @@ class NYUDepth(Dataset):
         # Remove the bad paths from the index
         for m in modality:
             self.index = self.index[~self.index[f"{m}_path"].isin(self.bad_paths)]
+
+        # shuffle the colour and depth images to produce irrelevant modalities
+        if shuffle:
+            for i, m in enumerate(self.modality[1:]):
+                self.index[f"{m}_path"] = self.index[f"{m}_path"].sample(frac=1, random_state=i).reset_index(drop=True)
 
     def make_scene_dataframe(self, x):
         paths = []

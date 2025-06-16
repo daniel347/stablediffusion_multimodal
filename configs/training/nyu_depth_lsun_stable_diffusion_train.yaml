@@ -2,7 +2,7 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Stable_Diffusion"
 print_freq: 50
-outputdir: /rds/general/user/ds3119/ephemeral/outputs # ../outputs
+outputdir: /rds/general/user/ds3119/ephemeral/outputs # ../outputs #
 
 function:
   name: training_loop
@@ -35,7 +35,7 @@ training:
 
   precompute_latents: True
   force_recompute: True
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute" # ". ../../datasets/lsun" #
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute" # ". ../../datasets/lsun"
   compute_latent_scale: True
   latent_scale_per_channel: True
 

@@ -43,7 +43,7 @@ model:
         latent_channel_z: 2
         latent_channel_w: 2
         cross_w_mode: "sample"
-        ckpt_path: "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_13__19_00_59_4way_z_combiner/model_4000.pt" # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_11__21_13_53_z_combiner_frozen_decoder/model_1200.pt"
+        ckpt_path: # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_13__19_00_59_4way_z_combiner/model_4000.pt" # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_11__21_13_53_z_combiner_frozen_decoder/model_1200.pt"
         avg_z: False
         all_combinations: False
         stop_self_z_grad: False

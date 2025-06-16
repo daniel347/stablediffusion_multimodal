@@ -95,7 +95,7 @@ class DisentanglingObjective(torch.nn.Module):
                 if iteration > self.start_adv_iter:
                     al = self.get_adversarial_loss_f(px_u)
                     lws[r] = lws[r] - al * self.wadversary
-                    loss_dict["adversarial_loss"] += al.detach().cpu().sum().item() * self.wadversary
+                    loss_dict["adversarial_loss"] -= al.detach().cpu().sum().item() * self.wadversary
 
         # KL divergence loss for w
         for r, qw_x in enumerate(qw_xs):

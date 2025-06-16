@@ -44,8 +44,8 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("We run the test code again because for some reason nothing logged on wandb")
-name = "test_4way_autoencoder"
+notes = ("We try training on a shuffled NYU depth dataset so the modalities are irrelevant. z should be uninformative noise or zero")
+name = "test_irrelevant_modes"
 
 
 def setup(rank, world_size):
@@ -753,7 +753,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/testing/", config_name="nyu_depth_lsun_autoencoder_test.yaml")
+@hydra.main(version_base=None, config_path="configs/training/", config_name="nyu_depth_autoencoder_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

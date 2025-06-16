@@ -2,18 +2,19 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
 print_freq: 50
+outputdir: ../outputs
 
 function:
   name: training_loop
   params: {}
 
+dataset_name: nyu_depth
 data:
   dataset_name: nyu_depth
-  datadir:  ../../datasets/nyuv2_processed/ # "/rds/general/user/ds3119/ephemeral/nyuv2_processed"
+  root_data_dir:  ../../datasets/nyuv2_processed/ # "/rds/general/user/ds3119/ephemeral/nyuv2_processed"
   input_size: 128
-  modalities: ["colour", "depth"]
-
-  outputdir: ../outputs
+  modality: ["colour", "depth"]
+  shuffle: True
 
 
 training:
@@ -30,7 +31,7 @@ training:
       mmd_ww_weight: 1000.0
 
   lr: 2.0e-4
-  batch_size: 8
+  batch_size: 4
   num_epochs: 20  # this will be interpreted as subepochs if test_every_iter is specified
   patience: 4     # this will be interpreted as subepochs if test_every_iter is specified
 
@@ -43,7 +44,7 @@ training:
     keep_history_upto: 5000
     start_clip: 10
 
-  test_every_iter: 100  # test and save the model every so many iterations
+  test_every_iter: 20  # test and save the model every so many iterations
 
   # discriminator:
   #   target: ldm.models.discriminator.MMDiscriminator
@@ -57,5 +58,5 @@ eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
 model_conf: configs/stable-diffusion/v2-inference-mm.yaml
-model_initialisation: "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
-init_from_stable_diffusion: False
+model_initialisation: # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
+init_from_stable_diffusion: True
