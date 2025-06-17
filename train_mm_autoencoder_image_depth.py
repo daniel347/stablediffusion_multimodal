@@ -508,10 +508,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                                  run)
 
             # Epoch test loss
-            epoch_loss = b_loss / len(test_loader.dataset)
+            epoch_loss = b_loss / len(test_loader)
             if enable_wandb:
                 wandb.log({"Loss/test": epoch_loss}, step=itercount)
-                wandb.log({f"Loss/test/breakdown/{key}": val for key, val in loss_series.items()}, step=itercount)
+                wandb.log({f"Loss/test/breakdown/{key}": val/len(test_loader) for key, val in loss_series.items()}, step=itercount)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
             print(loss_series)
 
