@@ -744,6 +744,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             for _ in it:
                 pass
 
+            latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
+            model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
+            model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
+
             for step, name in enumerate(model_names):
                 logging.info(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
                 load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
@@ -1092,7 +1096,7 @@ def run_training_ray_tune(config, conf, **params):
     run_training(conf=conf, **params)
 
 
-@hydra.main(version_base=None, config_path="configs/training", config_name="nyu_depth_lsun_stable_diffusion_train.yaml")
+@hydra.main(version_base=None, config_path="configs", config_name="nyu_depth_lsun_stable_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

@@ -1,0 +1,21 @@
+# @package _global_
+
+name: "4way_z_comb_channel_norm_optimise_ema"
+notes: "We try to optimise the EMA for the 4way_z_comb_channel_norm model."
+
+function:
+  name: test_optimum_EMA
+  kwargs: {out_nimgs: [27000], out_stds: [0.05, 0.75, 0.1, 0.125, 0.15, 0.175, 0.2]}
+
+training.batch_size: 4
+
+force_recompute: False
+latent_scale_per_channel: False
+compute_latent_scale: True
+
+outputdir: ../outputs
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_16__12_05_34_4way_z_comb_channel_norm/model_27000.pt
+
+defaults:
+  - override /ema: dummy_ema
+  - _self_

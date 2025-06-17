@@ -48,5 +48,4 @@ defaults:
   - training: diffusion_training_default
   - sampler: ddim_timetravel
   - ema: power_ema
-  - override training/discriminator: mm_joint_discriminator_semseg
   - _self_

@@ -1,3 +1,2 @@
-ema:
-  target: ldm.modules.ema.DummyEMA
-  params: {}
+target: ldm.modules.ema.DummyEMA
+params: {}
