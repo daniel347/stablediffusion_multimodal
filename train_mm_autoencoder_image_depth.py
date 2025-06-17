@@ -44,10 +44,6 @@ import pyiqa
 
 enable_wandb = True
 
-notes = ("We run the test code again because for some reason nothing logged on wandb")
-name = "test_4way_autoencoder"
-
-
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
@@ -62,7 +58,7 @@ def cleanup():
 
 
 def initialise_model(conf):
-    first_stage_conf = conf.model_conf.model.params.first_stage_config
+    first_stage_conf = conf.model.params.first_stage_config
     model = instantiate_from_config(first_stage_conf)
 
     if conf.init_from_stable_diffusion:
@@ -166,7 +162,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             conf.experiment = model.modelName
 
         # Set up run path
-        runId = str(datetime.now().strftime("%Y_%m_%d__%H_%M_%S")) + "_" + name
+        runId = str(datetime.now().strftime("%Y_%m_%d__%H_%M_%S")) + "_" + conf.name
         if rank == 0 or not data_parallel:
             experiment_dir = Path(os.path.join(conf.outputdir, conf.experiment, "checkpoints"))
             experiment_dir.mkdir(parents=True, exist_ok=True)
@@ -192,7 +188,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 # Run name
                 name=f"{runId}_{str(rank)}",
                 group=f"DDP_{runId}",
-                notes=notes
+                notes=conf.notes
             )
 
             wandb.alert(title="Starting Run", text="Started training stable diffusion autoencoder")
@@ -223,7 +219,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         if use_adversary:
             print("Initialising discriminator for adversarial loss ...")
             disc = instantiate_from_config(conf.training.discriminator).to(device)
-            disc_optimizer = optim.Adam(disc.parameters(), lr=conf.training.discriminator_lr, amsgrad=True)
+            disc_optimizer = optim.Adam(disc.parameters(), lr=conf.training.discriminator.discriminator_lr, amsgrad=True)
 
             get_adversarial_loss_f = partial(get_adversarial_loss, discriminator=disc, device=device)
             train_discriminator_f = partial(train_discriminator, discriminator=disc, optimiser=disc_optimizer, device=device)
@@ -753,7 +749,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             cleanup()
 
 
-@hydra.main(version_base=None, config_path="configs/testing/", config_name="nyu_depth_lsun_autoencoder_test.yaml")
+@hydra.main(version_base=None, config_path="configs/", config_name="celeba_semseg_autoencoder_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
 

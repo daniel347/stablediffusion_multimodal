@@ -117,8 +117,8 @@ class DiffusionIntermediateLogger():
 
 
 def initialise_model(conf):
-    OmegaConf.to_container(conf["model_conf"]["model"])
-    model = instantiate_from_config(conf["model_conf"]["model"])
+    OmegaConf.to_container(conf["model"])
+    model = instantiate_from_config(conf["model"])
 
     if conf.init_from_stable_diffusion:
         # sd_state_dict = torch.load("checkpoints/sd-v1-4.ckpt")
@@ -162,17 +162,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         print("Working directory: ", os.getcwd())
 
         use_mixed_precision = conf.training.use_mixed_precision
-        conf["model_conf"]["model"]["params"]["unet_config"]["params"]["use_fp16"] = use_mixed_precision
+        conf["model"]["params"]["unet_config"]["params"]["use_fp16"] = use_mixed_precision
         if use_mixed_precision:
             print("Using mixed precision training")
             scaler = GradScaler()
 
         if conf.training.latent_scale_per_channel:
-            conf.model_conf.model.params.first_stage_config.params.scale_per_channel = True
+            conf.model.params.first_stage_config.params.scale_per_channel = True
 
         # Initialise the model
-        if "ckpt_path" not in conf.model_conf.model.params.first_stage_config.params or \
-                conf.model_conf.model.params.first_stage_config.params.ckpt_path is None:
+        if "ckpt_path" not in conf.model.params.first_stage_config.params or \
+                conf.model.params.first_stage_config.params.ckpt_path is None:
             logger.warning("No checkpoint path for first stage! This is could be unintentional")
         model = initialise_model(conf)
         n_param = count_params(model)
@@ -246,8 +246,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if ray_tune:
             runId += f"_rank{train.get_context().get_world_rank()}"
 
-        if name is not None:
-            runId += f"_{name}"
+        if conf.name is not None:
+            runId += f"_{conf.name}"
 
         if rank == 0 or not data_parallel:
             experiment_dir = Path(os.path.join(conf.outputdir, conf.experiment, "checkpoints"))
@@ -274,7 +274,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 # Run name
                 name=f"{runId}_{str(rank)}",
                 group=f"DDP_{runId}",
-                notes=notes,
+                notes=conf.notes,
             )
             wandb.alert(title=f"Experiment {conf.experiment} has started", text=f"Run id: {runId}")
         else:
@@ -597,7 +597,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         N_gen = 16
                         if return_class:
                             classes = torch.randint(low=0,
-                                                    high=conf.model_conf.model.params.unet_config.params.num_classes,
+                                                    high=conf.model.params.unet_config.params.num_classes,
                                                     size=(N_gen,),
                                                     device=device)
 
@@ -677,7 +677,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     if use_diffusion:
                         if return_class:
                             classes = torch.randint(low=0,
-                                                    high=conf.model_conf.model.params.unet_config.params.num_classes,
+                                                    high=conf.model.params.unet_config.params.num_classes,
                                                     size=(gen_batch_size,),
                                                     device=device)
 
@@ -930,7 +930,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 print(f"found latent mean of: {latent_mean} and std of {latent_scale}")
                 print("resaving the first stage model with latent mean and scale")
                 torch.save(model_first_stage.state_dict(),
-                           conf.model_conf.model.params.first_stage_config.params.ckpt_path)
+                           conf.model.params.first_stage_config.params.ckpt_path)
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in pbar:
@@ -996,7 +996,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
                     model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
                     print("resaving the first stage model with latent mean and scale")
-                    torch.save(model_first_stage.state_dict(), conf.model_conf.model.params.first_stage_config.params.ckpt_path)
+                    torch.save(model_first_stage.state_dict(), conf.model.params.first_stage_config.params.ckpt_path)
 
                 print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
 
@@ -1116,8 +1116,8 @@ def main(conf: DictConfig) -> None:
 
         assert isinstance(conf.device, str), "Hyperparameter optimisation only works with single GPU"
         config = {
-            "model_conf.model.params.unet_config.params.model_channels": tune.choice([128, 192, 320, 448]),
-            "model_conf.model.params.unet_config.params.num_res_blocks": tune.choice([1, 2, 3]),
+            "model.params.unet_config.params.model_channels": tune.choice([128, 192, 320, 448]),
+            "model.params.unet_config.params.num_res_blocks": tune.choice([1, 2, 3]),
             "training.lr": tune.choice([ 1e-5, 5e-5, 1e-4, 5e-4, 1e-3]),
             # "training.batch_size": tune.choice([8, 16, 32, 64]),
         }
