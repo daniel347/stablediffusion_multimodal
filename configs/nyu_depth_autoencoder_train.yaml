@@ -1,8 +1,12 @@
+# @package _global_
+
 seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
 print_freq: 50
 outputdir: ../outputs
+name: "nyu_lsun_shuffled"
+notes: "We try training the autoencoder on NYU depth and LSUN with shuffled data so there is no common information"
 
 function:
   name: training_loop
@@ -11,7 +15,7 @@ function:
 dataset_name: nyu_depth
 
 training:
-  test_every_iter: 20  # test and save the model every so many iterations
+  test_every_iter: 2000 # test and save the model every so many iterations
 
 model_initialisation: # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
 resume_training: false
