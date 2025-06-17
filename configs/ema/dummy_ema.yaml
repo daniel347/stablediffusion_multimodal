@@ -1,0 +1,3 @@
+ema:
+  target: ldm.modules.ema.DummyEMA
+  params: {}

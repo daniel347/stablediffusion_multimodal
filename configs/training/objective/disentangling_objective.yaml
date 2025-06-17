@@ -1,0 +1,10 @@
+name: disentangling_objective
+params:
+  wlpips: [1000, 0.0]
+  wadversary: 0
+  beta: 1
+  channel_weighting: # semseg_class_freqs.pt
+  z_close_weight: 500000 # 0.1
+  off_combination_weight: 0.0
+  mmd_zw_weight: 1000.0  # 1000.0
+  mmd_ww_weight: 1000.0  # 1000.0

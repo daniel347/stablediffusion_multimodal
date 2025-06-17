@@ -1,0 +1,3 @@
+target: ldm.modules.ema.PowerFunctionEMA
+params:
+stds: [0.05, 0.10]

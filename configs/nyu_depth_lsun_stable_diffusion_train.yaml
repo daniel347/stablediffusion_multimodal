@@ -1,0 +1,52 @@
+seed: 1
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
+experiment: "NYU_Depth_Stable_Diffusion"
+print_freq: 50
+outputdir: /rds/general/user/ds3119/ephemeral/outputs # ../outputs #
+
+function:
+  name: training_loop
+  kwargs: {}
+
+dataset_name: nyu_depth_lsun  # name used when searching for image metrics
+
+training:
+  use_mixed_precision: False
+
+  lr: 1.0e-4
+  num_epochs: 10   # this will be interpreted as subepochs if test_every_iter is specified
+  start_iter: 0
+  patience: 10     # this will be interpreted as subepochs if test_every_iter is specified
+  test_every_iter: 3000
+
+  precompute_latents: True
+  force_recompute: True
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute" # ". ../../datasets/lsun"
+  compute_latent_scale: True
+  latent_scale_per_channel: True
+
+  keep_intermediate_models: True  # With false only the best model and the last model is saved, otherwise all epochs showing improvement are saved.
+
+eval:
+  inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_13__19_00_59_4way_z_combiner/model_4000.pt"
+
+model_initialisation:
+#/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_05_28__23_52_01_new_ae_train/model_18000.pt
+# rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_05_28__23_52_01_new_ae_train/model_21000.pt
+# "/home/ds3119/multimodal_generation/trained_models/stable_diffusion_nyu_2025_02_07__11_11_50/model_5.rar"
+init_from_stable_diffusion: False
+
+defaults:
+  - data: nyu_depth_lsun_bedroom
+  - model: v2-inference-mm
+  - training: diffusion_training_default
+  - sampler: ddim_timetravel
+  - ema: power_ema
+  - override training/discriminator: mm_joint_discriminator_semseg
+  - _self_

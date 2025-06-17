@@ -1,0 +1,34 @@
+seed: 1
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
+experiment: "MM_CelebA_Autoencoder"
+print_freq: 50
+notes: "Training an autoencoder on MM CelebA dataset with RGB and semantic segmentation inputs."
+name: "patch_disc_train"
+outputdir: ../outputs  # /rds/general/user/ds3119/ephemeral/outputs
+
+function:
+  name: training_loop
+  params: {}
+
+dataset_name: mm_celeba
+
+training:
+  objective:
+    params:
+      wlpips: [1000, 0.0]
+      wadversary: 100000
+
+  batch_size: 8
+
+  start_iter: 0
+  test_every_iter: 20
+
+model_initialisation: # "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_03_21__23_27_35_new_obj_z_dist_mmd/model_10.rar"
+init_from_stable_diffusion: True
+
+defaults:
+  - data: mm_celeba
+  - model: v2-inference-mm-rgb-semseg
+  - training: autoencoder_training_default
+  - override training/discriminator: mm_joint_discriminator_semseg
+  - _self_

@@ -1,0 +1,26 @@
+use_mixed_precision: False
+
+lr: 6.0e-5
+batch_size: 72
+num_epochs: 20   # this will be interpreted as subepochs if test_every_iter is specified
+start_iter: 0
+patience: 10     # this will be interpreted as subepochs if test_every_iter is specified
+test_only: False
+
+precompute_latents: True
+force_recompute: True
+precompute_latents_path: ../../datasets/latents_precompute
+compute_latent_scale: True
+latent_scale_per_channel: False
+
+keep_intermediate_models: True  # With false only the best model and the last model is saved, otherwise all epochs showing improvement are saved.
+
+z_mode: "z_combiner"  # one of ["random", "avg", "z_combiner" or an integer between 0 and NUM_VAES-1]
+
+grad_clipper:
+  clip_percentile: 95
+  clip_update_freq: 10
+  keep_history_upto: 5000
+  start_clip: 10
+
+t_sampler:

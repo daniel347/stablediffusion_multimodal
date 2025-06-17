@@ -1,0 +1,39 @@
+seed: 1
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
+experiment: "MM_CelebA_Autoencoder"
+print_freq: 50
+
+function:
+  name: training_loop
+  params: {}
+
+data:
+  dataset_name: mm_celeba
+  datadir:  ../../datasets/CelebAMask-HQ # ../mmvaeplus/data/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
+  input_size: 128
+  modalities: ["colour", "semseg"]
+
+  outputdir: ../outputs
+
+
+training:
+  objective:
+    params:
+      wlpips: [1000, 0.0]
+      wadversary: 100000
+
+  K: 1
+
+  objective_is_z_combiner: True
+  lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
+
+model_initialisation: "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_04_26__10_52_10_4x_down_z_comb_train/model_6.rar"
+init_from_stable_diffusion: False
+
+defaults:
+  - data: mm_celeba
+  - model: v2-inference-mm-rgb-semseg
+  - training: autoencoder_training_default
+  - override training/objective: 4way_z_combiner_objective
+  - override training/discriminator: mm_joint_discriminator_semseg
+  - _self_
