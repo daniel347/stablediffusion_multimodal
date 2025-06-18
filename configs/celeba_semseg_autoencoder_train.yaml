@@ -5,8 +5,8 @@ device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Autoencoder"
 print_freq: 50
 notes: "Training an autoencoder on MM CelebA dataset with RGB and semantic segmentation inputs."
-name: "patch_disc_train"
-outputdir: ../outputs  # /rds/general/user/ds3119/ephemeral/outputs
+name: "obj_hyp_opt"
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
 
 function:
   name: training_loop
@@ -21,10 +21,10 @@ training:
       wadversary: 100000
 
   start_iter: 0
-  test_every_iter: 200
+  test_every_iter: 400
 
 model_initialisation: # "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_03_21__23_27_35_new_obj_z_dist_mmd/model_10.rar"
-init_from_stable_diffusion: False
+init_from_stable_diffusion: True
 
 defaults:
   - data: mm_celeba
