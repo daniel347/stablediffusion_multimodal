@@ -20,13 +20,11 @@ training:
       wlpips: [1000, 0.0]
       wadversary: 100000
 
-  batch_size: 8
-
   start_iter: 0
-  test_every_iter: 20
+  test_every_iter: 200
 
 model_initialisation: # "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_03_21__23_27_35_new_obj_z_dist_mmd/model_10.rar"
-init_from_stable_diffusion: True
+init_from_stable_diffusion: False
 
 defaults:
   - data: mm_celeba
