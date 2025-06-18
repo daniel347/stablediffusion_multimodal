@@ -31,6 +31,8 @@ import torch.multiprocessing as mp
 from torch.amp import GradScaler, autocast
 import pandas as pd
 from torch.profiler import record_function
+import torchvision.utils as tvu
+import cmmd_pytorch as cmmd
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
@@ -302,6 +304,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                        "train_loader": train_loader,
                        "test_loader": test_loader}
 
+        compute_metrics = conf.training.compute_metrics if "compute_metrics" in conf.training else False
+
         def train(subepoch, itercount, epochcount, n_iter, train_pbar):
             model.train()
             b_loss = 0
@@ -400,7 +404,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print(loss_series)
             return epochcount, train_pbar
 
-        def test(subepoch, itercount, epochcount):
+        def test(subepoch, itercount, epochcount, compute_metrics=False, metrics=["fid", "kid"]):
             b_loss = 0
             loss_series = None
 
@@ -410,8 +414,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             if enable_wandb:
                 wandb.log({"epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
+            if compute_metrics:
+                tempdirs = {}
+                for mode in modality:
+                    tempdir = runPath / f'temp_fid_{mode}'
+                    tempdir.mkdir(parents=True, exist_ok=True)
+                    tempdirs[mode] = tempdir
+
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
+                    if i > 10:
+                        break
                     data = move_data_to_device(dataT, device=device)
                     loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount)
                     loss = -loss
@@ -431,6 +444,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         loss_series = -pd.Series(loss_dict)
                     else:
                         loss_series -= pd.Series(loss_dict)
+
+                    if compute_metrics:
+                        for m, name in enumerate(modality):
+                            out = model_outs[1][m][m] if isinstance(model_outs[1][0], list) else model_outs[1][m]
+                            for j, img in enumerate(out.mean[0]):
+                                s_disp = display_data_fs[m](img.detach().cpu())
+                                tvu.save_image(s_disp, str(tempdirs[name] / f"sample_{name}_{i * conf.training.batch_size + j}.png"))
 
                     if i == 0:  # select a different scene
                         # Compute cross-generations, unless we are using z combiner in which case it will be computed below
@@ -506,6 +526,33 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake", runPath, None,
                                                  itercount,
                                                  run)
+
+            if compute_metrics:
+                metric_scores = {}
+                for met in metrics:
+                    if met == "cmmd":
+                        metric = partial(cmmd.compute_cmmd, device=device)
+                    else:
+                        metric = pyiqa.create_metric(met, device=device)
+
+                    scores = []
+                    for mod in modality:
+                        if mod in ["colour", "depth"]:
+                            split = "test" if dataset_name == "nyu_depth" else "val"
+                            score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
+                            if enable_wandb:
+                                wandb.log({f"{met}_{mod}": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
+
+                            scores.append(score)
+
+                            print(f'====> {met} {mod}: {score:.2f}')
+                        else:
+                            scores.append(None)
+
+                    metric_scores[met] = scores
+
+                for met, score in metric_scores.items():
+                    wandb.log({f"{met}_sum": sum(filter(None, score))}, step=itercount)
 
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader)
@@ -721,7 +768,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                                            conf.training.num_epochs * n_iter + start_iter,
                                                            n_iter)):
                     epochcount, train_pbar = train(subepoch, itercount, epochcount, n_iter, train_pbar)
-                    test_loss = test(subepoch, itercount + n_iter, epochcount)
+                    test_loss = test(subepoch, itercount + n_iter, epochcount, compute_metrics)
 
                     if test_loss < best_test_loss:
                         best_test_loss = test_loss

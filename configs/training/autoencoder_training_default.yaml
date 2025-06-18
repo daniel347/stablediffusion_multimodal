@@ -8,6 +8,8 @@ patience: 4
 start_iter: 0
 K: 1
 
+compute_metrics: False
+
 grad_clipper:
   clip_percentile: 95
   clip_update_freq: 10

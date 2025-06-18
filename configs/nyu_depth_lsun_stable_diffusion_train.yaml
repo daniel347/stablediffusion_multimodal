@@ -25,11 +25,6 @@ training:
   compute_latent_scale: True
   latent_scale_per_channel: True
 
-  keep_intermediate_models: True  # With false only the best model and the last model is saved, otherwise all epochs showing improvement are saved.
-
-eval:
-  inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
-
 model:
   params:
     first_stage_config:
