@@ -4,7 +4,7 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
 print_freq: 50
-outputdir: ../outputs
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
 name: "nyu_lsun_shuffled"
 notes: "We try training the autoencoder on NYU depth and LSUN with shuffled data so there is no common information"
 
@@ -13,6 +13,8 @@ function:
   params: {}
 
 dataset_name: nyu_depth
+
+training.objective.params.wlpips: [1000, 1000]
 
 training:
   test_every_iter: 2000 # test and save the model every so many iterations
