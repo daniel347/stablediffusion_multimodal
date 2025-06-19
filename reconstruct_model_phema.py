@@ -36,6 +36,7 @@ def reconstruct_phema(
 ):
     if (Path(in_folder) / "saves.csv").exists():
         save_df = pd.read_csv(os.path.join(in_folder, "saves.csv"))
+        save_df = save_df[save_df.iteration > 0]  # Ignore model saves with 0
         saves_iteration = save_df["iteration"].tolist()
         saves_iteration = [s * epoch_size for s in saves_iteration]
         in_std = save_df["std"].tolist()
@@ -53,6 +54,10 @@ def reconstruct_phema(
         for save in tqdm.tqdm(saves):
             # expand the saves to extract std/iteration information for each ema
             save_dict = torch.load(save, map_location='cpu')
+            print(save_dict.keys())
+            if save_dict["iteration"] == 0:
+                # I don't know how we even get model_0 saved
+                continue
             for i, std in enumerate(save_dict["ema"]["stds"]):
                 in_std.append(std)
                 saves_iteration.append(save_dict["iteration"])
@@ -98,12 +103,16 @@ def reconstruct_phema(
                         for _, pj in out[j]["model"].items():
                             pj.zero_()
                     for pi, pj in zip(in_net.values(), out[j]["model"].values()):
+                        if torch.any(torch.isnan(pi)):
+                            print(f"found NaN parameter in input model {j} at iteration {i}")
                         if isinstance(pi, torch.Tensor):
                             # logger.debug(f"Copying parameter of shape {pi.shape} to {pj.shape}")
                             pj += pi.to(torch.float32) * coefs[i, j]
                         else:
                             logger.debug(f"found non parameter of type {type(pi)}, copying without weighting")
                             pj.copy_(pi.to(torch.float32))
+                        if torch.any(torch.isnan(pj)):
+                            print(f"found NaN parameter in output model {j} at iteration {i}")
 
                 # Finalise outputs.
                 if i == len(save_path) - 1:

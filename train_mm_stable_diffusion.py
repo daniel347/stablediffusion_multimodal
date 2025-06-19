@@ -735,6 +735,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         def test_optimum_EMA(dataloaders, out_nimgs, out_stds):
             saves_path = os.path.dirname(conf.model_initialisation)
+            print("saves_path", saves_path)
 
             out_nimgs, out_stds = zip(*product(out_nimgs, out_stds))
 

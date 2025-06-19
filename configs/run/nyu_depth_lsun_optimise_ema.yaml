@@ -12,6 +12,7 @@ training:
   latent_scale_per_channel: False
   compute_latent_scale: True
 
+outputdir: ../outputs
 model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_16__12_05_34_4way_z_comb_channel_norm/model_27000.pt
 
 defaults:
