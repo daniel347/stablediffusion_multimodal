@@ -22,6 +22,7 @@ training:
 
   start_iter: 0
   test_every_iter: 400
+  compute_metrics: True
 
 model_initialisation: # "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_03_21__23_27_35_new_obj_z_dist_mmd/model_10.rar"
 init_from_stable_diffusion: True
