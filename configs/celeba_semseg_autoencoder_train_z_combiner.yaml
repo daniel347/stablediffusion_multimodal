@@ -3,33 +3,34 @@
 seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Autoencoder"
+notes: "Training the z combiner on the most recent autoencoder involving MM CelebA dataset with RGB and semantic segmentation inputs."
+name: "new_hyp_z_comb_training"
 print_freq: 50
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
 
 function:
   name: training_loop
   params: {}
 
-data:
-  dataset_name: mm_celeba
-  datadir:  ../../datasets/CelebAMask-HQ # ../mmvaeplus/data/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
-  input_size: 128
-  modalities: ["colour", "semseg"]
-
-  outputdir: ../outputs
-
+dataset_name: mm_celeba
 
 training:
   objective:
     params:
-      wlpips: [1000, 0.0]
-      wadversary: 100000
+      wlpips: [7000, 0.0]
+      wadversary: 10000
+      mmd_zw_weight: 3500.0
+      mmd_ww_weight: 3000.0
 
   K: 1
+
+  start_iter: 0
+  test_every_iter: 400
 
   objective_is_z_combiner: True
   lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
 
-model_initialisation: "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_04_26__10_52_10_4x_down_z_comb_train/model_6.rar"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_18__20_23_48_obj_hyp_opt/model_2800.pt"
 init_from_stable_diffusion: False
 
 defaults:

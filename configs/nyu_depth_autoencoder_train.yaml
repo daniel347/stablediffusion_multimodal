@@ -14,10 +14,11 @@ function:
 
 dataset_name: nyu_depth
 
-training.objective.params.wlpips: [1000, 1000]
-
 training:
   test_every_iter: 2000 # test and save the model every so many iterations
+  objective:
+    params:
+      wlpips: [1000, 1000]
 
 model_initialisation: # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
 resume_training: false
