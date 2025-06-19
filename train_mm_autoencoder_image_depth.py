@@ -40,7 +40,9 @@ from objectives import get_objective, get_adversarial_loss, train_discriminator
 from objectives.mmvae_objectives import m_dreg
 from ldm.data import get_dataset
 
-from utils import save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs, move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders, cat_dists_or_tensor_latents
+from utils import (save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs,
+                   move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders,
+                   cat_dists_or_tensor_latents, insert_stable_diff_weights)
 
 import pyiqa
 
@@ -84,7 +86,7 @@ def initialise_model(conf):
                         del sd[k]
 
             # If we have doubled the number of channels we must go though and double all the initialisation weight shapes
-            sd = duplicate_stable_diff_weights(sd, vae)
+            sd = duplicate_stable_diff_weights(sd, vae, alpha=0.25)
 
             M, U = vae.load_state_dict(sd, strict=False)
             for m in M:
@@ -98,14 +100,6 @@ def initialise_model(conf):
         print(f"Trainable parameter count: {params}")
 
         return model
-
-    """"
-    elif conf.model_initialisation is not None:
-        print("Initialising with custom weights")
-        model = MMVAEDataParallelWrapper(model)
-        model.load_state_dict(torch.load(conf.model_initialisation), strict=False)
-        return model
-    """
 
     return MMVAEDataParallelWrapper(model)
 
@@ -355,7 +349,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             for px_u in model_outs[1]:
                                 disc_loss = disc_loss + train_discriminator_f(data, px_u)
                         else:
-                            disc_loss = train_discriminator(data, model_outs[1])
+                            disc_loss = train_discriminator_f(data, model_outs[1])
                         loss_dict["discriminator_loss"] = -disc_loss.detach().cpu().sum().item()
 
                     if loss_series is None:
@@ -423,8 +417,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             with torch.no_grad():
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
-                    if i > 10:
-                        break
                     data = move_data_to_device(dataT, device=device)
                     loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount)
                     loss = -loss
@@ -435,7 +427,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             for px_u in model_outs[1]:
                                 disc_loss = disc_loss + train_discriminator_f(data, px_u, test=True)
                         else:
-                            disc_loss = train_discriminator(data, model_outs[1], test=True)
+                            disc_loss = train_discriminator_f(data, model_outs[1], test=True)
                         loss_dict["discriminator_loss"] = -disc_loss.detach().cpu().sum().item()
 
                     b_loss += loss.detach().item()

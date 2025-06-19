@@ -249,8 +249,9 @@ def distribution_to_tensor(dist):
     return tens
 
 
-def duplicate_stable_diff_weights(sd_weights, vae):
+def duplicate_stable_diff_weights(sd_weights, vae, alpha=0.25):
     # If we have single multimodal VAE, we double the channel dimensions and duplicate convolutional weights across the layers.
+    # to allow the model to break symmetry we mix in the duplicated channels with the initialised weights from vae
 
     target_dict = vae.state_dict()
     for source_key, source_value in sd_weights.items():
@@ -261,20 +262,36 @@ def duplicate_stable_diff_weights(sd_weights, vae):
 
         if target_dict[source_key].shape != source_value.shape:
             if (len(target_dict[source_key].shape) == len(source_value.shape) == 4):
+                source_shape = source_value.shape
                 # Conv weights
                 out_mult = float(target_dict[source_key].shape[0]) / source_value.shape[0]
                 in_mult = float(target_dict[source_key].shape[1]) / source_value.shape[1]
                 # Pretty sure everthing goes wrong if out_mult and in_mult are not equal
 
-                source_value = source_value.repeat(math.ceil(out_mult), math.ceil(in_mult), 1, 1) / math.sqrt(out_mult)
+                source_value = source_value.repeat(math.ceil(out_mult), math.ceil(in_mult), 1, 1)
                 source_value = source_value[:target_dict[source_key].shape[0], :target_dict[source_key].shape[1], :, :]
+
+                interpolation_const = torch.ones_like(source_value) * alpha
+                interpolation_const[:source_shape[0], :source_shape[1], :, :] = 0.0
+
+                source_value = interpolation_const * target_dict[source_key] + (1 - interpolation_const) * source_value
+                source_value = source_value / math.sqrt(out_mult)
                 print(f"Duplicated conv weights: {source_key} by input factor {in_mult} and output factor {out_mult}")
 
             elif (len(target_dict[source_key].shape) == len(source_value.shape) == 1):
                 # Conv bias
+                source_shape = source_value.shape
                 out_mult = float(target_dict[source_key].shape[0]) / source_value.shape[0]
-                source_value = source_value.repeat(math.ceil(out_mult)) / out_mult
+
+                source_value = source_value.repeat(math.ceil(out_mult))
                 source_value = source_value[:target_dict[source_key].shape[0]]
+
+                interpolation_const = torch.ones_like(source_value) * alpha
+                interpolation_const[:source_shape[0]] = 0.0
+
+                source_value = interpolation_const * target_dict[source_key] + (1 - interpolation_const) * source_value
+
+                source_value = source_value / out_mult
                 print(f"Duplicated bias: {source_key} by output factor {out_mult}")
 
             else:
@@ -283,6 +300,34 @@ def duplicate_stable_diff_weights(sd_weights, vae):
             sd_weights[source_key] = source_value
 
     return sd_weights
+
+
+def insert_stable_diff_weights(sd_weights, vae):
+    # If we have single multimodal VAE, we insert the stable diffusion weights into the channels but dont duplicate them since this never breaks symmetry
+
+    target_dict = vae.state_dict()
+    for source_key, source_value in sd_weights.items():
+        if source_key not in target_dict:
+            # del sd_weights[source_key]
+            # print(f"Deleting key: {source_key}")
+            continue
+
+        if target_dict[source_key].shape != source_value.shape:
+            if (len(target_dict[source_key].shape) == len(source_value.shape) == 4):
+
+                target_dict[source_key][:source_value.shape[0], :source_value.shape[1], :, :] = source_value
+                print(f"Inserted conv weights: {source_key} with shape {source_value.shape} and output factor {target_dict[source_key].shape}")
+
+            elif (len(target_dict[source_key].shape) == len(source_value.shape) == 1):
+                # Conv bias
+                target_dict[source_key][:source_value.shape[0]] = source_value
+                print(f"Inserted conv weights: {source_key} by with shape {source_value.shape} and output factor {target_dict[source_key].shape}")
+            else:
+                print(f"Could not duplicate weights for layer: {source_key}")
+        else:
+            target_dict[source_key] = source_value
+
+    return target_dict
 
 
 def expand_sub_confs(conf):

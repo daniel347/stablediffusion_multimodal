@@ -72,7 +72,9 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, lpips, chann
 
 def get_adversarial_loss(px_u, discriminator, device):
     # print(f"nans in px_u: {[torch.any(torch.isnan(px.mode)) for px in px_u]}")
-
+    if not hasattr(px_u, "__iter__"):
+        # handles single autoencoder case
+        px_u = [px_u]
     px_u_fill = [torch.nan_to_num(t.mode, 0.0) for t in px_u]
 
     fake_outputs = torch.stack(discriminator(px_u_fill), dim=1)
