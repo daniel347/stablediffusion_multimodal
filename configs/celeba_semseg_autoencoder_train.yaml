@@ -17,8 +17,10 @@ dataset_name: mm_celeba
 training:
   objective:
     params:
-      wlpips: [1000, 0.0]
-      wadversary: 100000
+      wlpips: [7000, 7000.0]
+      wadversary: 10000
+      mmd_zw_weight: 3500.0
+      mmd_ww_weight: 3000.0
 
   start_iter: 0
   test_every_iter: 400

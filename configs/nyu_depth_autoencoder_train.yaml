@@ -6,7 +6,7 @@ experiment: "NYU_Depth_Autoencoder"
 print_freq: 50
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 name: "nyu_lsun_shuffled"
-notes: "We try training the autoencoder on NYU depth and LSUN with shuffled data so there is no common information"
+notes: "We try training our best model on NYU depth and LSUN"
 
 function:
   name: training_loop
@@ -18,14 +18,18 @@ training:
   test_every_iter: 2000 # test and save the model every so many iterations
   objective:
     params:
-      wlpips: [1000, 1000]
+      wlpips: [ 7000, 7000.0 ]
+      wadversary: 10000
+      mmd_zw_weight: 3500.0
+      mmd_ww_weight: 3000.0
 
 model_initialisation: # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
 resume_training: false
 init_from_stable_diffusion: True
 
 defaults:
-  - data: nyu_depth
+  - data: nyu_depth_lsun_bedroom
   - model: v2-inference-mm
   - training: autoencoder_training_default
+  - override training/discriminator: mm_joint_discriminator_rgb_depth
   - _self_
