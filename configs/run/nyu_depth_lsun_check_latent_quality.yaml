@@ -1,0 +1,26 @@
+# @package _global_
+
+name: "nyu_lsun_shuffled_latent_quality"
+notes: "We check the latent quality of NYU depth autoencoder with shuffled modalities so z is useless"
+outputdir: ../outputs
+
+
+function:
+  name: check_latent_quality
+  kwargs: {}
+
+training:
+  precompute_latents: False
+  force_recompute: False
+  latent_scale_per_channel: False
+  compute_latent_scale: False
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: ../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_19__17_59_57_nyu_lsun_shuffled/model_6000.pt
+
+defaults:
+  - override /ema: dummy_ema
+  - _self_

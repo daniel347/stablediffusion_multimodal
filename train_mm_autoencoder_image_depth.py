@@ -639,7 +639,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     latents = mod("encode", data, avg_z=True)
 
-                    latents_perturbed = latents + (0.05 * torch.std(latents)) * torch.randn_like(latents)
+                    latents_perturbed = latents + (0.01 * torch.std(latents)) * torch.randn_like(latents)
 
                     reconstructions = mod("decode", latents)
                     reconstructions_perturbed = mod("decode", latents_perturbed)
