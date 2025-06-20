@@ -50,7 +50,7 @@ class ZCombinerObj(torch.nn.Module):
         qw_xs = [torch.distributions.Normal(qw_x.mean, qw_x.std) for qw_x in qw_xs]
         qz_x = torch.distributions.Normal(qz_x.mean, qz_x.std)
 
-        loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "mmd_zw": 0}
+        loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "mmd_zw": 0, "adversarial_loss": 0}
 
         lws = []
 
