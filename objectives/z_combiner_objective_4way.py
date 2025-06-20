@@ -59,7 +59,7 @@ class ZCombinerObj4Way(torch.nn.Module):
         for r in range(len(recons)):
             lpx_u = 0
             for d, px_u in enumerate(recons[r]):
-                wlpips_d = self.wlpips[r] if hasattr(self.wlpips, "__getitem__") else self.wlpips
+                wlpips_d = self.wlpips[d] if hasattr(self.wlpips, "__getitem__") else self.wlpips
                 lpx_u = lpx_u + reconstruction_loss(px_u, x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, self.lpips,
                                                     self.channel_weighting[d],
                                                     fail_on_nan=True)
