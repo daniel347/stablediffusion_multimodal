@@ -1,10 +1,10 @@
 #!/bin/bash
 #PBS -l select=1:ncpus=4:mem=24gb:ngpus=1
-#PBS -l walltime=03:30:00
+#PBS -l walltime=06:00:00
 
 eval "$(~/miniconda3/bin/conda shell.bash hook)"
 conda activate mmvae
 export PYTHONPATH="${PYTHONPATH}:${HOME}/python_modules/"
 
 cd $HOME/multimodal_generation/stablediffusion/
-python train_mm_autoencoder_image_depth.py training.objective.params.wadversary=10000 training.objective.params.beta=0.1 training.objective.params.z_close_weight=5000000 training.objective.params.mmd_zw_weight=10000 training.objective.params.mmd_ww_weight=10000 training.num_epochs=4 'name="low_kl_reg' 'notes=We try with a KL regularisation reduced by factor 10 to see if we get sharp results'
+python train_mm_autoencoder_image_depth.py -cn celeba_semseg_autoencoder_train_z_combiner
