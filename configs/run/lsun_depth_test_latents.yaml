@@ -1,0 +1,17 @@
+# @package _global_
+
+outputdir: ../outputs
+device: "cuda:1"
+name: "nyu_4way_z_comb_test_latents"
+notes: "We save the latent space images from the 4 way z combiner for analysis"
+
+function:
+  name: test
+  params: {subepoch: 0, itercount: 0, epochcount: 0}
+
+dataset_name: nyu_depth_lsun
+
+model_initialisation: "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_13__19_00_59_4way_z_combiner/model_4000.pt"
+
+defaults:
+  - override /data: lsun

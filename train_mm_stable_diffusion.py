@@ -47,6 +47,7 @@ import cmmd_pytorch as cmmd
 from utils import save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders, cat_dists_or_tensor_latents
 from reconstruct_model_phema import reconstruct_phema
 import ldm.models.diffusion as diffusion
+import cv2
 
 import random
 from functools import partial
@@ -313,6 +314,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         test_param_name = "model.input_blocks.4.0.in_layers.0.weight"
 
         train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents)
+
+        print(f"Return row: {train_dataset.return_row}")
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank, data_parallel)
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
@@ -409,6 +412,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             with torch.no_grad():
                 for i, dataT in pbar:
+                    print(len(dataT))
+                    print(len(dataT[0]))
                     if return_class:
                         data, classes, row = move_data_to_device(dataT, device=device)
                     else:
@@ -701,8 +706,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     for m, (name, samples) in enumerate(zip(modality, samples_x)):
                         for i, s in enumerate(samples.mean):
-                            s_disp = display_data_fs[m](s.detach().cpu())
-                            tvu.save_image(s_disp, os.path.join(tempdirs[name], f"sample_{name}_{n * gen_batch_size + i}.png"))
+                            s_disp = display_data_fs[m](s.detach().cpu(), opencv=True)
+                            cv2.imwrite(os.path.join(tempdirs[name], f"sample_{name}_{n * gen_batch_size + i}.png"), s_disp)
 
                             if log_to_wandb:
                                 step_num = ((n*gen_batch_size + i + 1) * len(dataloaders["train_loader"])) if log_iterations else n*gen_batch_size + i
@@ -740,10 +745,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             out_nimgs, out_stds = zip(*product(out_nimgs, out_stds))
 
             model_names = [f"model_it{out_es//conf.training.batch_size}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_nimgs, out_stds)]
-            
+
+            """
             it = reconstruct_phema(saves_path, out_std=out_stds, out_nimg=out_nimgs, out_dir=saves_path, epoch_size=conf.training.batch_size)
             for _ in it:
                 pass
+            """
 
             latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
             model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
@@ -753,7 +760,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 logging.info(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
                 load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
                 test_epoch(dataloaders, step, step, step)
-                test_metrics(dataloaders, step, step, step, metrics=["fid"])
+                test_metrics(dataloaders, step, step, step, metrics=["fid", "kid", "cmmd"])
 
                 if enable_wandb:
                     wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)
@@ -1006,13 +1013,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
 
                 epochcount = 0
-                n_iter = conf.training.test_every_iter if "test_every_iter" in conf.training else len(train_loader)
+                n_iter = conf.training.test_every_iter if "test_every_iter" in conf.training else len(dataloaders["train_loader"])
                 train_pbar = tqdm.tqdm(enumerate(dataloaders["train_loader"]), total=len(dataloaders["train_loader"]),
                                        position=rank if data_parallel else 0)
 
-                for subepoch, itercount in enumerate(range(conf.training.start_iter,
-                                                           conf.training.num_epochs * conf.training.test_every_iter + conf.training.start_iter,
-                                                           conf.training.test_every_iter)):
+                for subepoch, itercount in enumerate(range(start_iter,
+                                                           conf.training.num_epochs * n_iter + start_iter,
+                                                           n_iter)):
                     print("============================ starting training =========================")
                     epochcount, train_pbar = train_epoch(dataloaders, subepoch, itercount, epochcount, n_iter, train_pbar)
                     print("============================ finished one epoch =========================")
@@ -1023,7 +1030,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     print("============================ finished computing FID =========================")
 
                     if ray_tune:
-                        #todo make this work with iteration training
+                        # todo make this work with iteration training
                         checkpoint_data = {
                             "epoch": itercount,
                             "net_state_dict": model.state_dict(),

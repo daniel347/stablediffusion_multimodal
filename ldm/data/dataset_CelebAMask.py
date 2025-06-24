@@ -15,6 +15,7 @@ import plotly.express as px
 import tqdm
 import matplotlib.pyplot as plt
 import math
+from pathlib import Path
 
 
 @register_dataset("mm_celeba")
@@ -28,6 +29,7 @@ class MMCelebA(Dataset):
                  p_hor_flip=0,
                  p_colour_jitter=0,
                  return_index=False,
+                 return_row=False,
                  force_reload=False,
                  bisenet_compat=False,
                  single_label=False,
@@ -90,6 +92,7 @@ class MMCelebA(Dataset):
             self.colour_jitter = ColorJitter(0.1, 0.1, 0.1, 0.02)
 
         self.return_index = return_index
+        self.return_row = return_row
         self.force_reload = force_reload
         self.bisenet_compat = bisenet_compat or single_label
         self.single_label = single_label
@@ -152,6 +155,8 @@ class MMCelebA(Dataset):
 
         torch_mask = torch.from_numpy(mask)
 
+        fp = os.path.join(self.img_dir, f"{index}.png") # simply a dummy filename which will be replaced if used
+
         if self.single_label:
             label_mask = self.mask_to_single_labels(torch_mask)
             tvu.save_image(label_mask.unsqueeze(0).float() / 255.0, combined_png_path)
@@ -159,7 +164,7 @@ class MMCelebA(Dataset):
         else:
             # print("saving compressed mask to disk")
             # torch.save(self.encode_compressed_semseg(torch_mask), combined_path)
-            return torch_mask
+            return torch_mask, fp
 
     def decode_compressed_semseg(self, compressed_mask):
         mask = torch.zeros((len(self.semseg_labels), *compressed_mask.shape), dtype=torch.float32)
@@ -175,10 +180,11 @@ class MMCelebA(Dataset):
         return compressed_mask
 
     def read_colour(self, index):
-        img = cv2.imread(os.path.join(self.img_dir, f"{index}.jpg"), cv2.IMREAD_COLOR)
+        fp = os.path.join(self.img_dir, f"{index}.jpg")
+        img = cv2.imread(fp, cv2.IMREAD_COLOR)
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = img.astype(np.float32) / 255  # Normalise
-        return torch.from_numpy(img).permute((2, 0, 1))
+        return torch.from_numpy(img).permute((2, 0, 1)), fp
 
     def hex_to_rgb(self, hex):
         hex_str = hex.lstrip("#")
@@ -194,7 +200,7 @@ class MMCelebA(Dataset):
             mask_inds = torch.where(mask[i, :, :] > 0.5, i, mask_inds)
         return mask_inds
 
-    def semseg_display(self, mask):
+    def semseg_display(self, mask, opencv=False):
         if len(mask.shape) == 2:
             # We have a mask of class indices
             mask = self.index_semseg_to_one_hot(mask, num_classes=len(self.semseg_labels))
@@ -206,7 +212,8 @@ class MMCelebA(Dataset):
 
             semseg_display_colours_t = torch.stack([col for col in self.semseg_display_colours.values()] + [torch.zeros(3)])
             mask_rgb = semseg_display_colours_t[mask_inds.to(int)]
-            return mask_rgb.permute((2, 0, 1))
+
+            mask_out = mask_rgb.permute((2, 0, 1))
         else:
             # Norm so that multiple classes mix colours - We clamp to allow background to be 0 everywhere.
             mask_norm = mask/torch.clamp(mask.sum(dim=0, keepdim=True), 1.0)
@@ -214,9 +221,16 @@ class MMCelebA(Dataset):
 
             for i in range(mask.shape[0]):
                 mask_rgb += self.semseg_display_colours[i][:, None, None] * mask_norm[i, :, :].unsqueeze(0).expand(3, -1, -1).float()
-            return mask_rgb
+            mask_out = mask_rgb
 
-    def colour_display(self, mask):
+        if opencv:
+            return (torch.clamp(mask_out, 0, 1) * 255).to(torch.uint8).permute(1, 2, 0).numpy()[:, :, ::-1]
+        else:
+            return mask_out
+
+    def colour_display(self, mask, opencv=False):
+        if opencv:
+            return (torch.clamp(mask, 0, 1) * 255).to(torch.uint8).permute(1, 2, 0).numpy()[:, :, ::-1]
         return mask
 
     def create_semseg_colour_index(self):
@@ -268,10 +282,12 @@ class MMCelebA(Dataset):
 
     def __getitem__(self, idx):
         index = self.index_list[idx]
+        fp_dict = {}
 
         outs = []
         for mod in self.modality:
-            img = self.mode_readers[mod](index)
+            img, fp = self.mode_readers[mod](index)
+            fp_dict[f"{mod}_path"] = fp
             if isinstance(self.transform, dict) and mod in self.transform:
                 # modality specific transform
                 img = self.transform[mod](img)
@@ -301,5 +317,10 @@ class MMCelebA(Dataset):
 
         if self.return_index:
             return outs, idx
-
-        return outs
+        elif self.return_row:
+            for k in fp_dict.keys():
+                if isinstance(fp_dict[k], Path):
+                    fp_dict[k] = str(fp_dict[k])
+            return outs, fp_dict
+        else:
+            return outs

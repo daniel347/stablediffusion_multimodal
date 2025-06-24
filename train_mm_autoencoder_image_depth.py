@@ -421,6 +421,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount)
                     loss = -loss
 
+
                     if use_adversary:
                         disc_loss = 0
                         if isinstance(model_outs[1][0], list):
@@ -445,6 +446,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 tvu.save_image(s_disp, str(tempdirs[name] / f"sample_{name}_{i * conf.training.batch_size + j}.png"))
 
                     if i == 0:  # select a different scene
+                        for m, (name, dbatch) in enumerate(zip(modality, data)):
+                            dbatch = dbatch.detach().cpu()
+                            dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                            grid = make_grid(dbatch, nrow=conf.training.batch_size)
+                            wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
+
                         # Compute cross-generations, unless we are using z combiner in which case it will be computed below
                         if mod.can_cross_generate and not mod.use_z_comb_network:
                             N_gen = 1
@@ -468,11 +475,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                         if mod.factorised_latent_space:
                             num_zs = len(latents) - NUM_VAES
+                            for j in range(NUM_VAES):
+                                save_and_log_latents(latents[j], f'Latents/wm{j}', runPath, itercount, run)
+
                             for j in range(num_zs):  # Choice of z
-                                latent_w_img = latents[j]
                                 latent_z_img = latents[j + NUM_VAES]
 
-                                save_and_log_latents(latent_w_img, f'Latents/wm{j}', runPath, itercount, run)
                                 save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, itercount, run)
 
                                 # Reconstructions with known w

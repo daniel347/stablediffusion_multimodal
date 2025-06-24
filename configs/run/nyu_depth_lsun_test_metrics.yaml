@@ -1,0 +1,23 @@
+# @package _global_
+
+outputdir: ../outputs
+notes: "We perform generations and compute quality metrics for the latest NYU depth LSUN generation model"
+name: "channel_norm_test_metrics"
+
+function:
+  name: test_metrics
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, metrics: ["fid", "kid"]}
+
+training:
+  precompute_latents: False
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: null
+
+model_initialisation: /home/ds3119/multimodal_generation/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_16__12_05_34_4way_z_comb_channel_norm/model_it24000_ema_0.100.pt
+
+defaults:
+  - override /ema: dummy_ema

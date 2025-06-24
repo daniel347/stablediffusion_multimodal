@@ -1,0 +1,23 @@
+# @package _global_
+
+name: "mmd_ablation"
+notes: "We train the autoencoder without the MMD loss in the latent space"
+
+num_epochs: 10
+
+training:
+  objective:
+    params:
+      mmd_zw_weight: 0.0
+      mmd_ww_weight: 0.0
+
+  objective_is_z_combiner: True
+  lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
+
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_18__20_23_48_obj_hyp_opt/model_2800.pt"
+resume_training: False
+init_from_stable_diffusion: False
+
+defaults:
+  - override training/objective: 4way_z_combiner_objective
+  - _self_

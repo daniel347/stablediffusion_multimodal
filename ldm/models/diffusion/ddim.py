@@ -198,7 +198,6 @@ class DDIMSampler(object):
 
             if tt_count < len(self.timetravel_schedule):
                 tt_start, tt_end = self.timetravel_schedule[tt_count]
-                print(step)
                 if step == tt_start:
                     tt_count += 1
 
@@ -207,7 +206,6 @@ class DDIMSampler(object):
 
                     tend = torch.full((b,), tt_end, device=device, dtype=torch.long)
                     img = self.model.q_sample(pred_x0, tend)
-                    print(f"timetravelling from {tt_start} to {tt_end}")
                     continue
 
 

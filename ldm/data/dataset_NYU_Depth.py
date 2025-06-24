@@ -177,11 +177,17 @@ class NYUDepth(Dataset):
         else:
             return outs
 
-    def depth_display(self, img):
-        return img.repeat(3, 1, 1)
+    def depth_display(self, img, opencv=False):
+        if opencv:
+            return (torch.clamp(img, 0, 1) * 65535).to(torch.uint16)[0].numpy()
+        else:
+            return img.repeat(3, 1, 1)
 
-    def colour_display(self, img):
-        return img
+    def colour_display(self, img, opencv=False):
+        if opencv:
+            return (torch.clamp(img, 0, 1) * 255).to(torch.uint8).permute(1, 2, 0).numpy()[:, :, ::-1]
+        else:
+            return img
 
     def read_colour(self, path):
         img = cv2.imread(path, cv2.IMREAD_COLOR)

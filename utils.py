@@ -421,7 +421,7 @@ def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu', 
             else:
                 val.load_state_dict(sd[key])
 
-    return sd["iteration"]
+    return sd["iteration"] if "iteration" in sd else 0
 
 
 def load_image_datasets(data_conf, precompute_latents=False):
