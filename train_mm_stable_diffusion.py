@@ -63,9 +63,6 @@ log_iterations = True
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-notes = ("We try training diffusion with our new z combiner 4 way training.")
-name = "4way_z_comb_channel_norm"
-
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -738,7 +735,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return metric_scores
 
-        def test_optimum_EMA(dataloaders, out_nimgs, out_stds):
+        def test_optimum_EMA(dataloaders, out_nimgs, out_stds, **test_metric_kwargs):
             saves_path = os.path.dirname(conf.model_initialisation)
             print("saves_path", saves_path)
 
@@ -760,7 +757,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 logging.info(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
                 load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
                 test_epoch(dataloaders, step, step, step)
-                test_metrics(dataloaders, step, step, step, metrics=["fid", "kid", "cmmd"])
+                test_metrics(dataloaders, step, step, step, metrics=["fid", "kid", "cmmd"], **test_metric_kwargs)
 
                 if enable_wandb:
                     wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)

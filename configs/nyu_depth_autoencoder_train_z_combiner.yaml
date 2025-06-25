@@ -5,6 +5,8 @@ device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
 print_freq: 50
 outputdir: /rds/general/user/ds3119/ephemeral/outputs/
+name: "nyu_lsun_ae_z_comb"
+notes: "We train the NYU LSUN autoencoder z combiner"
 
 function:
   name: training_loop
@@ -13,18 +15,26 @@ function:
 dataset_name: nyu_depth
 
 training:
-  test_every_iter: 200  # test and save the model every so many iterations
+  training:
+    test_every_iter: 1000 # test and save the model every so many iterations
+    objective:
+      params:
+        wlpips: [ 7000, 7000.0 ]
+        wadversary: 10000
+        mmd_zw_weight: 3500.0
+        mmd_ww_weight: 3000.0
 
   objective_is_z_combiner: True
   lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
 
-model_initialisation: "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_22__17_03_54_new_ae_arch/model_12000.pt" # "../trained_models/model_8.rar"
+model_initialisation: "../rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_20__20_56_49_nyu_lsun_ae/model_9000.pt" # "../trained_models/model_8.rar"
 resume_training: false
 init_from_stable_diffusion: False
 
 defaults:
-  - data: nyu_depth
+  - data: nyu_depth_lsun_bedroom
   - model: v2-inference-mm
   - training: autoencoder_training_default
   - override training/objective: 4way_z_combiner_objective
+  - override training/discriminator: mm_joint_discriminator_rgb_depth
   - _self_
