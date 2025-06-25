@@ -782,7 +782,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if rank == 0 or not data_parallel:
                         mod = model.module if data_parallel else model
                         save_kwargs = {"discriminator": disc, "discriminator_optimizer": disc_optimizer} if use_adversary else {}
-                        save_checkpoint(None, mod, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt", **save_kwargs)
+                        save_checkpoint(None, mod, optimizer, scheduler, itercount+n_iter, runPath / f"model_{itercount+n_iter}.pt", **save_kwargs)
 
 
         if conf.function.name is not None:

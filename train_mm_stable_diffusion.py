@@ -1063,7 +1063,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                 if torch.allclose(ema_sd["emas"][j][test_param_name].data, ema_sd["emas"][i][test_param_name].data):
                                     print(f"EMA {j} state dict is equal to EMA {i} parameters at the end of subepoch {subepoch}.")
                         """
-                        save_checkpoint(ema, model, optimizer, scheduler, itercount, runPath / f"model_{itercount}.pt")
+                        save_checkpoint(ema, model, optimizer, scheduler, itercount+n_iter, runPath / f"model_{itercount+n_iter}.pt")
                         if test_loss < best_test_loss:
                             pass
                         else:
@@ -1072,7 +1072,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                 print(
                                     f"Early stopping. Best test loss attained in epoch: {subepoch - conf.training.patience}")
                                 logger.info("saving last model")
-                                save_checkpoint(ema, model, optimizer, scheduler, itercount, runPath / "last_model.pt")
+                                save_checkpoint(ema, model, optimizer, scheduler, itercount+n_iter, runPath / "last_model.pt")
 
                                 break
 
