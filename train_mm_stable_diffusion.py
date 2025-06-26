@@ -312,7 +312,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents)
 
-        print(f"Return row: {train_dataset.return_row}")
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank, data_parallel)
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
@@ -654,6 +653,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             return epoch_loss
 
         def test_metrics(dataloaders, subepoch, itercount, epochcount, n_samples=32, use_diffusion=True, reencode_end=False, metrics=["fid", "kid", "cmmd"], log_to_wandb=False):
+            # latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
+            # model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
+            # model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
+
+            print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
+
             if "sampler" in conf:
                 run_params = conf.sampler.run_params
             else:

@@ -15,19 +15,18 @@ function:
 dataset_name: nyu_depth
 
 training:
-  training:
-    test_every_iter: 1000 # test and save the model every so many iterations
-    objective:
-      params:
-        wlpips: [ 7000, 7000.0 ]
-        wadversary: 10000
-        mmd_zw_weight: 3500.0
-        mmd_ww_weight: 3000.0
+  test_every_iter: 1000 # test and save the model every so many iterations
+  objective:
+    params:
+      wlpips: [ 7000, 7000.0 ]
+      wadversary: 10000
+      mmd_zw_weight: 3500.0
+      mmd_ww_weight: 3000.0
 
   objective_is_z_combiner: True
   lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_20__20_56_49_nyu_lsun_ae/model_9000.pt" # "../trained_models/model_8.rar"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_20__20_56_49_nyu_lsun_ae/model_12000.pt" # "../trained_models/model_8.rar"
 resume_training: false
 init_from_stable_diffusion: False
 

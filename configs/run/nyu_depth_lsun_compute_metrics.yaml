@@ -1,0 +1,21 @@
+# @package _global_
+
+name: "4way_z_comb_channel_norm_gen_ema0.1"
+notes: "We generate images and compute metrics for our latest NYU LSUN model"
+outputdir: ../outputs
+
+function:
+  name: test_metrics
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 128}  # {out_nimgs: [1944000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2]}
+
+training:
+  precompute_latents: False
+  force_recompute: False
+  latent_scale_per_channel: True
+  compute_latent_scale: False
+
+model_initialisation: ../outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_16__12_05_34_4way_z_comb_channel_norm/model_it24000_ema_0.100.pt
+
+defaults:
+  - override /ema: dummy_ema
+  - _self_

@@ -1,0 +1,35 @@
+# @package _global_
+
+seed: 1
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
+experiment: "NYU_Depth_Autoencoder"
+print_freq: 50
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
+name: "nyu_lsun_joint"
+notes: "We perform an ablation experiment using just a joint autoencoder"
+
+function:
+  name: training_loop
+  params: {}
+
+dataset_name: nyu_depth_lsun
+
+training:
+  test_every_iter: 3000
+  patience: 10
+  objective:
+    params:
+      wlpips: [ 7000, 7000.0 ]
+      wadversary: 10000
+
+model_initialisation:
+resume_training: false
+init_from_stable_diffusion: True
+
+defaults:
+  - data: nyu_depth_lsun_bedroom
+  - model: v2-inference-mm-non-disentangled-non-seperable
+  - training: autoencoder_training_default
+  - override training/discriminator: mm_joint_discriminator_rgb_depth
+  - override training/objective: non_disentangling_objective
+  - _self_

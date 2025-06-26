@@ -421,7 +421,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount)
                     loss = -loss
 
-
                     if use_adversary:
                         disc_loss = 0
                         if isinstance(model_outs[1][0], list):

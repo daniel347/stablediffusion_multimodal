@@ -178,12 +178,14 @@ class NYUDepth(Dataset):
             return outs
 
     def depth_display(self, img, opencv=False):
+        print("Depth img min: ", img.min().item(), "max:", img.max().item())
         if opencv:
             return (torch.clamp(img, 0, 1) * 65535).to(torch.uint16)[0].numpy()
         else:
             return img.repeat(3, 1, 1)
 
     def colour_display(self, img, opencv=False):
+        print("Colour img min: ", img.min().item(), "max:", img.max().item())
         if opencv:
             return (torch.clamp(img, 0, 1) * 255).to(torch.uint8).permute(1, 2, 0).numpy()[:, :, ::-1]
         else:

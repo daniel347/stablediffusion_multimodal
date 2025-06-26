@@ -7,7 +7,9 @@ notes: "We save the latent space images from the 4 way z combiner for analysis"
 
 function:
   name: test
-  params: {subepoch: 0, itercount: 0, epochcount: 0}
+  params: {subepoch: 0, itercount: 0, epochcount: 0, compute_metrics: True}
+
+
 
 dataset_name: nyu_depth_lsun
 

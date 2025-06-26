@@ -392,11 +392,19 @@ def save_checkpoint(ema, model, optimiser, scheduler, iteration, path, **kwargs)
 def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu', **kwargs):
     sd = torch.load(path, map_location=map_location)
 
-    if "model" in sd:
-        model.load_state_dict(sd["model"])
-    else:
-        logger.warning(f"No model key found in checkpoint, assuming only the model is saved")
-        model.load_state_dict(sd)
+    try:
+        if "model" in sd:
+            model.load_state_dict(sd["model"])
+        else:
+            logger.warning(f"No model key found in checkpoint, assuming only the model is saved")
+            model.load_state_dict(sd)
+    except RuntimeError:
+        # one of the checkpoints is saved slightly differently for some reason
+        if "model" in sd:
+            model.module.load_state_dict(sd["model"])
+        else:
+            logger.warning(f"No model key found in checkpoint, assuming only the model is saved")
+            model.module.load_state_dict(sd)
 
     if ("ema" in sd) and (ema is not None):
         ema.load_state_dict(sd["ema"])
