@@ -3,12 +3,12 @@ device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Stable_Diffusion"
 print_freq: 50
 outputdir: ../outputs # /rds/general/user/ds3119/ephemeral/outputs
-name: "test_gen_ema0.1"
-notes: "We generate some images with the best mm celeba diffusion model (ema0.1)"
+name: "new_hyp_sample_latents"
+notes: "We train diffusion with sampled latent distributions, rather than taking the mean"
 
 function:
-  name: test_metrics  # training_loop  # test_epoch
-  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 128}  # {out_nimgs: [459648], out_stds: [0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.225], n_samples: 256}
+  name: training_loop # test_metrics  # training_loop  # test_epoch
+  kwargs: {} # {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 128}  # {out_nimgs: [459648], out_stds: [0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.225], n_samples: 256}
 
 dataset_name: mm_celeba
 
@@ -21,7 +21,7 @@ training:
   patience: 10
 
   precompute_latents: True
-  force_recompute: False
+  force_recompute: True
   precompute_latents_path: ../../datasets/latents_precompute
   compute_latent_scale: True
   latent_scale_per_channel: True
@@ -32,7 +32,7 @@ model:
       params:
         ckpt_path: ../outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_20__22_34_18_new_hyp_z_comb_training/model_4400.pt
 
-model_initialisation: ../outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_06_24__08_18_56_new_hyp_diff_train/model_it6384_ema_0.100.pt
+model_initialisation: # ../outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_06_24__08_18_56_new_hyp_diff_train/model_it6384_ema_0.100.pt
 init_from_stable_diffusion: False
 
 defaults:
@@ -40,5 +40,5 @@ defaults:
   - model: v2-inference-mm-rgb-semseg
   - training: diffusion_training_default
   - sampler: ddim_timetravel
-  - ema: dummy_ema
+  - ema: power_ema
   - _self_

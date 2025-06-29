@@ -10,10 +10,12 @@ import json
 import torch
 from torchvision.transforms.v2.functional import horizontal_flip
 from torchvision.transforms.v2 import ColorJitter
+from torch.distributions import Normal
 import random
 import glob
 from .register_datasets import register_dataset
 from pathlib import Path
+
 
 @register_dataset("latents")
 class LatentDataset(Dataset):
@@ -35,11 +37,15 @@ class LatentDataset(Dataset):
         return len(self.latents)
 
     def __getitem__(self, idx):
-        latent = torch.load(self.latents[idx], weights_only=True).to("cpu")
+        latent = torch.load(self.latents[idx], weights_only=True)
+        if isinstance(latent, dict):
+            # Return a distribution to support sampling
+            latent = [Normal(latent["mean"].to("cpu"), latent["std"].to("cpu"))]
+
         if not self.return_class and not self.return_index:
-            return latent
+            return latent.to("cpu")
         else:
-            rets = [latent]
+            rets = [latent.to("cpu")]
             if self.return_class:
                 rets.append(self.classes[idx])
             if self.return_index:

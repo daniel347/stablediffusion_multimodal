@@ -125,7 +125,7 @@ def initialise_model(conf):
     return model
 
 
-def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode):
+def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=True):
     avg_z = z_mode == "avg"
     random_z = z_mode == "random"
     channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_channels
@@ -133,7 +133,7 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode):
     if conf.training.precompute_latents:
         latents = data
     else:
-        latents = model_first_stage.encode(data, avg_z=avg_z)
+        latents = model_first_stage.encode(data, avg_z=avg_z, return_dist=sample)
 
     if isinstance(latents, torch.Tensor):
         if latents.shape[1] == channel_u:
@@ -146,8 +146,10 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode):
         if len(latents) > NUM_VAES + 1:
             assert (random_z or isinstance(z_mode, int)), "One of average or random z must be set or a integer supplied to choose one z, or the z-combiner must be used"
             latents = [*latents[:NUM_VAES], random.choice(latents[NUM_VAES:])]
-            return cat_dists_or_tensor_latents(latents)
 
+        if sample:
+            print("sampling latents")
+            return cat_dists_or_tensor_latents([l.sample() for l in latents])
         else:
             return cat_dists_or_tensor_latents(latents)
 
@@ -421,10 +423,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         with autocast(dtype=torch.float16, device_type="cuda"):
                             latents = model_first_stage.encode(data, avg_z=avg_z)
                     else:
-                        latents = model_first_stage.encode(data, avg_z=avg_z)
+                        latents = model_first_stage.encode(data, avg_z=avg_z, return_dist=True)
 
                     if isinstance(latents, list):
-                        latents = torch.cat(latents, dim=1)
+                        if isinstance(latents[0], torch.Tensor):
+                            latents = torch.cat(latents, dim=1)
+                        else:
+                            # We have distributions
+                            latent_means = torch.cat([l.mean for l in latents], dim=1)
+                            latent_stds = torch.cat([l.std for l in latents], dim=1)
+                            latents = {"mean": latent_means, "std": latent_stds}  # Means then stds
 
                     print(latents.shape)
 
