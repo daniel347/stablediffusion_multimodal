@@ -410,13 +410,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             with torch.no_grad():
                 for i, dataT in pbar:
-                    print(len(dataT))
-                    print(len(dataT[0]))
+                    # print(len(dataT))
+                    # print(len(dataT[0]))
                     if return_class:
                         data, classes, row = move_data_to_device(dataT, device=device)
                     else:
                         data, row = move_data_to_device(dataT, device=device)
-                    print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
+                    # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
                     if use_mixed_precision:
@@ -424,17 +424,19 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             latents = model_first_stage.encode(data, avg_z=avg_z)
                     else:
                         latents = model_first_stage.encode(data, avg_z=avg_z, return_dist=True)
-
+                    
+                    dists = False
                     if isinstance(latents, list):
                         if isinstance(latents[0], torch.Tensor):
                             latents = torch.cat(latents, dim=1)
+                            # print(latents.shape)
                         else:
                             # We have distributions
-                            latent_means = torch.cat([l.mean for l in latents], dim=1)
-                            latent_stds = torch.cat([l.std for l in latents], dim=1)
-                            latents = {"mean": latent_means, "std": latent_stds}  # Means then stds
-
-                    print(latents.shape)
+                            dists = True
+                            latents = torch.cat([l.mean for l in latents] + [l.std for l in latents], dim=1)
+                            # latents = {"mean": latent_means, "std": latent_stds}  # Means then stds
+                            # print(f"latent meat shape: {latent_means.shape} std shape: {latent_stds.shape}")
+                            # print(latents.shape)
 
                     for latent, r in zip(latents, row[f"{modality[0]}_path"]):
                         save_path = Path(r.replace(modality[0], "latent"))
@@ -443,7 +445,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                 save_path = out_base_folder / save_path.relative_to(root.parent)  # keep the dataset folder name
                         save_path.parent.mkdir(parents=True, exist_ok=True)
                         # print(save_path)
-                        torch.save(latent.contiguous().cpu(), save_path.with_suffix(".pt"))
+                        if dists:
+                            mean, std = torch.chunk(latent, 2, dim=0)
+                            torch.save({"mean": mean.contiguous().cpu(), "std": std.contiguous().cpu()}, save_path.with_suffix(".pt"))
+                        else:
+                            torch.save(latent.contiguous().cpu(), save_path.with_suffix(".pt"))
 
 
         def train_epoch(dataloaders, subepoch, itercount, epochcount, n_iter, train_pbar):

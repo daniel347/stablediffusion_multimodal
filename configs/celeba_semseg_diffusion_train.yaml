@@ -2,7 +2,7 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Stable_Diffusion"
 print_freq: 50
-outputdir: ../outputs # /rds/general/user/ds3119/ephemeral/outputs
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
 name: "new_hyp_sample_latents"
 notes: "We train diffusion with sampled latent distributions, rather than taking the mean"
 
@@ -22,7 +22,7 @@ training:
 
   precompute_latents: True
   force_recompute: True
-  precompute_latents_path: ../../datasets/latents_precompute
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute
   compute_latent_scale: True
   latent_scale_per_channel: True
 
