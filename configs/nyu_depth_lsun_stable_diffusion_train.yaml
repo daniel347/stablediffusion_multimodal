@@ -20,7 +20,7 @@ training:
 
   precompute_latents: True
   force_recompute: True
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute" # ". ../../datasets/lsun"
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute # ". ../../datasets/lsun"
   compute_latent_scale: True
   latent_scale_per_channel: True
 
@@ -28,7 +28,7 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/"
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt"
 
 model_initialisation:
 #/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_05_28__23_52_01_new_ae_train/model_18000.pt

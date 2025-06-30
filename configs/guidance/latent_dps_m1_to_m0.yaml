@@ -1,0 +1,12 @@
+guider:
+  target: ldm.models.guidance.latent_dps.LatentDPS
+  params:
+    mod_weights: [1.0, 1.0]
+    scale: 0.3
+    manifold_constraint: False
+    curvature_bound: 1000
+
+meas_confs:
+  - null
+  - target: ldm.models.guidance.measurements.IdentityMeasurement
+    params: {}

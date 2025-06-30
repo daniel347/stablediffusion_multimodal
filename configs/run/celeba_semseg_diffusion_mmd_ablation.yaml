@@ -1,0 +1,22 @@
+# @package _global_
+
+name: "mmd_ablation_diff"
+notes: "We train diffusion with our mmd ablation autoencoder. We also employ sampling of the latent space during the diffusion training"
+
+training:
+  precompute_latents: True
+  force_recompute: True
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_mmd_ablation
+  latent_scale_per_channel: True
+  compute_latent_scale: True
+
+  patience: 20
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_27__12_15_36_mmd_ablation_z_comb/model_5200.pt"
+
+defaults:
+  - _self_

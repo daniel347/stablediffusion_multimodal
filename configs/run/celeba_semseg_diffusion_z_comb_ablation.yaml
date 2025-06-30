@@ -1,0 +1,24 @@
+# @package _global_
+
+name: "z_comb_ablation"
+notes: "We train diffusion with our best autoencoder but without z combiner We instead choose one of the zs at random during training. We also employ sampling of the latent space during the diffusion training"
+
+training:
+  precompute_latents: True
+  force_recompute: True
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_z_comb_ablation
+  latent_scale_per_channel: True
+  compute_latent_scale: True
+
+  patience: 20
+
+  z_mode: "random"
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_18__20_23_48_obj_hyp_opt/model_2800.pt"
+
+defaults:
+  - _self_

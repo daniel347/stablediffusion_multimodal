@@ -140,6 +140,7 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
         if sample:
             print("sampling latents")
             latents = torch.distributions.Normal(latents["mean"], latents["std"]).sample()
+            sample = False  # We have finished sampling, so don't try to sample again
         else:
             latents = latents["mean"]
 
@@ -339,8 +340,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         already_precomputed = False
         if conf.training.precompute_latents:
-            latents_train_path = Path(conf.training.precompute_latents_path + "_train") / Path(conf.data.root_data_dir).name
-            latents_val_path = Path(conf.training.precompute_latents_path + "_val") / Path(conf.data.root_data_dir).name
+            latents_train_path = Path(conf.training.precompute_latents_path + "_train") / conf.dataset_name
+            latents_val_path = Path(conf.training.precompute_latents_path + "_val") / conf.dataset_name
             if latents_train_path.exists() and latents_val_path.exists() and not conf.training.force_recompute:
                 # We have already computed the latents
 
@@ -402,7 +403,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return channel_means, channel_stds
 
-        def precompute_latents(dataloaders, split="train", save_folder="latents"):
+        def precompute_latents(dataloaders, split="train", save_folder="latents", dataset_name=None):
             dataloader = dataloaders["train_loader" if split == "train" else "test_loader"]
             model.eval()
 
@@ -416,6 +417,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 pbar = enumerate(dataloader)
 
             out_base_folder = Path(f"{save_folder}_{split}")
+            if dataset_name is not None:
+                out_base_folder = out_base_folder / dataset_name
 
             with torch.no_grad():
                 for i, dataT in pbar:
@@ -1015,11 +1018,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 if conf.training.precompute_latents and not already_precomputed:
                     # Compute the latents and reload the latent dataloader
                     print("Beginning latent computation and saving")
-                    precompute_latents(dataloaders, "train", conf.training.precompute_latents_path)
-                    precompute_latents(dataloaders, "val", conf.training.precompute_latents_path)
+                    precompute_latents(dataloaders, "train", conf.training.precompute_latents_path, dataset_name=conf.dataset_name)
+                    precompute_latents(dataloaders, "val", conf.training.precompute_latents_path, dataset_name=conf.dataset_name)
 
-                    latents_train_path = Path(conf.training.precompute_latents_path + "_train") / Path(conf.data.root_data_dir).name
-                    latents_val_path = Path(conf.training.precompute_latents_path + "_val") / Path(conf.data.root_data_dir).name
+                    latents_train_path = Path(conf.training.precompute_latents_path + "_train") / conf.dataset_name
+                    latents_val_path = Path(conf.training.precompute_latents_path + "_val") / conf.dataset_name
 
                     # Replace the dataloaders with the precomputed latent loaders
                     train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, latents_train_path, latents_val_path)
@@ -1035,8 +1038,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
                     model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
                     model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
-                    print("resaving the first stage model with latent mean and scale")
-                    torch.save(model_first_stage.state_dict(), conf.model.params.first_stage_config.params.ckpt_path)
+                    # print("resaving the first stage model with latent mean and scale")
+                    # torch.save(model_first_stage.state_dict(), conf.model.params.first_stage_config.params.ckpt_path)
 
                 print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
 
