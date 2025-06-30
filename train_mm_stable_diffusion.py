@@ -478,7 +478,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         data, classes = move_data_to_device(dataT, device=device)
                     else:
                         data = move_data_to_device(dataT, device=device)
-                    print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
+                    # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)

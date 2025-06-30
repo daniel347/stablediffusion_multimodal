@@ -344,6 +344,8 @@ def move_data_to_device(data, device="cuda"):
         return data.to(device)
     elif isinstance(data, tuple) or isinstance(data, list):
         return [move_data_to_device(d, device) for d in data]
+    elif isinstance(data, dict):
+        return {k: move_data_to_device(v, device) for k, v in data.items()}
     else:
         return data
 
