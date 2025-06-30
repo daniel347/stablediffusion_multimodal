@@ -134,13 +134,19 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
         latents = data
     else:
         latents = model_first_stage.encode(data, avg_z=avg_z, return_dist=sample)
+   
+    if isinstance(latents, dict):
+        # Assume dict of mean and std
+        if sample:
+            latents = torch.distributions.Normal(latents["mean"], latents["std"]).sample()
+        else:
+            latents = latents["mean"]
 
     if isinstance(latents, torch.Tensor):
         if latents.shape[1] == channel_u:
             return latents
         else:
-            latents = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [
-            model_first_stage.z_channels for _ in range(NUM_VAES)], dim=1)
+            latents = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels for _ in range(NUM_VAES)], dim=1)
         
     if isinstance(latents, list):
         if len(latents) > NUM_VAES + 1:
@@ -469,7 +475,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         data, classes = move_data_to_device(dataT, device=device)
                     else:
                         data = move_data_to_device(dataT, device=device)
-                    # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
+                    print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)

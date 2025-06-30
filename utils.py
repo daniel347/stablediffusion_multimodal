@@ -481,10 +481,15 @@ def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, ra
     test_sampler = DistributedSampler(test_dataset, num_replicas=world_size, rank=rank,
                                       shuffle=False) if data_parallel else None
 
+    train_collate_fn = None # train_dataset.collate_fn if hasattr(train_dataset, "collate_fn") else None 
+    test_collate_fn = None # test_dataset.collate_fn if hasattr(test_dataset, "collate_fn") else None
+
     train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
-                                               shuffle=not data_parallel, sampler=train_sampler, **kwargs)
+                                               shuffle=not data_parallel, sampler=train_sampler,
+                                               collate_fn=train_collate_fn, **kwargs)
     test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
-                                              sampler=test_sampler, **kwargs)
+                                              sampler=test_sampler,
+                                              collate_fn=test_collate_fn, **kwargs)
 
     return train_loader, test_loader
 
