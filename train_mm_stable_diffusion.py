@@ -76,9 +76,9 @@ def cleanup():
     dist.destroy_process_group()
 
 
-def load_precomputed_datasets(conf_data, latent_path):
-    train_dataset = get_dataset("latents", latent_path=latent_path, split="train", **conf_data)
-    test_dataset = get_dataset("latents", latent_path=latent_path, split="val", **conf_data)
+def load_precomputed_datasets(conf_data, latent_path_train, latent_path_val):
+    train_dataset = get_dataset("latents", latent_path=latent_path_train, split="train", **conf_data)
+    test_dataset = get_dataset("latents", latent_path=latent_path_val, split="val", **conf_data)
 
     return train_dataset, test_dataset
 
@@ -136,8 +136,9 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
         latents = model_first_stage.encode(data, avg_z=avg_z, return_dist=sample)
    
     if isinstance(latents, dict):
-        # Assume dict of mean and std
+        # Assume dict of mean and std of Normal distribution
         if sample:
+            print("sampling latents")
             latents = torch.distributions.Normal(latents["mean"], latents["std"]).sample()
         else:
             latents = latents["mean"]
@@ -338,13 +339,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         already_precomputed = False
         if conf.training.precompute_latents:
-            latents_train_path = Path(conf.training.precompute_latents_path + "_train")
-            latents_val_path = Path(conf.training.precompute_latents_path + "_val")
+            latents_train_path = Path(conf.training.precompute_latents_path + "_train") / Path(conf.data.root_data_dir).name
+            latents_val_path = Path(conf.training.precompute_latents_path + "_val") / Path(conf.data.root_data_dir).name
             if latents_train_path.exists() and latents_val_path.exists() and not conf.training.force_recompute:
                 # We have already computed the latents
-                train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, conf.training.precompute_latents_path)
+
+                train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, latents_train_path, latents_val_path)
                 train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank,
                                                                data_parallel)
+                print(f"Latent dataset length train: {len(train_dataset)} val: {len(test_dataset)}")
                 already_precomputed = True
 
         return_class = "return_class" in data_conf_0 and data_conf_0.return_class
@@ -1015,8 +1018,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     precompute_latents(dataloaders, "train", conf.training.precompute_latents_path)
                     precompute_latents(dataloaders, "val", conf.training.precompute_latents_path)
 
+                    latents_train_path = Path(conf.training.precompute_latents_path + "_train") / Path(conf.data.root_data_dir).name
+                    latents_val_path = Path(conf.training.precompute_latents_path + "_val") / Path(conf.data.root_data_dir).name
+
                     # Replace the dataloaders with the precomputed latent loaders
-                    train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, conf.training.precompute_latents_path)
+                    train_dataset, test_dataset = load_precomputed_datasets(data_conf_0, latents_train_path, latents_val_path)
                     train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank,
                                                                    data_parallel)
 

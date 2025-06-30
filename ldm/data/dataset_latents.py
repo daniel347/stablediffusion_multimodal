@@ -23,7 +23,7 @@ class LatentDataset(Dataset):
     def __init__(self,  latent_path, split, modality, return_class=False, return_index=False, **kwargs):
         super().__init__()
 
-        latent_dir = Path(f"{latent_path}_{split}")
+        latent_dir = Path(latent_path)
         self.latents = list(latent_dir.glob("**/*.pt"))
 
         self.modality = modality
