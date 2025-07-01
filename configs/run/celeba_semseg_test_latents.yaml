@@ -2,16 +2,19 @@
 
 outputdir: ../outputs
 device: "cuda:1"
-name: "celeba_4way_z_comb_test_latents"
-notes: "We save the latent space images from the 4 way z combiner for analysis"
+name: "celeba_low_kl_test_latent_std"
+notes: "We check the stds of the latent vectors predicted by the low kl autoencoder"
 
 function:
-  name: test
-  params: {subepoch: 0, itercount: 0, epochcount: 0}
+  name: check_latent_std
+  params: {}
+
+training:
+  batch_size: 8
 
 dataset_name: mm_celeba
 
-model_initialisation: "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_20__22_34_18_new_hyp_z_comb_training/model_4400.pt"
+model_initialisation: "/home/ds3119/multimodal_generation/outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_19__20_12_17_low_kl_reg/model_800.pt"
 
 defaults:
   - override /data: mm_celeba

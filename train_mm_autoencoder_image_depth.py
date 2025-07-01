@@ -750,6 +750,82 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     break
 
+        def check_latent_std():
+            """The model predicts a standard deviation from which z is sampled - this acts as a smoothness parameter for the latent space"""
+
+            itercount = 0
+
+            vaes = model.module.module.vaes if data_parallel else model.module.vaes
+            mod = model.module if data_parallel else model
+            mod.module.use_z_comb_network = False  # Default to using the z combiner when encoding
+
+            w_stds_avg = [0, 0]
+            z_stds_avg = [0, 0]
+
+            with ((torch.no_grad())):
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
+                                          position=rank if data_parallel else 0):
+                    data = move_data_to_device(dataT, device=device)
+                    # print(f"data shapes: {data[0].shape}, {data[1].shape}")
+
+                    for m, (name, dbatch) in enumerate(zip(modality, data)):
+                        dbatch = dbatch.detach().cpu()
+                        dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                        grid = make_grid(dbatch, nrow=8)
+                        wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
+
+                    if mod.module.use_z_comb_network:
+                        *qw_xs, qz_xs = mod("encode", data, return_dist=True)
+                    else:
+                        u = mod("encode", data, avg_z=False)
+                        qw_xs = u[:NUM_VAES]
+                        qz_xs = u[NUM_VAES:]
+                    qw_means = [qw_x.mean for qw_x in qw_xs]
+                    qw_stds = [qw_x.std for qw_x in qw_xs]
+                    z_comb_means = [qz_x.mean for qz_x in qz_xs]
+                    z_comb_stds = [qz_x.std for qz_x in qz_xs]
+
+                    for m, (q_mean, q_std) in enumerate(zip(qw_means, qw_stds)):
+                        save_and_log_latents(q_mean, f'Latents/wm{m}_mean', runPath, i, run)
+                        save_and_log_latents(q_std, f'Latents/wm{m}_std', runPath, i, run)
+
+                        w_stds_avg[m] += torch.mean(q_std).item()
+
+                    for m, (q_mean, q_std) in enumerate(zip(z_comb_means, z_comb_stds)):
+                        save_and_log_latents(q_mean, f'Latents/zm{m}_mean', runPath, i, run)
+                        save_and_log_latents(q_std, f'Latents/zm{m}_std', runPath, i, run)
+
+                        z_stds_avg[m] += torch.mean(q_std).item()
+
+                    print(f"w stds: {[torch.mean(q_std, dim=(1,2,3)) for q_std in qw_stds]}, z stds: {[torch.mean(q_std, dim=(1,2,3)) for q_std in z_comb_stds]}")
+
+                    if i > 10:
+                        break
+
+                    # Perform reconstructions on the noised latents
+                    n_samp = 8
+                    latent_samples = [qw_x.sample(n_samp) for qw_x in qw_xs] + [zcd.sample(n_samp) for zcd in qz_xs]
+                    latent_samples = torch.cat(latent_samples, dim=2)
+                    latent_samples = latent_samples.reshape(-1, *latent_samples.shape[2:])
+
+                    recons = mod("decode", latent_samples)
+                    for k, rec in enumerate(recons):
+                        save_and_log_img(rec, f'Reconstructions/m{k}',
+                                         runPath, display_data_fs[k], i, run, nrow=conf.training.batch_size)
+
+                    # perform interpolation
+                    latent_samples_1 = torch.cat([qw_x.sample() for qw_x in qw_xs] + [zcd.sample() for zcd in qz_xs])
+                    latent_samples_2 = torch.roll(latent_samples_1, 1, dims=0)
+                    latent_samples_interp = torch.stack([(1 - a) * latent_samples_1 + a * latent_samples_2 for a in torch.linspace(0, 1, 8)], dim=1)
+                    latent_samples_interp = latent_samples_interp.reshape(-1, *latent_samples_interp.shape[2:])
+                    recons_interp = mod("decode", latent_samples_interp)
+                    for k, rec in enumerate(recons_interp):
+                        save_and_log_img(rec, f'Interpolation/m{k}',
+                                         runPath, display_data_fs[k], i, run, nrow=conf.training.batch_size)
+
+            print(f"w avg std: {[w_std/i for w_std in w_stds_avg]}, z avg std: {[zsa/i for zsa in z_stds_avg]}")
+
+
         def training_loop():
             best_test_loss = 1e20
             test_worsening_count = 0
