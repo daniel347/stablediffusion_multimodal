@@ -66,7 +66,7 @@ class NonDisentanglingAE(nn.Module):
 
         if ckpt_path is not None:
             print("Loading MMVAE checkpoint from {params.ckpt_path}")
-            ckpt = torch.load(ckpt_path)
+            ckpt = torch.load(ckpt_path, map_location="cpu")
             ckpt = remove_module_prefix(ckpt)
             missing, unexpected = self.load_state_dict(ckpt, strict=False)
             if len(missing) > 0:

@@ -46,6 +46,7 @@ params:
       lik_dists: [ Laplace, Laplace]
       final_acts: [ identity, identity ]
       llik_scales: [ 1.0,  5.0 ]
+      scale_per_channel: False
 
       vae_params:
         - target: ldm.models.autoencoder.AutoencoderKL  # RGB images

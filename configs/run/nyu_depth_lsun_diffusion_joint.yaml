@@ -19,5 +19,5 @@ model:
         ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_21_31_nyu_lsun_joint/model_12000.pt"
 
 defaults:
-  - model: v2-inference-mm-non-disentangled-non-seperable
+  - override /model: v2-inference-mm-non-disentangled-non-seperable 
   - _self_
