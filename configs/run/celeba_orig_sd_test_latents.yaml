@@ -1,0 +1,24 @@
+# @package _global_
+
+outputdir: ../outputs
+device: "cuda:1"
+name: "celeba_orig_sd_test_latent_std"
+notes: "We check the stds of the latent vectors predicted by the original_stable diffusion autoencoder"
+
+function:
+  name: check_latent_std
+  params: {}
+
+training:
+  batch_size: 8
+
+dataset_name: mm_celeba
+
+model_initialisation: # "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_20__22_34_18_new_hyp_z_comb_training/model_4400.pt"
+
+data:
+  modality: ["colour"]
+
+defaults:
+  - override /data: mm_celeba
+  - override /model: v2-inference-rgb-orig
