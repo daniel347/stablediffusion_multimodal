@@ -754,13 +754,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 for mod in modality:
                     if mod in ["colour", "depth"]:
                         split = "test" if dataset_name == "nyu_depth" else "val"
-                        score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
-                        if enable_wandb:
-                            wandb.log({f"{met}_{mod}": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
+                        try:
+                            score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
+                            if enable_wandb:
+                                wandb.log({f"{met}_{mod}": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
-                        scores.append(score)
-
-                        print(f'====> {met} {mod}: {score:.2f}')
+                            scores.append(score)
+                            print(f'====> {met} {mod}: {score:.2f}')
+                        except Exception:
+                            print(f"Error computing {met} for {mod} in {dataset_name}, skipping")
+                            scores.append(None)
                     else:
                         scores.append(None)
 
@@ -776,15 +779,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             model_names = [f"model_it{out_es//conf.training.batch_size}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_nimgs, out_stds)]
 
-            """
             it = reconstruct_phema(saves_path, out_std=out_stds, out_nimg=out_nimgs, out_dir=saves_path, epoch_size=conf.training.batch_size)
             for _ in it:
                 pass
-            """
 
-            latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
-            model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
-            model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
+            # latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
+            # model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
+            # model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
 
             for step, name in enumerate(model_names):
                 logging.info(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
@@ -1059,7 +1060,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     test_loss = test_epoch(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished testing =========================")
-                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount, metrics=["fid", "kid"])
+                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished computing FID =========================")
 
                     if ray_tune:
