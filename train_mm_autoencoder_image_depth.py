@@ -687,7 +687,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
             mod = model.module if data_parallel else model
-            mod.module.use_z_comb_network = True  # Default to using the z combiner when encoding
 
             with ((torch.no_grad())):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
@@ -702,9 +701,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
                     latents = mod("encode", data)
+
                     if isinstance(latents, list):
                         latents = cat_dists_or_tensor_latents(latents)
-                        print(latents.shape)
+                        print(f"Latent shape: {latents.shape}")
 
                     for c in range(latents.shape[1]):
                         print(f"Normalising channel {c}")
@@ -718,6 +718,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                    "orig_channel_std": channel_std[c].detach().cpu(),
                                    "orig_channel_mean": channel_mean[c].detach().cpu()}, step=itercount)
 
+                        if latent_norm.shape[1] > mod.w_channels * NUM_VAES + mod.z_channels:
+                            # We dont use z combiner, so select the z we are scaling, or z0 by default
+                            z_ind = max((c - mod.w_channels * NUM_VAES) // mod.z_channels, 0)
+                            print("using z index:", z_ind)
+                            z_start = mod.w_channels * NUM_VAES + z_ind * mod.z_channels
+                            z_end = z_start + mod.z_channels
+                            latent_norm = torch.cat([latent_norm[:, :mod.w_channels * NUM_VAES], latent_norm[:, z_start:z_end]], dim=1)
+
                         reconstructions = mod("decode", latent_norm)
 
                         for k, rec in enumerate(reconstructions):
@@ -727,7 +735,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         itercount += 1
 
                     # add a fixed amount of noise to each channel and measure the reconstruction error
-                    baseline_recon = mod("decode", latents)
+                    baseline_recon = mod("decode", latents[:, :mod.w_channels * NUM_VAES + mod.z_channels])
                     baseline_error = [torch.nn.functional.mse_loss(d, b.mean) for d, b in zip(data, baseline_recon)]
                     noise = torch.randn_like(latents)
 
@@ -736,6 +744,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     for c in range(latents.shape[1]):
                         latent_noised = copy.deepcopy(latents)
                         latent_noised[:, c] += 0.2 * noise[:, 0]  # we add the same noise to all channels incase there is a "black hole"
+
+                        if latent_noised.shape[1] > mod.w_channels * NUM_VAES + mod.z_channels:
+                            # We dont use z combiner, so select the z we are scaling, or z0 by default
+                            z_ind = max((c - mod.w_channels * NUM_VAES) // mod.z_channels, 0)
+                            print("using z index:", z_ind)
+                            z_start = mod.w_channels * NUM_VAES + z_ind * mod.z_channels
+                            z_end = z_start + mod.z_channels
+                            latent_noised = torch.cat([latent_noised[:, :mod.w_channels * NUM_VAES], latent_noised[:, z_start:z_end]], dim=1)
 
                         recons = mod("decode", latent_noised)
                         error = [torch.nn.functional.mse_loss(d, r.mean) for d, r in zip(data, recons)]
@@ -757,7 +773,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
             mod = model.module if data_parallel else model
-            mod.module.use_z_comb_network = False  # Default to using the z combiner when encoding
 
             w_stds_avg = [0, 0]
             z_stds_avg = [0, 0]
