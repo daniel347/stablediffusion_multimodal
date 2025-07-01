@@ -21,6 +21,8 @@ import copy
 import logging
 logger = logging.getLogger(__name__)
 from torch.utils.data import DistributedSampler
+from image_diversity import ClipMetrics, InceptionMetrics
+from pathlib import Path
 
 # Constants
 class Constants(object):
@@ -498,9 +500,32 @@ def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, ra
 
 def cat_dists_or_tensor_latents(latents):
     if all([isinstance(l, torch.Tensor) for l in latents]):
-        # Tensors
+        # Tensorble
         latents = torch.cat(latents, dim=1)
     else:
         # Distributions
         latents = torch.cat([l.mean for l in latents], dim=1)
     return latents
+
+
+class DiversityMetrics():
+
+    def __init__(self, name):
+        self.name = name
+        if name == "tie":
+            self.metric = InceptionMetrics()
+        elif name == "tce":
+            self.metric = ClipMetrics()
+
+    def __call__(self, folder, n_eigs=None, **kwargs):
+        n_imgs = len(Path(folder).glob("**/*.png"))
+
+        if self.name == "tie":
+            if n_eigs is None:
+                n_eigs = min(2048, n_imgs)  # full number if possible
+            return self.metric.tie(folder, n_eigs=n_eigs)
+        elif self.name == "tce":
+            if n_eigs is None:
+                n_eigs = min(768, n_imgs)  # full number if possible
+            return self.metric.tce(folder,n_eigs=n_eigs)
+
