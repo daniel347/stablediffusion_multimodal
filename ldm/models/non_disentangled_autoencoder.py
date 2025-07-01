@@ -67,7 +67,13 @@ class NonDisentanglingAE(nn.Module):
         if ckpt_path is not None:
             print("Loading MMVAE checkpoint from {params.ckpt_path}")
             ckpt = torch.load(ckpt_path, map_location="cpu")
+            if "model" in ckpt:
+                ckpt = ckpt["model"]
             ckpt = remove_module_prefix(ckpt)
+            if "latent_mean" in ckpt and ckpt["latent_mean"].shape != self.latent_mean.shape:
+                del ckpt["latent_mean"]
+            if "latent_scale" in ckpt and ckpt["latent_scale"].shape != self.latent_scale.shape:
+                del ckpt["latent_scale"]
             missing, unexpected = self.load_state_dict(ckpt, strict=False)
             if len(missing) > 0:
                 print(f"Missing Keys:\n {missing}")
