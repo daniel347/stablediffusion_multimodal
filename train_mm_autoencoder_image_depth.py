@@ -444,7 +444,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 s_disp = display_data_fs[m](img.detach().cpu())
                                 tvu.save_image(s_disp, str(tempdirs[name] / f"sample_{name}_{i * conf.training.batch_size + j}.png"))
 
-                    if i == 0:  # select a different scene
+                    if i == 25:  # select a different scene
                         for m, (name, dbatch) in enumerate(zip(modality, data)):
                             dbatch = dbatch.detach().cpu()
                             dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
@@ -505,6 +505,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                     save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
                                                      runPath, display_data_fs[k], itercount, run)
                         else:
+                            save_and_log_latents(latents, f'Latents/u', runPath, itercount, run)
                             reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
 
                             for k, rec in enumerate(reconstructions):

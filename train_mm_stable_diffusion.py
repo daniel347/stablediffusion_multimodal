@@ -150,15 +150,16 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
         else:
             latents = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels for _ in range(NUM_VAES)], dim=1)
         
-    if isinstance(latents, list):
+    if isinstance(latents, list) or isinstance(latents, tuple):
         if len(latents) > NUM_VAES + 1:
             assert (random_z or isinstance(z_mode, int)), "One of average or random z must be set or a integer supplied to choose one z, or the z-combiner must be used"
             latents = [*latents[:NUM_VAES], random.choice(latents[NUM_VAES:])]
 
         if sample:
-            print("sampling latents")
+            print("sampling chosen latents")
             return cat_dists_or_tensor_latents([l.sample() for l in latents])
         else:
+            print("concatenating chosen latents")
             return cat_dists_or_tensor_latents(latents)
 
 

@@ -9,8 +9,8 @@ name: "nyu_lsun_joint"
 notes: "We perform an ablation experiment using just a joint autoencoder"
 
 function:
-  name: training_loop
-  params: {}
+  name: test
+  params: {subepoch: 0, itercount: 0, epochcount: 0}
 
 dataset_name: nyu_depth_lsun
 
@@ -22,9 +22,9 @@ training:
       wlpips: [ 7000, 7000.0 ]
       wadversary: 10000
 
-model_initialisation:
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_21_31_nyu_lsun_joint/model_12000.pt"
 resume_training: false
-init_from_stable_diffusion: True
+init_from_stable_diffusion: False
 
 defaults:
   - data: nyu_depth_lsun_bedroom
