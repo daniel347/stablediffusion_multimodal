@@ -5,7 +5,7 @@ notes: "We try to optimise the EMA for the nyu_lsun_ae_diff model."
 
 function:
   name: test_optimum_EMA
-  kwargs: {out_nimgs: [4320000, 3672000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2]}
+  kwargs: {out_nimgs: [4320000, 3672000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256}
 
 training:
   precompute_latents: True
