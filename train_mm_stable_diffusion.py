@@ -791,7 +791,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 logging.info(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
                 load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
                 test_epoch(dataloaders, step, step, step)
-                test_metrics(dataloaders, step, step, step, metrics=["fid", "kid", "cmmd"], **test_metric_kwargs)
+                test_metrics(dataloaders, step, step, step, **test_metric_kwargs)
 
                 if enable_wandb:
                     wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)

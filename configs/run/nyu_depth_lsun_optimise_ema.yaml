@@ -11,7 +11,7 @@ training:
   precompute_latents: True
   force_recompute: False
   latent_scale_per_channel: True
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_2
   compute_latent_scale: True
 
 model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_01__04_10_09_nyu_lsun_ae_diff/model_60000.pt

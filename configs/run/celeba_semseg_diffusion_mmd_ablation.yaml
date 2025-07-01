@@ -5,7 +5,7 @@ notes: "We train diffusion with our mmd ablation autoencoder. We also employ sam
 
 training:
   precompute_latents: True
-  force_recompute: True
+  force_recompute: False
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_mmd_ablation
   latent_scale_per_channel: True
   compute_latent_scale: True

@@ -2,7 +2,6 @@
 
 name: "z_comb_ablation"
 notes: "We train diffusion with our best autoencoder but without z combiner We instead choose one of the zs at random during training. We also employ sampling of the latent space during the diffusion training"
-device: "cpu"
 
 training:
   precompute_latents: True
