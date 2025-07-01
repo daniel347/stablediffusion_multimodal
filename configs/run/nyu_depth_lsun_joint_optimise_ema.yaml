@@ -1,0 +1,22 @@
+# @package _global_
+
+name: "nyu_lsun_joint_diff_optimise_ema"
+notes: "We try to optimise the EMA for the nyu_lsun_joint_diff model."
+
+function:
+  name: test_optimum_EMA
+  kwargs: {out_nimgs: [4320000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256}
+
+training:
+  precompute_latents: True
+  force_recompute: False
+  latent_scale_per_channel: True
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_joint
+  compute_latent_scale: True
+
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_01__09_56_18_nyu_lsun_joint_diff/model_60000.pt
+
+defaults:
+  - override /model: v2-inference-mm-non-disentangled-non-seperable
+  - override /ema: dummy_ema
+  - _self_
