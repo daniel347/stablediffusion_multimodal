@@ -1,15 +1,18 @@
 # @package _global_
 
-outputdir: ../outputs
-notes: "We perform generations and compute quality metrics for the latest NYU depth LSUN generation model"
-name: "channel_norm_test_metrics"
+name: "nyu_lsun_ae_diff_test_metrics"
+notes: "We test metrics for the nyu_lsun_ae_diff model with optimised ema of std 0.175"
 
 function:
   name: test_metrics
-  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, metrics: ["fid", "kid"]}
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True}
 
 training:
-  precompute_latents: False
+  precompute_latents: True
+  force_recompute: False
+  latent_scale_per_channel: True
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_2
+  compute_latent_scale: True
 
 model:
   params:
@@ -17,7 +20,8 @@ model:
       params:
         ckpt_path: null
 
-model_initialisation: /home/ds3119/multimodal_generation/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_16__12_05_34_4way_z_comb_channel_norm/model_it24000_ema_0.100.pt
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_01__04_10_09_nyu_lsun_ae_diff/model_it60000_ema_0.175.pt
 
 defaults:
   - override /ema: dummy_ema
+  - _self_
