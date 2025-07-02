@@ -518,14 +518,14 @@ class DiversityMetrics():
             self.metric = ClipMetrics()
 
     def __call__(self, folder, n_eigs=None, **kwargs):
-        n_imgs = len(Path(folder).glob("**/*.png"))
+        n_imgs = len(list(Path(folder).glob("**/*.png")))
 
         if self.name == "tie":
             if n_eigs is None:
                 n_eigs = min(128, n_imgs)  # full number if possible
-            return self.metric.tie(folder, n_eigs=n_eigs)
+            return self.metric.tie(folder) # , n_eigs=n_eigs)
         elif self.name == "tce":
             if n_eigs is None:
                 n_eigs = min(128, n_imgs)  # full number if possible
-            return self.metric.tce(folder,n_eigs=n_eigs)
+            return self.metric.tce(folder) # ,n_eigs=n_eigs)
 
