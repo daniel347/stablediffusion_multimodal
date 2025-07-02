@@ -761,7 +761,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                             scores.append(score)
                             print(f'====> {met} {mod}: {score:.2f}')
-                        except Exception:
+                        except Exception as e:
+                            print(e)
                             print(f"Error computing {met} for {mod} in {dataset_name}, skipping")
                             scores.append(None)
                     else:

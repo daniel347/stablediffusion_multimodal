@@ -522,10 +522,10 @@ class DiversityMetrics():
 
         if self.name == "tie":
             if n_eigs is None:
-                n_eigs = min(2048, n_imgs)  # full number if possible
+                n_eigs = min(128, n_imgs)  # full number if possible
             return self.metric.tie(folder, n_eigs=n_eigs)
         elif self.name == "tce":
             if n_eigs is None:
-                n_eigs = min(768, n_imgs)  # full number if possible
+                n_eigs = min(128, n_imgs)  # full number if possible
             return self.metric.tce(folder,n_eigs=n_eigs)
 

@@ -688,6 +688,21 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             vaes = model.module.module.vaes if data_parallel else model.module.vaes
             mod = model.module if data_parallel else model
 
+            w_channels = mod.module.w_channels
+            z_channels = mod.module.z_channels
+            u_channels = w_channels * NUM_VAES + z_channels
+
+            def select_z_channel(latent, c):
+                # select the z channel we are scaling, or z0 by default
+                if latent.shape[1] > u_channels:
+                    z_ind = max((c - w_channels * NUM_VAES) // z_channels, 0)
+                    print("using z index:", z_ind)
+                    z_start = w_channels * NUM_VAES + z_ind * z_channels
+                    z_end = z_start + z_channels
+                    latent = torch.cat([latent[:, :w_channels * NUM_VAES], latent[:, z_start:z_end]], dim=1)
+                return latent
+
+
             with ((torch.no_grad())):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
@@ -718,13 +733,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                    "orig_channel_std": channel_std[c].detach().cpu(),
                                    "orig_channel_mean": channel_mean[c].detach().cpu()}, step=itercount)
 
-                        if latent_norm.shape[1] > mod.w_channels * NUM_VAES + mod.z_channels:
-                            # We dont use z combiner, so select the z we are scaling, or z0 by default
-                            z_ind = max((c - mod.w_channels * NUM_VAES) // mod.z_channels, 0)
-                            print("using z index:", z_ind)
-                            z_start = mod.w_channels * NUM_VAES + z_ind * mod.z_channels
-                            z_end = z_start + mod.z_channels
-                            latent_norm = torch.cat([latent_norm[:, :mod.w_channels * NUM_VAES], latent_norm[:, z_start:z_end]], dim=1)
+                        latent_norm = select_z_channel(latent_norm, c)
 
                         reconstructions = mod("decode", latent_norm)
 
@@ -735,7 +744,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         itercount += 1
 
                     # add a fixed amount of noise to each channel and measure the reconstruction error
-                    baseline_recon = mod("decode", latents[:, :mod.w_channels * NUM_VAES + mod.z_channels])
+                    baseline_recon = mod("decode", latents[:, :w_channels * NUM_VAES + z_channels])
                     baseline_error = [torch.nn.functional.mse_loss(d, b.mean) for d, b in zip(data, baseline_recon)]
                     noise = torch.randn_like(latents)
 
@@ -744,14 +753,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     for c in range(latents.shape[1]):
                         latent_noised = copy.deepcopy(latents)
                         latent_noised[:, c] += 0.2 * noise[:, 0]  # we add the same noise to all channels incase there is a "black hole"
-
-                        if latent_noised.shape[1] > mod.w_channels * NUM_VAES + mod.z_channels:
-                            # We dont use z combiner, so select the z we are scaling, or z0 by default
-                            z_ind = max((c - mod.w_channels * NUM_VAES) // mod.z_channels, 0)
-                            print("using z index:", z_ind)
-                            z_start = mod.w_channels * NUM_VAES + z_ind * mod.z_channels
-                            z_end = z_start + mod.z_channels
-                            latent_noised = torch.cat([latent_noised[:, :mod.w_channels * NUM_VAES], latent_noised[:, z_start:z_end]], dim=1)
+                        latent_noised = select_z_channel(latent_noised, c)
 
                         recons = mod("decode", latent_noised)
                         error = [torch.nn.functional.mse_loss(d, r.mean) for d, r in zip(data, recons)]
