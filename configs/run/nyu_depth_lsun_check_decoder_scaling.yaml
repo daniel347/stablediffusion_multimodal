@@ -14,7 +14,7 @@ training:
   latent_scale_per_channel: False
   compute_latent_scale: False
 
-model_initialisation: ../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_19__17_59_57_nyu_lsun_shuffled/model_6000.pt
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_19__17_59_57_nyu_lsun_shuffled/model_6000.pt
 
 defaults:
   - _self_

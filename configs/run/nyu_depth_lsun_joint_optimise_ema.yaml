@@ -14,6 +14,12 @@ training:
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_joint
   compute_latent_scale: True
 
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: null
+
 model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_01__09_56_18_nyu_lsun_joint_diff/model_60000.pt
 
 defaults:

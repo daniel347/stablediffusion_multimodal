@@ -5,7 +5,7 @@ notes: "We compute metrics with the mmd ablation ema optimised diffusion model"
 
 function:
   name: test_metrics
-  kwargs: {n_samples: 128}
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 256}
 
 training:
   precompute_latents: True
