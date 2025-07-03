@@ -25,6 +25,7 @@ from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 import torchvision.utils as tvu
 from torch.amp import GradScaler, autocast
+from torchvision.transforms import Resize, InterpolationMode
 
 import ray
 from ray import tune
@@ -43,6 +44,8 @@ from ldm.data import get_dataset, MMCelebA
 from objectives.objective_util import MMDGaussianLoss
 from ldm.modules.ema import DummyEMA
 import pyiqa
+from pyiqa.archs.fid_arch import frechet_distance, kernel_distance
+from py
 import cmmd_pytorch as cmmd
 from utils import (save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config,
                    save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders, cat_dists_or_tensor_latents,
@@ -681,7 +684,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return epoch_loss
 
-        def generate(dataloaders, subepoch, itercount, epochcount, n_samples=64, log_to_wandb=False, folder_name=None):
+        def generate(dataloaders, subepoch, itercount, epochcount, n_samples=64, log_to_wandb=False, folder_name=None, save_latents=False):
             print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
 
             if "sampler" in conf:
@@ -699,6 +702,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 tempdir = os.path.join(runPath, f'{folder_name}_{mod}')
                 os.makedirs(tempdir, exist_ok=True)
                 tempdirs[mod] = tempdir
+
+            if save_latents:
+                tempdir = os.path.join(runPath, f'{folder_name}_latent')
+                os.makedirs(tempdir, exist_ok=True)
+                tempdirs["latent"] = tempdir
 
             if enable_pbars:
                 pbar = tqdm.tqdm(range(n_batches))
@@ -721,6 +729,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                              **run_params)
 
                     latents = model_first_stage.scale_latents(latents, reverse=True)
+                    if save_latents:
+                        for b, latent in enumerate(latents):
+                            save_path = Path(tempdirs["latent"]) / f"latent_{n * gen_batch_size + b}.pt"
+                            torch.save({"mean": latent.contiguous().mean.cpu(), "std": latent.contiguous().std.cpu()}, save_path)
+
                     samples_x = model_first_stage.decode(latents)
 
                     for m, (name, samples) in enumerate(zip(modality, samples_x)):
@@ -1011,6 +1024,101 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             print(f"MMD loss of latents: {mmd_loss.item()}")
 
             # check smoothness by perturbing latents
+
+        def compute_latent_metrics(dataloaders,
+                                   subepoch,
+                                   itercount,
+                                   epochcount,
+                                   n_samples=256,
+                                   metrics=["fid", "kid", "mmd"],
+                                   folder_name=None,
+                                   gen_samples=True,
+                                   compute_refs=False,
+                                   ref_feat_path=None,
+                                   **generate_kwargs):
+
+            metric_outs = {}
+
+            def compute_latent_feats(dataloader):
+                if enable_pbars:
+                    pbar = tqdm.tqdm(enumerate(dataloader),
+                                     total=len(dataloader),
+                                     position=rank if data_parallel else 0)
+                else:
+                    pbar = enumerate(dataloader)
+
+                inseption_feats = []
+                mmd_feats = []  # simply flattened latents
+
+                fid_resize = Resize((299, 299), interpolation=InterpolationMode.BICUBIC)
+                fid_model = pyiqa.create_metric("fid", device=device).net.model
+
+                with (torch.no_grad(), ema.ema_scope("Epoch test")):
+                    for i, dataT in pbar:
+                        if return_class:
+                            data, classes = move_data_to_device(dataT, device=device)
+                        else:
+                            data = move_data_to_device(dataT, device=device)
+
+                        latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                        latents = model_first_stage.scale_latents(latents)
+                        n_chans = latents.shape[1]
+                        batch_size = latents.shape[0]
+
+                        if "mmd" in metrics:
+                            latents_flat = latents.reshape(batch_size, -1)
+                            mmd_feats.append(latents_flat.detach().cpu())
+
+                        if "fid" in metrics or "kid" in metrics:
+                            latents = latents / 2  # scale lower so more of the values are within [-1, 1]
+                            latents = fid_resize(latents)
+                            latents_grey = latents.reshape(-1, latents.shape[2:]).unsqueeze(1)
+                            latents_grey = latents_grey.expand((1, 3, 1, 1))
+
+                            feat = fid_model(latents_grey.to(device), False, False)
+                            feat = feat[0].squeeze(-1).squeeze(-1).detach().cpu()
+                            feat = feat.reshape(batch_size, n_chans, -1)
+                            inseption_feats.append(feat)
+
+                    return torch.cat(inseption_feats, dim=0), torch.cat(mmd_feats, dim=0)
+
+            if compute_refs:
+                ref_incep_feats, ref_mmd_feats = compute_latent_feats(dataloaders["test_loader"])
+                save_path = Path(runPath) / "ref_latent_feats.pt"
+                torch.save({"inception": ref_incep_feats, "mmd": ref_mmd_feats}, save_path)
+            else:
+                assert ref_feat_path is not None
+                ref_feats = torch.load(ref_feat_path, map_location="cpu")
+                ref_incep_feats, ref_mmd_feats = ref_feats["inception"], ref_feats["mmd"]
+
+            if gen_samples:
+                tempdirs = generate(dataloaders, subepoch, itercount, epochcount, folder_name=folder_name, save_latents=True, **generate_kwargs)
+            else:
+                tempdirs = {"latents": folder_name} if folder_name else {"latents": os.path.join(runPath, 'temp_fid_latent')}
+
+            gen_dataset = get_dataset("latents", latent_path=tempdirs["latent"], split="train", modality=["latent"])
+            gen_dataloader = torch.utils.data.DataLoader(gen_dataset, batch_size=conf.training.batch_size, shuffle=False, num_workers=4, pin_memory=True)
+
+            gen_insep_feats, gen_mmd_feats = compute_latent_metrics(gen_dataloader)
+
+            if "fid" in metrics:
+                for c in range(gen_insep_feats.shape[1]):
+                    mu1, sig1 = np.mean(ref_incep_feats[:, c].numpy(), axis=0), np.cov(ref_incep_feats[:, c].numpy(), rowvar=False)
+                    mu2, sig2 = np.mean(gen_insep_feats[:, c].numpy(), axis=0), np.cov(gen_insep_feats[:, c].numpy(), rowvar=False)
+                    metric_outs["fid"] += frechet_distance(mu1, sig1, mu2, sig2)
+
+            if "kid" in metrics:
+                for c in range(gen_insep_feats.shape[1]):
+                    metric_outs["kid"] = kernel_distance(ref_incep_feats[:, c].numpy(), gen_insep_feats[:, c].numpy())
+
+            if "mmd" in metrics:
+                metric_outs["mmd"] = kernel_distance(ref_mmd_feats.numpy(), gen_mmd_feats.numpy())
+
+            if enable_wandb:
+                for met, score in metric_outs.items():
+                    wandb.log({f"{met}_latent": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
+
+            return metric_outs
 
 
         def training_loop(dataloaders):
