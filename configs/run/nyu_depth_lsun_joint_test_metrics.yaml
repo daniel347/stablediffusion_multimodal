@@ -5,7 +5,7 @@ notes: "We compute metrics for the nyu_lsun_joint_diff model, with ema std 0.05.
 
 function:
   name: test_metrics
-  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: False, metrics: ["tce", "tie", "cmmd"], folder_name: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_02__16_49_22_nyu_lsun_join_dif_ema_opt_test_metrics/temp_fid"}
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: False, metrics: ["tce", "tie", "cmmd"], folder_name: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_02__16_49_22_nyu_lsun_joint_diff_ema_opt_test_metrics/temp_fid"}
 
 training:
   precompute_latents: True
