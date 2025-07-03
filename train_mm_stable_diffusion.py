@@ -1071,7 +1071,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         if "fid" in metrics or "kid" in metrics:
                             latents = latents / 2  # scale lower so more of the values are within [-1, 1]
                             latents = fid_resize(latents)
-                            latents_grey = latents.reshape(-1, latents.shape[2:]).unsqueeze(1)
+                            latents_grey = latents.reshape(-1, *latents.shape[2:]).unsqueeze(1)
                             latents_grey = latents_grey.expand((1, 3, 1, 1))
 
                             feat = fid_model(latents_grey.to(device), False, False)
