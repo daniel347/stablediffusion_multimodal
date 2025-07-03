@@ -45,7 +45,6 @@ from objectives.objective_util import MMDGaussianLoss
 from ldm.modules.ema import DummyEMA
 import pyiqa
 from pyiqa.archs.fid_arch import frechet_distance, kernel_distance
-from py
 import cmmd_pytorch as cmmd
 from utils import (save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config,
                    save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders, cat_dists_or_tensor_latents,

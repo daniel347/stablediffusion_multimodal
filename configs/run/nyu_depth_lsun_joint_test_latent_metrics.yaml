@@ -4,13 +4,12 @@ name: "nyu_lsun_joint_diff_ema_opt_test_latent_metrics"
 notes: "We compute latent space FID, KID and MMD for the nyu_lsun_joint_diff model. This may help tell whether this model trains better than the disentangled model. We test the code and computation before running on a large generation set."
 
 function:
-  name: test_metrics
+  name: compute_latent_metrics
   kwargs: {subepoch: 0,
            itercount: 0,
            epochcount: 0,
            n_samples: 256,
            gen_samples: True,
-           metrics: ["tce", "tie", "cmmd"],
            compute_refs: True}
 
 training:
