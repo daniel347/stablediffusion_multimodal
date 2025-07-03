@@ -1,11 +1,11 @@
 # @package _global_
 
 name: "nyu_lsun_ae_diff_test_metrics"
-notes: "We test metrics for the nyu_lsun_ae_diff model with optimised ema of std 0.175"
+notes: "We test metrics for the nyu_lsun_ae_diff model with optimised ema of std 0.175. We recompute TCE and TIE because of an error in the depth computation."
 
 function:
   name: test_metrics
-  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True}
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: False, metrics: ["tce", "tie", "cmmd"], folder_name: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_02__16_33_18_nyu_lsun_ae_diff_test_metrics/temp_fid"}
 
 training:
   precompute_latents: True

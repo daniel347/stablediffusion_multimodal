@@ -7,8 +7,8 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 nyu_dir = "../../../datasets/nyuv2_processed"
 lsun_dir = "../../../datasets/lsun"
 
-colour_imgs = glob.glob(nyu_dir+"/colour/bedroom_*/*") + glob.glob(lsun_dir+"/colour/**/*")
-depth_imgs = glob.glob(nyu_dir+"/depth/bedroom_*/*") + glob.glob(lsun_dir+"/depth/**/*")
+colour_imgs = glob.glob(nyu_dir+"/colour/bedroom_0001a/*") + glob.glob(lsun_dir+"/colour/bedroom_0/*")
+depth_imgs = glob.glob(nyu_dir+"/depth/bedroom_0001a/*") + glob.glob(lsun_dir+"/depth/bedroom_0/*")
 
 print("Found {} colour images and {} depth images".format(len(colour_imgs), len(depth_imgs)))
 
