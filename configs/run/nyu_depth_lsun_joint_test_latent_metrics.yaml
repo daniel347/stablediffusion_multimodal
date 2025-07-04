@@ -8,7 +8,7 @@ function:
   kwargs: {subepoch: 0,
            itercount: 0,
            epochcount: 0,
-           n_samples: 256,
+           n_samples: 10000,
            gen_samples: True,
            compute_refs: True}
 
