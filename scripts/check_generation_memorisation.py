@@ -28,15 +28,15 @@ for mode in modalities:
 
     mode_gen_path = f"{generation_path}_{mode}"
     mode_gen_files = list(glob.glob(mode_gen_path + "/*"))
-
+    """
     cmmd.compute_and_cache_embeddings(dir=None,
                                       files=mode_gen_files,
                                       dataset_name="mm_celeba_colour",
                                       dataset_res=299,
                                       dataset_split="gen",
                                       device=device)
-
-    gen_clip_embeddings = f"{embedding_dir}/mm_celeba_colour_{mode}_gen_val_299.npy"
+    """
+    gen_clip_embeddings = f"{embedding_dir}/mm_celeba_{mode}_gen_299.npy"
 
     gen_emb = np.load(gen_clip_embeddings)
     data_emb = np.load(dataset_clip_embeddings)

@@ -1036,7 +1036,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                    ref_feat_path=None,
                                    **generate_kwargs):
 
-            metric_outs = {}
+            metric_outs = {met: 0 for met in metrics}
 
             def compute_latent_feats(dataloader):
                 if enable_pbars:
@@ -1093,29 +1093,37 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             if gen_samples:
                 tempdirs = generate(dataloaders, subepoch, itercount, epochcount, folder_name=folder_name, save_latents=True, **generate_kwargs)
             else:
-                tempdirs = {"latents": f"{folder_name}_latent"} if folder_name else {"latents": os.path.join(runPath, 'temp_fid_latent')}
+                tempdirs = {"latent": f"{folder_name}_latent"} if folder_name else {"latent": os.path.join(runPath, 'temp_fid_latent')}
 
             gen_dataset = get_dataset("latents", latent_path=tempdirs["latent"], split="train", modality=["latent"])
             gen_dataloader = torch.utils.data.DataLoader(gen_dataset, batch_size=conf.training.batch_size, shuffle=False, num_workers=4, pin_memory=True)
+            
+            print(f"found {len(gen_dataset)} generated latents")
 
-            gen_incep_feats, gen_mmd_feats = compute_latent_metrics(gen_dataloader)
+            gen_incep_feats, gen_mmd_feats = compute_latent_feats(gen_dataloader)
 
             if "fid" in metrics:
+                metric_outs["fid"] = []  # per channel
                 for c in range(gen_incep_feats.shape[1]):
                     mu1, sig1 = np.mean(ref_incep_feats[:, c].numpy(), axis=0), np.cov(ref_incep_feats[:, c].numpy(), rowvar=False)
                     mu2, sig2 = np.mean(gen_incep_feats[:, c].numpy(), axis=0), np.cov(gen_incep_feats[:, c].numpy(), rowvar=False)
-                    metric_outs["fid"] += frechet_distance(mu1, sig1, mu2, sig2)
+                    metric_outs["fid"].append(frechet_distance(mu1, sig1, mu2, sig2))
 
             if "kid" in metrics:
+                metric_outs["kid"] = []  # per channel
                 for c in range(gen_incep_feats.shape[1]):
-                    metric_outs["kid"] = kernel_distance(ref_incep_feats[:, c].numpy(), gen_incep_feats[:, c].numpy())
+                    metric_outs["kid"].append(kernel_distance(ref_incep_feats[:, c].numpy(), gen_incep_feats[:, c].numpy()))
 
             if "mmd" in metrics:
                 metric_outs["mmd"] = kernel_distance(ref_mmd_feats.numpy(), gen_mmd_feats.numpy())
 
             if enable_wandb:
                 for met, score in metric_outs.items():
-                    wandb.log({f"{met}_latent": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
+                    if isinstance(score, list):
+                        for c, s in enumerate(score):
+                            wandb.log({f"{met}_latent/channel_{c}": s, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
+                    else: 
+                        wandb.log({f"{met}_latent": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
             return metric_outs
 
