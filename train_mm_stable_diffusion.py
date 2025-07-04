@@ -731,7 +731,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     if save_latents:
                         for b, latent in enumerate(latents):
                             save_path = Path(tempdirs["latent"]) / f"latent_{n * gen_batch_size + b}.pt"
-                            torch.save({"mean": latent.contiguous().mean.cpu(), "std": latent.contiguous().std.cpu()}, save_path)
+                            torch.save(latent.contiguous().cpu(), save_path)
 
                     samples_x = model_first_stage.decode(latents)
 
