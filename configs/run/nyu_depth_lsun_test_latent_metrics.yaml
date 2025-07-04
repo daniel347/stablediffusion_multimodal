@@ -1,0 +1,32 @@
+# @package _global_
+
+name: "nyu_lsun_ae_diff_test_latent_metrics"
+notes: "We test latent metrics for our best nyu lsun diffusion model"
+
+function:
+  name: compute_latent_metrics
+  kwargs: {subepoch: 0,
+           itercount: 0,
+           epochcount: 0,
+           n_samples: 10000,
+           gen_samples: True,
+           compute_refs: True}
+
+training:
+  precompute_latents: True
+  force_recompute: False
+  latent_scale_per_channel: True
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_2
+  compute_latent_scale: True
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: null
+
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_01__04_10_09_nyu_lsun_ae_diff/model_it60000_ema_0.175.pt
+
+defaults:
+  - override /ema: dummy_ema
+  - _self_

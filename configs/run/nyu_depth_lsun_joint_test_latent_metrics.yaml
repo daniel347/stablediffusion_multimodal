@@ -9,9 +9,8 @@ function:
            itercount: 0,
            epochcount: 0,
            n_samples: 10000,
-           gen_samples: False,
+           gen_samples: True,
            compute_refs: False,
-           folder_name:  "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_04__08_22_27_nyu_lsun_joint_diff_ema_opt_test_latent_metrics/temp_fid",
            ref_feat_path: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_03__23_50_40_nyu_lsun_joint_diff_ema_opt_test_latent_metrics/ref_latent_feats.pt"}
 
 training:
