@@ -10,7 +10,8 @@ function:
            epochcount: 0,
            n_samples: 10000,
            gen_samples: True,
-           compute_refs: True}
+           compute_refs: False,
+           ref_feat_path: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_03__23_50_40_nyu_lsun_joint_diff_ema_opt_test_latent_metrics/ref_latent_feats.pt"}
 
 training:
   precompute_latents: True

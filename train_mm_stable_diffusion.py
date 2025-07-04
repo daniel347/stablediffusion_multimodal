@@ -1046,7 +1046,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 else:
                     pbar = enumerate(dataloader)
 
-                inseption_feats = []
+                inception_feats = []
                 mmd_feats = []  # simply flattened latents
 
                 fid_resize = Resize((299, 299), interpolation=InterpolationMode.BICUBIC)
@@ -1077,9 +1077,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             feat = fid_model(latents_grey.to(device), False, False)
                             feat = feat[0].squeeze(-1).squeeze(-1).detach().cpu()
                             feat = feat.reshape(batch_size, n_chans, -1)
-                            inseption_feats.append(feat)
+                            inception_feats.append(feat)
 
-                    return torch.cat(inseption_feats, dim=0), torch.cat(mmd_feats, dim=0)
+                    return torch.cat(inception_feats, dim=0), torch.cat(mmd_feats, dim=0)
 
             if compute_refs:
                 ref_incep_feats, ref_mmd_feats = compute_latent_feats(dataloaders["train_loader"])
@@ -1093,22 +1093,22 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             if gen_samples:
                 tempdirs = generate(dataloaders, subepoch, itercount, epochcount, folder_name=folder_name, save_latents=True, **generate_kwargs)
             else:
-                tempdirs = {"latents": folder_name} if folder_name else {"latents": os.path.join(runPath, 'temp_fid_latent')}
+                tempdirs = {"latents": f"{folder_name}_latent"} if folder_name else {"latents": os.path.join(runPath, 'temp_fid_latent')}
 
             gen_dataset = get_dataset("latents", latent_path=tempdirs["latent"], split="train", modality=["latent"])
             gen_dataloader = torch.utils.data.DataLoader(gen_dataset, batch_size=conf.training.batch_size, shuffle=False, num_workers=4, pin_memory=True)
 
-            gen_insep_feats, gen_mmd_feats = compute_latent_metrics(gen_dataloader)
+            gen_incep_feats, gen_mmd_feats = compute_latent_metrics(gen_dataloader)
 
             if "fid" in metrics:
-                for c in range(gen_insep_feats.shape[1]):
+                for c in range(gen_incep_feats.shape[1]):
                     mu1, sig1 = np.mean(ref_incep_feats[:, c].numpy(), axis=0), np.cov(ref_incep_feats[:, c].numpy(), rowvar=False)
-                    mu2, sig2 = np.mean(gen_insep_feats[:, c].numpy(), axis=0), np.cov(gen_insep_feats[:, c].numpy(), rowvar=False)
+                    mu2, sig2 = np.mean(gen_incep_feats[:, c].numpy(), axis=0), np.cov(gen_incep_feats[:, c].numpy(), rowvar=False)
                     metric_outs["fid"] += frechet_distance(mu1, sig1, mu2, sig2)
 
             if "kid" in metrics:
-                for c in range(gen_insep_feats.shape[1]):
-                    metric_outs["kid"] = kernel_distance(ref_incep_feats[:, c].numpy(), gen_insep_feats[:, c].numpy())
+                for c in range(gen_incep_feats.shape[1]):
+                    metric_outs["kid"] = kernel_distance(ref_incep_feats[:, c].numpy(), gen_incep_feats[:, c].numpy())
 
             if "mmd" in metrics:
                 metric_outs["mmd"] = kernel_distance(ref_mmd_feats.numpy(), gen_mmd_feats.numpy())

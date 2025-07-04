@@ -23,7 +23,7 @@ out_dir = Path("memorisation_check")
 out_dir.mkdir(parents=True, exist_ok=True)
 
 for mode in modalities:
-    dataset_clip_embeddings = f"{embedding_dir}/nyu_depth_lsun_{mode}_val_299.npy"
+    dataset_clip_embeddings = f"{embedding_dir}/mm_celeba_{mode}_train_299.npy"
     data_paths = data_path_dir[mode]
 
     mode_gen_path = f"{generation_path}_{mode}"
@@ -31,12 +31,12 @@ for mode in modalities:
 
     cmmd.compute_and_cache_embeddings(dir=None,
                                       files=mode_gen_files,
-                                      dataset_name="nyu_depth_lsun_colour_gen",
+                                      dataset_name="mm_celeba_colour",
                                       dataset_res=299,
-                                      dataset_split="val",
+                                      dataset_split="gen",
                                       device=device)
 
-    gen_clip_embeddings = f"{embedding_dir}/nyu_depth_lsun_{mode}_gen_val_299.npy"
+    gen_clip_embeddings = f"{embedding_dir}/mm_celeba_colour_{mode}_gen_val_299.npy"
 
     gen_emb = np.load(gen_clip_embeddings)
     data_emb = np.load(dataset_clip_embeddings)
