@@ -688,7 +688,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             ts = torch.linspace(50, 950, 19, device=device).long()  # Test at these timesteps
             test_losses = []
             for i, t in enumerate(ts):
-                t_sampler = lambda x: t.unsqueeze(0).expand(conf.training.batch_size).to(device)
+                t_sampler = lambda x: t.unsqueeze(0).expand(x.shape[0]).to(device)
                 loss = test_epoch(dataloaders, 0, i, 0, gen=False, t_sampler=t_sampler)
                 test_losses.append(loss.detach().cpu())
 
@@ -1049,7 +1049,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                    subepoch,
                                    itercount,
                                    epochcount,
-                                   n_samples=256,
                                    metrics=["fid", "kid", "mmd"],
                                    folder_name=None,
                                    gen_samples=True,
