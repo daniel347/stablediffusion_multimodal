@@ -1,7 +1,7 @@
 # @package _global_
 
-name: "nyu_lsun_shuffled_latent_quality"
-notes: "We check the latent quality of NYU depth autoencoder with shuffled modalities so z is useless. This time with the z combiner hopefully turned off"
+name: "nyu_lsun_check_latent_quality"
+notes: "We check the latent quality of NYU depth autoencoder, with kl divergence computation."
 outputdir: ../outputs
 
 
@@ -10,16 +10,19 @@ function:
   kwargs: {}
 
 training:
-  precompute_latents: False
+  precompute_latents: True
   force_recompute: False
-  latent_scale_per_channel: False
-  compute_latent_scale: False
+  latent_scale_per_channel: True
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_2
+  compute_latent_scale: True
 
 model:
   params:
     first_stage_config:
       params:
-        ckpt_path: ../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_19__17_59_57_nyu_lsun_shuffled/model_6000.pt
+        ckpt_path: null
+
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_01__04_10_09_nyu_lsun_ae_diff/model_it60000_ema_0.175.pt
 
 defaults:
   - override /ema: dummy_ema

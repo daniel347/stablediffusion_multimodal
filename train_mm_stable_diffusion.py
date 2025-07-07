@@ -129,7 +129,7 @@ def initialise_model(conf):
     return model
 
 
-def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=True):
+def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=True, return_dist=False):
     avg_z = z_mode == "avg"
     random_z = z_mode == "random"
     channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_channels
@@ -145,6 +145,8 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
             print("sampling latents")
             latents = torch.distributions.Normal(latents["mean"], latents["std"]).sample()
             sample = False  # We have finished sampling, so don't try to sample again
+        elif return_dist:
+            return torch.distributions.Normal(latents["mean"], latents["std"])
         else:
             latents = latents["mean"]
 
@@ -162,6 +164,11 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
         if sample:
             print("sampling chosen latents")
             return cat_dists_or_tensor_latents([l.sample() for l in latents])
+        elif return_dist:
+            print("returning chosen latents as distributions")
+            means = cat_dists_or_tensor_latents(latents)
+            stds = cat_dists_or_tensor_latents([l.std for l in latents])
+            return torch.distributions.Normal(means, stds)
         else:
             print("concatenating chosen latents")
             return cat_dists_or_tensor_latents(latents)
@@ -985,7 +992,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 run_bisenet(0, dataloader=dataloaders["test_loader"])
 
 
-        def check_latent_quality(dataloaders, n_latents=800):
+        def check_latent_quality(dataloaders, n_latents=1024):
             if enable_pbars:
                 pbar = tqdm.tqdm(enumerate(dataloaders["train_loader"]),
                                  total=len(dataloaders["train_loader"]),
@@ -995,6 +1002,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             b_loss = 0
             all_latents = []
+            all_latent_dists = []
 
             if conf.training.precompute_latents and not already_precomputed:
                 conf.training.precompute_latents = False  # we want to compute latents on the fly
@@ -1016,10 +1024,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         data = move_data_to_device(dataT, device=device)
 
-                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                    latent_dist = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, return_dist=True)
+                    latents = latent_dist.sample()
+
                     latents = model_first_stage.scale_latents(latents)
+                    latent_dist = torch.distributions.Normal(model_first_stage.scale_latents(latent_dist.mean).detach().cpu(),
+                                                             model_first_stage.scale_latents(latent_dist.std).detach().cpu())
+
 
                     all_latents.append(latents.detach().cpu())
+                    all_latent_dists.append(latent_dist)
                     if i * conf.training.batch_size >= n_latents:
                         break
 
@@ -1039,9 +1053,24 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             save_and_log_latents(avg_latent_std, "Latents/latent_std", runPath, 0, run)
 
             # check MMD with gaussian
-            mmd_dist = MMDGaussianLoss(sigma=0.3)
+            mmd_dist = MMDGaussianLoss(sigma=0.1)
             mmd_loss = mmd_dist(all_latents)
             print(f"MMD loss of latents: {mmd_loss.item()}")
+
+            # Compute a KL divergence between the empirical MoG Latent distribution and a Gaussian
+            mix = torch.distributions.Categorical(torch.ones(all_latents.shape[0], device=device))
+            comp = torch.distributions.Normal(torch.cat([d.mean for d in all_latent_dists], dim=0),
+                                                torch.cat([d.std for d in all_latent_dists], dim=0))
+            comp = torch.distributions.Independent(comp, 3)
+            mix_dist = torch.distributions.MixtureSameFamily(mix, comp)
+
+            log_q = mix_dist.log_prob(all_latents)
+            log_p = torch.distributions.Normal(0, 1).log_prob(all_latents).mean(dim=(1, 2, 3))
+
+            kl_div = torch.mean(log_q - log_p)
+            print(f"KL divergence between empirical MoG and Gaussian: {kl_div.item()}")
+
+            wandb.log({"latent_mmd": mmd_loss.item(), "latent_kl_div": kl_div.item()}, step=0)
 
             # check smoothness by perturbing latents
 
