@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 from ldm.data.dataset_CelebAMask import MMCelebA
 import os
+import pandas as pd
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 modalities = ["colour"]
@@ -26,6 +27,8 @@ for mode in modalities:
     dataset_clip_embeddings = f"{embedding_dir}/mm_celeba_{mode}_train_299.npy"
     data_paths = data_path_dir[mode]
 
+    print(f"datapath len: {len(data_paths)}")
+
     mode_gen_path = f"{generation_path}_{mode}"
     mode_gen_files = list(glob.glob(mode_gen_path + "/*"))
     """
@@ -41,19 +44,27 @@ for mode in modalities:
     gen_emb = np.load(gen_clip_embeddings)
     data_emb = np.load(dataset_clip_embeddings)
 
+    print(f"gen_emb_shape {gen_emb.shape}")
+    print(f"data emb shape {data_emb.shape}")
+
     n_sim = 3
-    sim_thresh = 0.975
+    sim_thresh = 0.8
 
     for i, ge in enumerate(gen_emb):
         data_cos_sim = data_emb @ ge
+        print(data_cos_sim.shape)
         max_n_inds = np.argpartition(data_cos_sim, -n_sim)[-n_sim:]
         print(f"top {n_sim} similarities: {data_cos_sim[max_n_inds]}")
         if np.any(data_cos_sim[max_n_inds] > sim_thresh):
             print("Generation is similar to data!")
-            data_paths = data_paths[max_n_inds]
+            sim_data_paths = [data_paths[n] for n in max_n_inds]
+            similarity = pd.Series(data=data_cos_sim[max_n_inds], index=[Path(s).name for s in sim_data_paths])
+
             dst = out_dir / f"{mode}_{i}"
             dst.mkdir(parents=True, exist_ok=True)
+            
+            similarity.to_csv(str(dst / "sims.csv"))
             shutil.copy(mode_gen_files[i], dst / f"{i}_gen.png")
-            for j, p in enumerate(data_paths):
-                dst_path = dst / f"{j}_sim_{data_cos_sim[max_n_inds[j]]:.2f}.png"
+
+            for j, p in enumerate(sim_data_paths):
                 shutil.copy(p, dst)
