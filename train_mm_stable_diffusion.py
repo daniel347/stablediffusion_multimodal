@@ -573,7 +573,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return epochcount, train_pbar
 
-        def test_epoch(dataloaders, subepoch, itercount, epochcount, reencode_end=False, save_intermediate_z0t=False):
+        def test_epoch(dataloaders, subepoch, itercount, epochcount, reencode_end=False, save_intermediate_z0t=False, gen=True, t_sampler=None):
             if "sampler" in conf:
                 run_params = conf.sampler.run_params
             else:
@@ -603,7 +603,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
                     b_loss += loss.detach().item()
 
-                    if i == 0:
+                    if i == 0 and gen:
                         # Perform test generations
                         if save_intermediate_z0t:
                             saver = DiffusionIntermediateLogger(10, n_save=16)
@@ -682,6 +682,27 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
 
             return epoch_loss
+
+
+        def test_loss_by_timestep(dataloaders):
+            ts = torch.linspace(50, 950, 19, device=device).long()  # Test at these timesteps
+            test_losses = []
+            for i, t in enumerate(ts):
+                t_sampler = lambda x: t.unsqueeze(0).expand(conf.training.batch_size).to(device)
+                loss = test_epoch(dataloaders, 0, i, 0, gen=False, t_sampler=t_sampler)
+                test_losses.append(loss.detach().cpu())
+
+                if enable_wandb:
+                    wandb.log({"Loss/test": loss, "t": t}, step=i)
+
+            test_losses = torch.stack(test_losses, dim=0)
+            fig, ax = plt.subplots(figsize=(10, 5))
+            ax.plot(ts.cpu().numpy(), test_losses.cpu().numpy())
+            ax.set_xlabel("Timestep")
+            ax.set_ylabel("Test Loss")
+
+            fig.savefig(runPath / "timestep_wise_loss.png")
+
 
         def generate(dataloaders, subepoch, itercount, epochcount, n_samples=64, log_to_wandb=False, folder_name=None, save_latents=False):
             print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
