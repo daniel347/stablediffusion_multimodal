@@ -10,7 +10,7 @@ function:
   kwargs: {n_latents: 4096}
 
 training:
-  precompute_latents: True
+  precompute_latents: False
   force_recompute: False
   latent_scale_per_channel: True
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_joint
