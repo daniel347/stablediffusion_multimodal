@@ -1,6 +1,8 @@
 # Base MMVAEplus class definition
 import torch
 import torch.nn as nn
+
+from ..modules.distributions.distributions import DiagonalGaussianDistribution
 from ..util import instantiate_from_config, remove_module_prefix
 from torch.distributions import Normal, Laplace
 import torch.nn.functional as F
@@ -127,7 +129,7 @@ class NonDisentanglingAE(nn.Module):
 
         return qu_xs, px_us, uss
 
-    def encode(self, data, **kwargs):
+    def encode(self, data, return_dist=True, **kwargs):
         # Encode data into z and W
         if not self.seperable:
             X = torch.cat(data, dim=1)
@@ -137,10 +139,12 @@ class NonDisentanglingAE(nn.Module):
             U = []
             for dm, vae in zip(data, self.vaes):
                 qu_x = vae.encode(dm)
-                U.append(qu_x.mean)
+                U.append(qu_x)
 
-            full_latent = torch.concat(U, dim=1)
-            return full_latent
+            if return_dist:
+                return U
+            else:
+                return torch.concat([u.mean for u in U], dim=1)
 
     def decode(self, full_latent, **kwargs):
         # convert z and W to image and depth
