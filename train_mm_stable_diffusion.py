@@ -697,12 +697,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             for i, t in enumerate(ts):
                 t_sampler = lambda x: t.unsqueeze(0).expand(x.shape[0]).to(device)
                 loss = test_epoch(dataloaders, 0, i, 0, gen=False, t_sampler=t_sampler)
-                test_losses.append(loss.detach().cpu())
+                test_losses.append(loss)
 
                 if enable_wandb:
-                    wandb.log({"Loss/test": loss, "t": t}, step=i)
+                    wandb.log({"Loss/test": loss, "t": t.detach().cpu()}, step=i)
 
-            test_losses = torch.stack(test_losses, dim=0)
+            test_losses = torch.tensor(test_losses)
             fig, ax = plt.subplots(figsize=(10, 5))
             ax.plot(ts.cpu().numpy(), test_losses.cpu().numpy())
             ax.set_xlabel("Timestep")
@@ -1014,8 +1014,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
                 print(f"found latent mean of: {latent_mean} and std of {latent_scale}")
                 print("resaving the first stage model with latent mean and scale")
-                torch.save(model_first_stage.state_dict(),
-                           conf.model.params.first_stage_config.params.ckpt_path)
+                # torch.save(model_first_stage.state_dict(),
+                #            conf.model.params.first_stage_config.params.ckpt_path)
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in pbar:
@@ -1024,12 +1024,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         data = move_data_to_device(dataT, device=device)
 
-                    latent_dist = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, return_dist=True)
+                    latent_dist = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, return_dist=True, sample=False)
                     latents = latent_dist.sample()
 
                     latents = model_first_stage.scale_latents(latents)
                     latent_dist = torch.distributions.Normal(model_first_stage.scale_latents(latent_dist.mean).detach().cpu(),
-                                                             model_first_stage.scale_latents(latent_dist.std).detach().cpu())
+                                                             model_first_stage.scale_latents(latent_dist.stddev).detach().cpu())
 
 
                     all_latents.append(latents.detach().cpu())
@@ -1060,7 +1060,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             # Compute a KL divergence between the empirical MoG Latent distribution and a Gaussian
             mix = torch.distributions.Categorical(torch.ones(all_latents.shape[0], device=device))
             comp = torch.distributions.Normal(torch.cat([d.mean for d in all_latent_dists], dim=0),
-                                                torch.cat([d.std for d in all_latent_dists], dim=0))
+                                                torch.cat([d.stddev for d in all_latent_dists], dim=0))
             comp = torch.distributions.Independent(comp, 3)
             mix_dist = torch.distributions.MixtureSameFamily(mix, comp)
 

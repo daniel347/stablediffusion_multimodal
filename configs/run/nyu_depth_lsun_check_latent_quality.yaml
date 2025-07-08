@@ -7,7 +7,7 @@ outputdir: ../outputs
 
 function:
   name: check_latent_quality
-  kwargs: {}
+  kwargs: {n_latents: 72}
 
 training:
   precompute_latents: True
