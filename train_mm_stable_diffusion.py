@@ -167,7 +167,12 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
         elif return_dist:
             print("returning chosen latents as distributions")
             means = cat_dists_or_tensor_latents(latents)
-            stds = cat_dists_or_tensor_latents([l.std for l in latents])
+            try:
+                # DiagonalGaussianDistribution has std
+                stds = cat_dists_or_tensor_latents([l.std for l in latents])
+            except AttributeError:
+                # torch.distributions.Normal does not have std, so we use stddev
+                stds = cat_dists_or_tensor_latents([l.stddev for l in latents])
             return torch.distributions.Normal(means, stds)
         else:
             print("concatenating chosen latents")
@@ -1029,7 +1034,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     latents = model_first_stage.scale_latents(latents)
                     latent_dist = torch.distributions.Normal(model_first_stage.scale_latents(latent_dist.mean).detach().cpu(),
-                                                             model_first_stage.scale_latents(latent_dist.stddev).detach().cpu())
+                                                             model_first_stage.scale_latents_std(latent_dist.stddev).detach().cpu())
 
 
                     all_latents.append(latents.detach().cpu())
@@ -1072,7 +1077,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             wandb.log({"latent_mmd": mmd_loss.item(), "latent_kl_div": kl_div.item()}, step=0)
 
-            # check smoothness by perturbing latents
 
         def compute_latent_metrics(dataloaders,
                                    subepoch,
