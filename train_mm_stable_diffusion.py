@@ -11,6 +11,9 @@ from datetime import datetime
 
 import numpy as np
 import matplotlib
+
+from insightface.alignment.heatmap.symbol.sym_heatmap import workspace
+
 matplotlib.use('Agg')
 import wandb
 
@@ -59,6 +62,8 @@ from itertools import product
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+
+import math
 
 enable_wandb = True
 optimise_hyperparameters = False
@@ -1179,6 +1184,56 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         wandb.log({f"{met}_latent": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
             return metric_outs
+
+
+        def compute_manifold_dimensionality(dataloaders, subepoch, itercount, epochcount, gen_samples=True, folder_name=None, **generate_kwargs):
+            if gen_samples:
+                tempdirs = generate(dataloaders, subepoch, itercount, epochcount,
+                                    save_latents=True, **generate_kwargs)
+            else:
+                tempdirs = {"latent": f"{folder_name}_latent"} if folder_name else {
+                    "latent": os.path.join(runPath, 'temp_fid_latent')}
+
+            gen_dataset = get_dataset("latents", latent_path=tempdirs["latent"], split="train", modality=["latent"])
+            gen_dataloader = torch.utils.data.DataLoader(gen_dataset, batch_size=1,
+                                                         shuffle=False, num_workers=4, pin_memory=True)
+
+            n_reps = 6*16*16
+
+            t = torch.ones(conf.training.batch_size, device=device) * 50
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
+                for i, dataT in enumerate(gen_dataloader):
+                    if return_class:
+                        data, classes = move_data_to_device(dataT, device=device)
+                    else:
+                        data = move_data_to_device(dataT, device=device)
+
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                    latents = latents.expand(conf.training.batch_size, -1, -1, -1)
+
+                    epsilons = []
+
+                    for j in range(math.ceil(n_reps / conf.training.batch_size)):
+                        latents_noisy = model.q_sample(latents, t, noise=None)
+                        epsilon = torch.randn_like(latents_noisy) # model.model(latents_noisy, t)
+                        epsilons.append(epsilon.detach().cpu())
+
+                        if j == 0 and enable_wandb:
+                            save_and_log_latents(latents_noisy, f'Latents/noised', runPath, itercount, run)
+
+                    epsilons = torch.cat(epsilons, dim=0).reshape(epsilons.shape[0], -1)
+                    U, S, Vh = torch.linalg.svd(epsilons)
+
+                    fig, ax = plt.subplots()
+                    ax.semilogy(S)
+                    ax.set_xlabel("Singular Value Index")
+                    ax.set_ylabel("Singular Value")
+
+                    dim = torch.numel(latents) - torch.argmax(torch.abs(torch.diff(S)))
+                    print(f"Manifold dimensionality for sample {i}: {dim.item()}")
+
+                    if enable_wandb:
+                        wandb.log({"manifold_dimensionality": dim.item(), "singular_values": fig}, step=itercount)
 
 
         def training_loop(dataloaders):

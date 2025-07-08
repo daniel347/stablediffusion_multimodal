@@ -1,0 +1,33 @@
+# @package _global_
+
+name: "nyu_lsun_joint_diff_ema_opt_test_latent_metrics"
+notes: "We approximate the dimension of the manifold of the latent space of the NYU joint depth autoencoder."
+
+function:
+  name: compute_manifold_dimensionality
+  kwargs: {subepoch: 0,
+           itercount: 0,
+           epochcount: 0,
+           n_samples: 72,
+           gen_samples: False,
+           folder_name: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_04__19_54_40_nyu_lsun_ae_diff_test_latent_metrics/temp_fid"}
+
+training:
+  precompute_latents: True
+  force_recompute: False
+  latent_scale_per_channel: True
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_joint
+  compute_latent_scale: True
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: null
+
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_01__09_56_18_nyu_lsun_joint_diff/model_it60000_ema_0.050.pt
+
+defaults:
+  - override /model: v2-inference-mm-non-disentangled-non-seperable
+  - override /ema: dummy_ema
+  - _self_
