@@ -12,8 +12,6 @@ from datetime import datetime
 import numpy as np
 import matplotlib
 
-from insightface.alignment.heatmap.symbol.sym_heatmap import workspace
-
 matplotlib.use('Agg')
 import wandb
 
