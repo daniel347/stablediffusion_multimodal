@@ -1209,6 +1209,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, sample=False)
                     latents = model_first_stage.scale_latents(latents)
+                    latent_shape = latents.shape[1:]
+
                     latents = latents.expand(conf.training.batch_size, -1, -1, -1)
 
                     epsilons = []
@@ -1218,7 +1220,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         epsilon = model.model(latents_noisy, t)
                         epsilons.append(epsilon.detach().cpu())
 
-                        if j == 0 and enable_wandb:
+                        if j == 0:
                             save_and_log_latents(latents_noisy, f'Latents/noised', runPath, i, run)
 
                     epsilons = torch.cat(epsilons, dim=0)
@@ -1234,6 +1236,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     dim = torch.numel(latents[0]) - torch.argmax(torch.abs(torch.diff(S))) - 1
                     print(f"Manifold dimensionality for sample {i}: {dim.item()}")
+
+                    V_samples = Vh[torch.arange(0, n_reps, 100)].reshape(-1, *latent_shape)
+                    save_and_log_latents(V_samples, f'singular_vectors', runPath, i, run)
 
                     if enable_wandb:
                         wandb.log({"manifold_dimensionality": dim.item(), "singular_values": fig}, step=i)
