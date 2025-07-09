@@ -1197,9 +1197,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             n_reps = 6*16*16
 
-            t = torch.ones(conf.training.batch_size, device=device, dtype=torch.long) * 50
+            t = torch.ones(conf.training.batch_size, device=device, dtype=torch.long) * t
+            spectrums = []
+
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
-                for i, dataT in enumerate(train_loader):
+                for i, dataT in enumerate(test_loader):
                     if return_class:
                         data, classes = move_data_to_device(dataT, device=device)
                     else:
@@ -1221,9 +1223,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     epsilons = torch.cat(epsilons, dim=0)
                     epsilons = epsilons.reshape(epsilons.shape[0], -1)
                     U, S, Vh = torch.linalg.svd(epsilons)
+                    spectrums.append(S)
 
                     fig, ax = plt.subplots()
-                    ax.semilogy(S)
+                    ax.plot(S)
+                    ax.set_ylim(0, S.mean() * 5)
                     ax.set_xlabel("Singular Value Index")
                     ax.set_ylabel("Singular Value")
 
@@ -1235,6 +1239,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     if i >= n_samples:
                         break
+
+            spectrums = torch.stack(spectrums, dim=0)
+            fig, ax = plt.subplots()
+            ax.plot(spectrums.T)
+            ax.set_xlabel("Singular Value Index")
+            ax.set_ylabel("Singular Value")
+
+            if enable_wandb:
+                wandb.log({"all_singular_values": fig}, step=i+1)
+
+
 
 
         def training_loop(dataloaders):

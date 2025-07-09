@@ -5,7 +5,7 @@ notes: "We approximate the dimension of the manifold of the latent space of the 
 
 function:
   name: compute_manifold_dimensionality
-  kwargs: { n_samples: 72, t: 50 }
+  kwargs: { n_samples: 32, t: 100 }
 
 training:
   precompute_latents: True
