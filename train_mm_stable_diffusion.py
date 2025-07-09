@@ -1208,6 +1208,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         data = move_data_to_device(dataT, device=device)
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, sample=False)
+                    latents = model_first_stage.scale_latents(latents)
                     latents = latents.expand(conf.training.batch_size, -1, -1, -1)
 
                     epsilons = []
