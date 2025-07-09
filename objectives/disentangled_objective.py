@@ -2,7 +2,8 @@
 import torch
 from torch.profiler import record_function
 from numpy import prod
-from .objective_util import compute_microbatch_split, reconstruction_loss, register_objective, log_mean_exp, MMDIndependenceLoss
+from .objective_util import compute_microbatch_split, reconstruction_loss, register_objective, log_mean_exp, \
+    MMDIndependenceLoss, CosSimIndependenceLoss
 import pyiqa
 
 eta = 1e-20
@@ -24,6 +25,8 @@ class DisentanglingObjective(torch.nn.Module):
                 off_combination_weight=0.2,
                 mmd_zw_weight=1,
                 mmd_ww_weight=1,
+                cos_zw_weight=1,
+                cos_ww_weight=1,
                 **kwargs):
         super(DisentanglingObjective, self).__init__()
 
@@ -45,6 +48,9 @@ class DisentanglingObjective(torch.nn.Module):
         self.off_combination_weight = off_combination_weight
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
+
+        self.cos_zw_weight = cos_zw_weight
+        self.cos_ww_weight = cos_ww_weight
 
     def _m_dreg(self, model, x, K=1, test=False, iteration=0):
 
@@ -70,7 +76,8 @@ class DisentanglingObjective(torch.nn.Module):
 
         loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0,
                      "mmd_zw": 0, "mmd_ww": 0, "z_dist_normed_euclidean": 0,
-                     "discriminator_loss": 0, "adversarial_loss": 0}
+                     "discriminator_loss": 0, "adversarial_loss": 0,
+                     "cos_sim_ww": 0, "cos_sim_zw": 0}
 
         # reconstruction loss
         for r, qu_x in enumerate(qu_xs):
@@ -168,6 +175,23 @@ class DisentanglingObjective(torch.nn.Module):
 
             lws[r] = lws[r] - lmmd_zw_r * self.mmd_ww_weight
             lws[r] = lws[r] - lmmd_ww_r * self.mmd_zw_weight
+
+        # z - w cosine similarity loss
+        cos_sim = CosSimIndependenceLoss()
+
+        for r, (qz_x, qw_x_r) in enumerate(zip(qz_xs, qw_xs)):
+            lcos_zw_r = 0
+            lcos_ww_r = 0
+            for d, qw_x in enumerate(qw_xs):
+                lcos_zw_r = lcos_zw_r + cos_sim(qz_x.mean, qw_x.mean)
+                if r != d:
+                    lcos_ww_r = lcos_ww_r + cos_sim(qw_x_r.mean, qw_x.mean)
+
+            loss_dict["cos_sim_zw"] -= lcos_zw_r.detach().cpu().sum().item()
+            loss_dict["cos_sim_ww"] -= lcos_ww_r.detach().cpu().sum().item()
+
+            lws[r] = lws[r] - lcos_zw_r * self.cos_sim_ww_weight
+            lws[r] = lws[r] - lcos_ww_r * self.cos_sim_zw_weight
 
         return torch.stack(lws), torch.stack(uss), loss_dict, (qu_xs, px_us, uss)
 

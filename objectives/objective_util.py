@@ -173,6 +173,21 @@ class MMDIndependenceLoss(nn.Module):
         return XX - 2 * XY + YY
 
 
+class CosSimIndependenceLoss(nn.Module):
+
+    def __init__(self, target_dim=2):
+        super().__init__()
+        self.target_dim = target_dim
+        self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
+
+    def forward(self, X, Y):
+        X_flat = X.flatten(start_dim=self.target_dim + 1).permute(0, 1, 3, 2).flatten(end_dim=-2)
+        Y_flat = Y.flatten(start_dim=self.target_dim + 1).permute(0, 1, 3, 2).flatten(end_dim=-2)
+
+        sim = self.cos_sim(X_flat, Y_flat)
+        return sim.abs().mean()
+
+
 class MMDGaussianLoss(nn.Module):
 
     def __init__(self, sigma=0.2):

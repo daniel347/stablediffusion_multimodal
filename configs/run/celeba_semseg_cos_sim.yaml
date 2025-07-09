@@ -1,0 +1,14 @@
+# @package _global_
+
+name: "mmd_ablation"
+notes: "We train the autoencoder without the MMD loss in the latent space"
+
+num_epochs: 10
+
+training:
+  objective:
+    params:
+      mmd_zw_weight: 0.0
+      mmd_ww_weight: 0.0
+      cos_zw_weight: 1000.0
+      cos_ww_weight: 1000.0
