@@ -464,6 +464,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             # print(latents.shape)
                         else:
                             # We have distributions
+                            print("Latents are distributions")
                             dists = True
                             latents = torch.cat([l.mean for l in latents] + [l.std for l in latents], dim=1)
                             # latents = {"mean": latent_means, "std": latent_stds}  # Means then stds

@@ -134,7 +134,10 @@ class NonDisentanglingAE(nn.Module):
         if not self.seperable:
             X = torch.cat(data, dim=1)
             qu_x = self.vaes[0].encode(X)
-            return qu_x.mean
+            if return_dist:
+                return qu_x
+            else:
+                return qu_x.mean
         else:
             U = []
             for dm, vae in zip(data, self.vaes):
