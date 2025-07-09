@@ -461,7 +461,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     if isinstance(latents, list):
                         if isinstance(latents[0], torch.Tensor):
                             latents = torch.cat(latents, dim=1)
-                            # print(latents.shape)
+                            print(latents.shape)
                         else:
                             # We have distributions
                             print("Latents are distributions")
@@ -469,7 +469,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             latents = torch.cat([l.mean for l in latents] + [l.std for l in latents], dim=1)
                             # latents = {"mean": latent_means, "std": latent_stds}  # Means then stds
                             # print(f"latent meat shape: {latent_means.shape} std shape: {latent_stds.shape}")
-                            # print(latents.shape)
+                            print(latents.shape)
 
                     for latent, r in zip(latents, row[f"{modality[0]}_path"]):
                         save_path = Path(r.replace(modality[0], "latent"))
@@ -1185,7 +1185,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             return metric_outs
 
 
-        def compute_manifold_dimensionality(dataloaders, t=50, n_reps=6*16*16):
+        def compute_manifold_dimensionality(dataloaders, n_samples=72, t=50, n_reps=6*16*16):
             if conf.training.batch_size != 1:
                 train_loader, test_loader = create_dataloaders(dataloaders["train_dataset"],
                                                                dataloaders["train_dataset"],
@@ -1197,7 +1197,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             n_reps = 6*16*16
 
-            t = torch.ones(conf.training.batch_size, device=device) * 50
+            t = torch.ones(conf.training.batch_size, device=device, dtype=torch.long) * 50
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in enumerate(train_loader):
                     if return_class:
@@ -1212,13 +1212,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     for j in range(math.ceil(n_reps / conf.training.batch_size)):
                         latents_noisy = model.q_sample(latents, t, noise=None)
-                        epsilon = torch.randn_like(latents_noisy) # model.model(latents_noisy, t)
+                        epsilon = model.model(latents_noisy, t)
                         epsilons.append(epsilon.detach().cpu())
 
                         if j == 0 and enable_wandb:
                             save_and_log_latents(latents_noisy, f'Latents/noised', runPath, i, run)
 
-                    epsilons = torch.cat(epsilons, dim=0).reshape(epsilons.shape[0], -1)
+                    epsilons = torch.cat(epsilons, dim=0)
+                    epsilons = epsilons.reshape(epsilons.shape[0], -1)
                     U, S, Vh = torch.linalg.svd(epsilons)
 
                     fig, ax = plt.subplots()
@@ -1226,11 +1227,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     ax.set_xlabel("Singular Value Index")
                     ax.set_ylabel("Singular Value")
 
-                    dim = torch.numel(latents) - torch.argmax(torch.abs(torch.diff(S)))
+                    dim = torch.numel(latents[0]) - torch.argmax(torch.abs(torch.diff(S))) - 1
                     print(f"Manifold dimensionality for sample {i}: {dim.item()}")
 
                     if enable_wandb:
                         wandb.log({"manifold_dimensionality": dim.item(), "singular_values": fig}, step=i)
+
+                    if i >= n_samples:
+                        break
 
 
         def training_loop(dataloaders):

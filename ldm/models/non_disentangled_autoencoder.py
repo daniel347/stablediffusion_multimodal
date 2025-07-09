@@ -135,7 +135,7 @@ class NonDisentanglingAE(nn.Module):
             X = torch.cat(data, dim=1)
             qu_x = self.vaes[0].encode(X)
             if return_dist:
-                return qu_x
+                return [qu_x]
             else:
                 return qu_x.mean
         else:
