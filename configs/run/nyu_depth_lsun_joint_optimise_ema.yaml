@@ -1,7 +1,7 @@
 # @package _global_
 
 name: "nyu_lsun_joint_diff_optimise_ema"
-notes: "We try to optimise the EMA for the nyu_lsun_joint_diff model."
+notes: "We try to optimise the EMA for the nyu_lsun_joint_diff model. This is repeated for model with proper latent space sampling"
 
 function:
   name: test_optimum_EMA
@@ -20,7 +20,7 @@ model:
       params:
         ckpt_path: null
 
-model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_01__09_56_18_nyu_lsun_joint_diff/model_60000.pt
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_08__19_51_56_nyu_lsun_joint_diff/model_60000.pt
 
 defaults:
   - override /model: v2-inference-mm-non-disentangled-non-seperable
