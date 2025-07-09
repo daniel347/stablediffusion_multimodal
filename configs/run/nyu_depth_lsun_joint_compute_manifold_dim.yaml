@@ -1,16 +1,11 @@
 # @package _global_
 
-name: "nyu_lsun_joint_diff_ema_opt_test_latent_metrics"
+name: "nyu_lsun_joint_diff_manifold_dim"
 notes: "We approximate the dimension of the manifold of the latent space of the NYU joint depth autoencoder."
 
 function:
   name: compute_manifold_dimensionality
-  kwargs: {subepoch: 0,
-           itercount: 0,
-           epochcount: 0,
-           n_samples: 72,
-           gen_samples: False,
-           folder_name: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_04__19_54_40_nyu_lsun_ae_diff_test_latent_metrics/temp_fid"}
+  kwargs: { t: 50 }
 
 training:
   precompute_latents: True
