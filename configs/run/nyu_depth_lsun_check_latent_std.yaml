@@ -2,7 +2,6 @@
 
 name: "nyu_lsun_latent_std"
 notes: "We check the standard deviation of latents of the NYU depth & LSUN autoencoder"
-device: cpu
 
 outputdir: ../outputs
 

@@ -8,7 +8,7 @@ training:
   force_recompute: False
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_joint
   latent_scale_per_channel: True
-  compute_latent_scale: True
+  compute_latent_scale: False
 
   patience: 20
   num_epochs: 10

@@ -1035,6 +1035,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     latent_dist = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, return_dist=True, sample=False)
                     latents = latent_dist.sample()
+                    
+                    print(f"latent dist means: {latent_dist.mean.mean(dim=(0, 2, 3))} stds: {latent_dist.stddev.mean(dim=(0, 2, 3))}")
 
                     latents = model_first_stage.scale_latents(latents)
                     latent_dist = torch.distributions.Normal(model_first_stage.scale_latents(latent_dist.mean).detach().cpu(),
@@ -1306,7 +1308,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     test_loss = test_epoch(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished testing =========================")
-                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount)
+                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount, metrics=["fid", "kid"])
                     print("============================ finished computing FID =========================")
 
                     if ray_tune:

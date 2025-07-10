@@ -188,3 +188,18 @@ class NonDisentanglingAE(nn.Module):
                 return (latents - self.latent_mean[None, :, None, None]) / self.latent_scale[None, :, None, None]
             else:
                 return (latents - self.latent_mean) / self.latent_scale
+
+
+    def scale_latents_std(self, latents_std, reverse=False):
+        """Same as above but without mean subtraction"""
+        if reverse:
+            if len(self.latent_scale.shape) == 1:
+                return (latents_std * self.latent_scale[None, :, None, None])
+            else:
+                return (latents_std * self.latent_scale)
+        else:
+            if len(self.latent_scale.shape) == 1:
+                return latents_std / self.latent_scale[None, :, None, None]
+            else:
+                return latents_std / self.latent_scale
+
