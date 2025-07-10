@@ -800,7 +800,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if mod.module.use_z_comb_network:
                         *qw_xs, qz_xs = mod("encode", data, return_dist=True)
                     else:
-                        u = mod("encode", data, avg_z=False)
+                        u = mod("encode", data, avg_z=False, return_dist=True)
                         qw_xs = u[:NUM_VAES]
                         qz_xs = u[NUM_VAES:]
                     qw_means = [qw_x.mean for qw_x in qw_xs]

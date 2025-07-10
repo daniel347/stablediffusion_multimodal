@@ -3,11 +3,14 @@
 name: "nyu_lsun_latent_std"
 notes: "We check the standard deviation of latents of the NYU depth & LSUN autoencoder"
 
-outputdir: ../outputs
+outputdir: ../outputsc
 
 function:
   name: check_latent_std
   kwargs: {}
+
+training:
+  objective_is_z_combiner: True
 
 model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt"
 
