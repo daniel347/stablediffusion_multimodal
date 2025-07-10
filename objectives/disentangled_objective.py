@@ -190,8 +190,8 @@ class DisentanglingObjective(torch.nn.Module):
             loss_dict["cos_sim_zw"] -= lcos_zw_r.detach().cpu().sum().item()
             loss_dict["cos_sim_ww"] -= lcos_ww_r.detach().cpu().sum().item()
 
-            lws[r] = lws[r] - lcos_zw_r * self.cos_sim_ww_weight
-            lws[r] = lws[r] - lcos_ww_r * self.cos_sim_zw_weight
+            lws[r] = lws[r] - lcos_zw_r * self.cos_ww_weight
+            lws[r] = lws[r] - lcos_ww_r * self.cos_zw_weight
 
         return torch.stack(lws), torch.stack(uss), loss_dict, (qu_xs, px_us, uss)
 
