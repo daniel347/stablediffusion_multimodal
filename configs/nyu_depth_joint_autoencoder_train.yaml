@@ -9,8 +9,8 @@ name: "nyu_lsun_joint"
 notes: "We perform an ablation experiment using just a joint autoencoder"
 
 function:
-  name: test
-  params: {subepoch: 0, itercount: 0, epochcount: 0}
+  name: training_loop
+  params: {}
 
 dataset_name: nyu_depth_lsun
 
