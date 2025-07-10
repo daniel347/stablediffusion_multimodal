@@ -799,6 +799,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if mod.module.use_z_comb_network:
                         *qw_xs, qz_xs = mod("encode", data, return_dist=True)
+                        qz_xs = [qz_xs]
                     else:
                         u = mod("encode", data, avg_z=False, return_dist=True)
                         qw_xs = u[:NUM_VAES]
@@ -856,6 +857,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                          runPath, display_data_fs[k], i, run, nrow=conf.training.batch_size)
 
                     # perform interpolation
+                    """
                     latent_samples_1 = torch.cat([qw_x.sample() for qw_x in qw_xs] + [zcd.sample() for zcd in qz_xs])
                     latent_samples_2 = torch.roll(latent_samples_1, 1, dims=0)
                     latent_samples_interp = torch.stack([(1 - a) * latent_samples_1 + a * latent_samples_2 for a in torch.linspace(0, 1, 8)], dim=1)
@@ -864,6 +866,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     for k, rec in enumerate(recons_interp):
                         save_and_log_img(rec, f'Interpolation/m{k}',
                                          runPath, display_data_fs[k], i, run, nrow=conf.training.batch_size)
+                    """
 
             print(f"w avg std: {[w_std/i for w_std in w_stds_avg]}, z avg std: {[zsa/i for zsa in z_stds_avg]}")
             print(f"average mse loss: {mse_loss/i}, mae loss: {mae_loss/i}, lpips loss: {lpips_loss/i}")

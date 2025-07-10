@@ -1,16 +1,13 @@
 # @package _global_
 
-name: "nyu_lsun_latent_std"
-notes: "We check the standard deviation of latents of the NYU depth & LSUN autoencoder"
+name: "nyu_lsun_joint_latent_std"
+notes: "We check the standard deviation of latents of the NYU depth & LSUN joint autoencoder"
 
 outputdir: ../outputs
 
 function:
   name: check_latent_std
   kwargs: {}
-
-training:
-  objective_is_z_combiner: True
 
 model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_21_31_nyu_lsun_joint/model_12000.pt"
 

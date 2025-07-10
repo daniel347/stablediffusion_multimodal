@@ -20,7 +20,7 @@ model:
       params:
         ckpt_path: null
 
-model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_08__19_51_56_nyu_lsun_joint_diff/model_60000.pt
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_10__15_19_45_nyu_lsun_joint_diff/model_60000.pt
 
 defaults:
   - override /model: v2-inference-mm-non-disentangled-non-seperable
