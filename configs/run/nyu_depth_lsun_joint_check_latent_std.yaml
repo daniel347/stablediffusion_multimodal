@@ -7,7 +7,7 @@ outputdir: ../outputs
 
 function:
   name: check_latent_std
-  kwargs: {}
+  params: {}
 
 model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_21_31_nyu_lsun_joint/model_12000.pt"
 

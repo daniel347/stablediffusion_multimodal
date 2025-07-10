@@ -1217,7 +1217,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     epsilons = []
 
-                    for j in range(math.ceil(n_reps / conf.training.batch_size)):
+                    for j in range(math.ceil(n_reps / conf.training.batch_size) + 1):
                         latents_noisy = model.q_sample(latents, t, noise=None)
                         epsilon = model.model(latents_noisy, t)
                         epsilons.append(epsilon.detach().cpu())
