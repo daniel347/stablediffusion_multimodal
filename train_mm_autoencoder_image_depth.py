@@ -779,6 +779,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             w_stds_avg = [0, 0]
             z_stds_avg = [0, 0]
 
+            lpips = pyiqa.create_metric("lpips", device=device, as_loss=True)
+
+            mse_loss = 0
+            mae_loss = 0
+            lpips_loss = 0
+
             with ((torch.no_grad())):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
@@ -819,6 +825,25 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if i > 10:
                         break
 
+                    # Compute reconstruction loss (MSE & LPIPS) with the mean latents
+                    latents = torch.cat(qw_means + z_comb_means, dim=1)
+                    recons = mod("decode", latents)
+                    for k, rec in enumerate(recons):
+                        save_and_log_img(rec, f'ReconstructionsMean/m{k}',
+                                         runPath, display_data_fs[k], i, run)
+
+                    mse_l = torch.stack([torch.nn.functional.mse_loss(d, r.mean).detach().cpu() for d, r in zip(data, recons)])
+                    mae_l = torch.stack([torch.nn.functional.l1_loss(d, r.mean).detach().cpu() for d, r in zip(data, recons)])
+                    lpips_l = torch.stack([lpips(d, r.mean).detach().cpu() for d, r in zip(data, recons)])
+
+                    print("loss shapes: ", mse_l.shape, mae_l.shape, lpips_l.shape)
+
+                    wandb.log({"mse_loss": mse_l.mean(), "mae_loss": mae_l.mean(), "lpips_loss": lpips_l.mean()}, step=i)
+
+                    mse_loss += mse_l
+                    mae_loss += mae_l
+                    lpips_loss += lpips_l
+
                     # Perform reconstructions on the noised latents
                     n_samp = 8
                     latent_samples = [qw_x.sample(n_samp) for qw_x in qw_xs] + [zcd.sample(n_samp) for zcd in qz_xs]
@@ -841,6 +866,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                          runPath, display_data_fs[k], i, run, nrow=conf.training.batch_size)
 
             print(f"w avg std: {[w_std/i for w_std in w_stds_avg]}, z avg std: {[zsa/i for zsa in z_stds_avg]}")
+            print(f"average mse loss: {mse_loss/i}, mae loss: {mae_loss/i}, lpips loss: {lpips_loss/i}")
 
 
         def training_loop():

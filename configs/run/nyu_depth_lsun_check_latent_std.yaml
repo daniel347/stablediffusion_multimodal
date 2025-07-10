@@ -1,0 +1,16 @@
+# @package _global_
+
+name: "nyu_lsun_latent_std"
+notes: "We check the standard deviation of latents of the NYU depth & LSUN autoencoder"
+device: cpu
+
+outputdir: ../outputs
+
+function:
+  name: check_latent_std
+  kwargs: {}
+
+model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt"
+
+defaults:
+  - _self_
