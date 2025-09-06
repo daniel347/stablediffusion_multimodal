@@ -797,7 +797,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         grid = make_grid(dbatch, nrow=8)
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
-                    if mod.module.use_z_comb_network:
+                    if hasattr(mod.module, "use_z_comb_network") and mod.module.use_z_comb_network:
                         *qw_xs, qz_xs = mod("encode", data, return_dist=True)
                         qz_xs = [qz_xs]
                     else:
@@ -844,9 +844,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     mse_loss += mse_l
                     mae_loss += mae_l
                     lpips_loss += lpips_l
-
+                    
                     # Perform reconstructions on the noised latents
-                    n_samp = 8
+                    n_samp = 3
                     latent_samples = [qw_x.sample(n_samp) for qw_x in qw_xs] + [zcd.sample(n_samp) for zcd in qz_xs]
                     latent_samples = torch.cat(latent_samples, dim=2)
                     latent_samples = latent_samples.reshape(-1, *latent_samples.shape[2:])

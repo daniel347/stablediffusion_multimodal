@@ -1,9 +1,9 @@
 # @package _global_
 
-name: "cos_sim"
-notes: "We train the autoencoder with a cosine similarity independence objective in place of the MMD loss"
+name: "cos_sim_z_comb"
+notes: "We train the autoencoder with a cosine similarity independence objective in place of the MMD loss. We now train the z combiner."
 
-num_epochs: 10
+num_epochs: 5
 
 training:
   objective:

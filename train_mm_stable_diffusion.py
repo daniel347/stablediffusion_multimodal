@@ -715,7 +715,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             fig, ax = plt.subplots(figsize=(10, 5))
             ax.plot(ts.cpu().numpy(), test_losses.cpu().numpy())
             ax.set_xlabel("Timestep")
-            ax.set_ylabel("Test Loss")
+            ax.set.e632858_ylabel("Test Loss")
 
             fig.savefig(runPath / "timestep_wise_loss.png")
 
@@ -784,6 +784,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             return tempdirs
 
         def test_metrics(dataloaders, subepoch, itercount, epochcount, metrics=["fid", "kid", "cmmd", "tce", "tie"], folder_name=None, gen_samples=True, **generate_kwargs):
+            # print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
+            # raise ValueError
+
             if gen_samples:
                 tempdirs = generate(dataloaders, subepoch, itercount, epochcount, folder_name=folder_name, **generate_kwargs)
             else:
@@ -1308,7 +1311,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     test_loss = test_epoch(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished testing =========================")
-                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount, metrics=["fid", "kid"])
+                    metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished computing FID =========================")
 
                     if ray_tune:
