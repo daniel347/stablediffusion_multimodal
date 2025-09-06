@@ -1,0 +1,10 @@
+# @package _global_
+
+name: "4_1_split"
+notes: "We train the autoencoder with 4 z channels and only 1 w channel in the latent space"
+outputdir: ../outputs
+
+num_epochs: 10
+
+default:
+  - override /model: v2-inference-mm-rgb-semseg-4-1-split
