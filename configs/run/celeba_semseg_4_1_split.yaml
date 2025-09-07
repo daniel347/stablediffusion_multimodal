@@ -1,11 +1,11 @@
 # @package _global_
 
-name: "4_1_split"
-notes: "We train the autoencoder with 4 z channels and only 1 w channel in the latent space"
+name: "4_1_split_z_comb"
+notes: "We train the autoencoder with 4 z channels and only 1 w channel in the latent space. we train the z combiner"
 
 num_epochs: 10
 
-model_initialisation: ../outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_06__18_22_56_4_1_split/model_1200.pt
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_07__08_56_12_4_1_split/model_2400.pt"
 init_from_stable_diffusion: False
 
 default:

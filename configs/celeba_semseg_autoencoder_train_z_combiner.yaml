@@ -28,7 +28,7 @@ training:
   objective_is_z_combiner: True
   lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_07_11__13_06_15_cos_sim/model_4000.pt"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_07__08_56_12_4_1_split/model_2400.pt"
 resume_training: False
 init_from_stable_diffusion: False
 
