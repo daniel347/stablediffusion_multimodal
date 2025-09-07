@@ -2,9 +2,11 @@
 
 name: "4_1_split"
 notes: "We train the autoencoder with 4 z channels and only 1 w channel in the latent space"
-outputdir: ../outputs
 
 num_epochs: 10
+
+model_initialisation: ../outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_06__18_22_56_4_1_split/model_1200.pt
+init_from_stable_diffusion: False
 
 default:
   - override /model: v2-inference-mm-rgb-semseg-4-1-split
