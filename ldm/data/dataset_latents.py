@@ -38,18 +38,20 @@ class LatentDataset(Dataset):
 
     def __getitem__(self, idx):
         latent = torch.load(self.latents[idx], weights_only=True)
-        if isinstance(latent, dict):
+        if isinstance(latent, dict) and "mean" in latent and "std" in latent:
             # Return a distribution to support sampling
-            latent = {"mean": latent["mean"].to("cpu"), "std": latent["std"].to("cpu")}
+            latent_out = {"mean": latent["mean"].to("cpu"), "std": latent["std"].to("cpu")}
+        elif isinstance(latent, dict) and "latent" in latent:
+            latent_out = latent["latent"].to("cpu")
         elif isinstance(latent, torch.Tensor):
-            latent = latent.to("cpu")
+            latent_out = latent.to("cpu")
 
         if not self.return_class and not self.return_index:
-            return latent
+            return latent_out
         else:
-            rets = [latent]
+            rets = [latent_out]
             if self.return_class:
-                rets.append(self.classes[idx])
+                rets.append(latent["class"])
             if self.return_index:
                 rets.append(idx)
 

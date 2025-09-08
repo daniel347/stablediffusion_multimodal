@@ -13,12 +13,24 @@ from torchvision.transforms.v2 import ColorJitter
 import random
 import glob
 from .register_datasets import register_dataset
+from pathlib import Path
 
 
 @register_dataset("imagenet")
 class ImagenetMultiModal(Dataset):
 
-    def __init__(self, root_data_dir, transform, split, modality, p_hor_flip=0, p_colour_jitter=0, return_class=False, return_index=False, **kwargs):
+    def __init__(self,
+                 root_data_dir,
+                 transform,
+                 split,
+                 modality,
+                 p_hor_flip=0,
+                 p_colour_jitter=0,
+                 return_class=False,
+                 return_index=False,
+                 return_row=False,
+                 modality_exts="JPEG",
+                 **kwargs):
 
         super().__init__()
         self.split = split
@@ -29,16 +41,17 @@ class ImagenetMultiModal(Dataset):
             modality = [modality]
         self.modality = modality
 
-        self.image_extensions = {"colour": "JPEG", "depth": "JPX"}
+        self.modality_exts = {"colour": "JPEG", "depth": "JPX"}
+        self.modality_exts = modality_exts if isinstance(modality_exts, dict) else {m: modality_exts for m in modality}
 
         base_mod = modality[0]
-        base_mod_ext = self.image_extensions[base_mod]
+        base_mod_ext = self.modality_exts[base_mod]
         base_paths = glob.glob(os.path.join(root_data_dir, f"{split}/{base_mod}/**/*.{base_mod_ext}"), recursive=True)
 
         self.mode_image_paths[modality[0]] = base_paths
 
         for mod in modality[1:]:
-            self.mode_image_paths[mod] = [f"{bp.replace(base_mod, mod).strip(base_mod_ext)}{self.image_extensions[mod]}" for bp in base_paths]
+            self.mode_image_paths[mod] = [f"{bp.replace(base_mod, mod).strip(base_mod_ext)}{self.modality_exts[mod]}" for bp in base_paths]
 
         self.mode_types = {"colour": cv2.IMREAD_COLOR, "depth": cv2.IMREAD_GRAYSCALE | cv2.IMREAD_ANYDEPTH}
         self.image_depths = {"colour": 255, "depth": 65535} if self.split == "train" else {"colour": 255, "depth": 65535}
@@ -62,6 +75,7 @@ class ImagenetMultiModal(Dataset):
             self.classes.index = classes["synset"]
 
         self.return_index = return_index
+        self.return_row = return_row
 
     def class_num_to_name(self, class_num):
         return self.classes[self.classes.num == class_num].iloc[0].name
@@ -105,5 +119,11 @@ class ImagenetMultiModal(Dataset):
                 rets.append(class_num)
             if self.return_index:
                 rets.append(idx)
+            elif self.return_row:
+                fp_dict = filepaths
+                for k in fp_dict.keys():
+                    if isinstance(fp_dict[k], Path):
+                        fp_dict[k] = str(fp_dict[k])
+                rets.append(fp_dict)
 
             return rets

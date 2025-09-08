@@ -478,11 +478,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                 save_path = out_base_folder / save_path.relative_to(root.parent)  # keep the dataset folder name
                         save_path.parent.mkdir(parents=True, exist_ok=True)
                         # print(save_path)
+                        data_to_save = {}
+
                         if dists:
                             mean, std = torch.chunk(latent, 2, dim=0)
-                            torch.save({"mean": mean.contiguous().cpu(), "std": std.contiguous().cpu()}, save_path.with_suffix(".pt"))
+                            data_to_save = {"mean": mean.contiguous().cpu(), "std": std.contiguous().cpu()}
                         else:
-                            torch.save(latent.contiguous().cpu(), save_path.with_suffix(".pt"))
+                            data_to_save = {"latent": latent.contiguous().cpu()}  # This might break something
+
+                        if return_class:
+                            data_to_save["class"] = classes[r].contiguous().cpu()
+
+                        torch.save(data_to_save, save_path.with_suffix(".pt"))
 
 
         def train_epoch(dataloaders, subepoch, itercount, epochcount, n_iter, train_pbar):
