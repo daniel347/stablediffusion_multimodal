@@ -1,5 +1,5 @@
 dataset_name: imagenet
-root_data_dir:  ../../datasets/imagenet/ # "/rds/general/user/ds3119/home/datasets/lsun" #
+root_data_dir:  ../../datasets/imagenet/ILSVRC/Data/CLS-LOC/
 input_size: 128
 modality: ["colour", "depth"]
 modality_exts: {"colour": "JPEG", "depth": "JPX"}  # specify extensions for each modality
