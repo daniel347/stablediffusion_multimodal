@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -l select=1:ncpus=4:mem=24gb:ngpus=1
+#PBS -l select=1:ncpus=4:mem=48gb:ngpus=1
 #PBS -l walltime=06:00:00
 
 eval "$(~/miniconda3/bin/conda shell.bash hook)"
@@ -7,4 +7,4 @@ conda activate mmvae
 export PYTHONPATH="${PYTHONPATH}:${HOME}/python_modules/"
 
 cd $HOME/multimodal_generation/stablediffusion/
-python train_mm_autoencoder_image_depth.py -cn celeba_semseg_autoencoder_train_z_combiner +run=celeba_semseg_cos_sim
+python train_mm_autoencoder_image_depth.py -cn celeba_semseg_autoencoder_train +run=celeba_semseg_4_1_split
