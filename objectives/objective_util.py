@@ -151,10 +151,11 @@ class RBF(nn.Module):
 
 class MMDIndependenceLoss(nn.Module):
 
-    def __init__(self, kernel=RBF(), target_dim=2):
+    def __init__(self, kernel=RBF(), target_dim=2, max_batch_size=1000):
         super().__init__()
         self.kernel = kernel
         self.target_dim = target_dim
+        self.max_batch_size = max_batch_size
 
     def forward(self, X, Y):
         permutation = [i for i in range(len(X.shape)) if i != self.target_dim] + [self.target_dim]
@@ -165,13 +166,21 @@ class MMDIndependenceLoss(nn.Module):
         perm = torch.randperm(X_flat.shape[0])
         XY_ind_samples = torch.cat([X_flat, Y_flat[perm, :]], dim=1)
 
-        K = self.kernel(torch.vstack([XY_samples, XY_ind_samples]))
+        loss = 0
 
-        X_size = X.shape[0]
-        XX = K[:X_size, :X_size].mean()
-        XY = K[:X_size, X_size:].mean()
-        YY = K[X_size:, X_size:].mean()
-        return XX - 2 * XY + YY
+        XY_samp_chunk = torch.chunk(XY_samples, max(1, math.ceil(XY_samples.shape[0] / self.max_batch_size)), dim=0)
+        XY_ind_samp_chunk = torch.chunk(XY_ind_samples, max(1, math.ceil(XY_ind_samples.shape[0] / self.max_batch_size)), dim=0)
+
+        for XY_samp, XY_ind_samp in zip(XY_samp_chunk, XY_ind_samp_chunk):
+            K = self.kernel(torch.vstack([XY_samp, XY_ind_samp]))
+
+            X_size = X.shape[0]
+            XX = K[:X_size, :X_size].mean()
+            XY = K[:X_size, X_size:].mean()
+            YY = K[X_size:, X_size:].mean()
+            loss = loss +  XX - 2 * XY + YY
+
+        return loss / len(XY_samp_chunk)
 
 
 class CosSimIndependenceLoss(nn.Module):
