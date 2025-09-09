@@ -160,12 +160,14 @@ class DisentanglingObjective(torch.nn.Module):
 
 
         # z - w independence loss with MMD
-        mmd_loss = MMDIndependenceLoss()
+        mmd_loss = MMDIndependenceLoss(target_dim=1)
 
         for r, (qz_x, qw_x_r) in enumerate(zip(qz_xs, qw_xs)):
             lmmd_zw_r = 0
             lmmd_ww_r = 0
             for d, qw_x in enumerate(qw_xs):
+                print(f"qz_x mean: {qz_x.mean.shape}")
+                print(f"qw_x mean: {qw_x.mean.shape}")
                 lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x.mean, qw_x.mean)
                 if r != d:
                     lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r.mean, qw_x.mean)
