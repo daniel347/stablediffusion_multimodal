@@ -16,6 +16,6 @@ init_from_stable_diffusion: True
 #         ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_07__08_56_12_4_1_split/model_2400.pt"
 
 
-default:
+defaults:
   - override /model: v2-inference-mm-rgb-semseg-4-1-split
   - _self_
