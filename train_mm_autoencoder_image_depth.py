@@ -67,7 +67,7 @@ def initialise_model(conf):
 
     if conf.init_from_stable_diffusion:
         print("Initialising autoencoders with stable diffusion weights")
-        sd_state_dict = torch.load("checkpoints/v2-1_512-ema-pruned.ckpt")
+        sd_state_dict = torch.load("checkpoints/v2-1_512-ema-pruned.ckpt", weights_only=False)
         first_stage_dict = {}
         for name, param in sd_state_dict["state_dict"].items():
             if "first_stage_model" in name:

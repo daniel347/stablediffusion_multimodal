@@ -157,8 +157,9 @@ class MMDIndependenceLoss(nn.Module):
         self.target_dim = target_dim
 
     def forward(self, X, Y):
-        X_flat = X.flatten(start_dim=self.target_dim+1).permute(0, 1, 3, 2).flatten(end_dim=-2)
-        Y_flat = Y.flatten(start_dim=self.target_dim+1).permute(0, 1, 3, 2).flatten(end_dim=-2)
+        permutation = [i for i in range(len(X.shape)) if i != self.target_dim] + [self.target_dim]
+        X_flat = X.permute(permutation).flatten(end_dim=-2)
+        Y_flat = Y.permute(permutation).flatten(end_dim=-2)
 
         XY_samples = torch.cat([X_flat, Y_flat], dim=1)
         perm = torch.randperm(X_flat.shape[0])
@@ -181,8 +182,9 @@ class CosSimIndependenceLoss(nn.Module):
         self.cos_sim = nn.CosineSimilarity(dim=1, eps=1e-6)
 
     def forward(self, X, Y):
-        X_flat = X.flatten(start_dim=self.target_dim + 1).permute(0, 1, 3, 2).flatten(end_dim=-2)
-        Y_flat = Y.flatten(start_dim=self.target_dim + 1).permute(0, 1, 3, 2).flatten(end_dim=-2)
+        permutation = [i for i in range(len(X.shape)) if i != self.target_dim] + [self.target_dim]
+        X_flat = X.permute(permutation).flatten(end_dim=-2)
+        Y_flat = Y.permute(permutation).flatten(end_dim=-2)
 
         sim = self.cos_sim(X_flat, Y_flat)
         return sim.abs().mean()

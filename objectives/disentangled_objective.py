@@ -179,7 +179,7 @@ class DisentanglingObjective(torch.nn.Module):
             lws[r] = lws[r] - lmmd_ww_r * self.mmd_zw_weight
 
         # z - w cosine similarity loss
-        cos_sim = CosSimIndependenceLoss()
+        cos_sim = CosSimIndependenceLoss(target_dim=1)
 
         for r, (qz_x, qw_x_r) in enumerate(zip(qz_xs, qw_xs)):
             lcos_zw_r = 0

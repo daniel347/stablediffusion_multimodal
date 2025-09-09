@@ -1,0 +1,5 @@
+dataset_name: mm_celeba
+root_data_dir:  ../datasets/CelebAMask-HQ # ../mmvaeplus/data/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
+input_size: 128
+force_reload: True
+modality: ["colour", "semseg"]
