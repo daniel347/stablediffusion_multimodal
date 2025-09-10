@@ -5,15 +5,16 @@ notes: "We train the autoencoder with 4 z channels and only 1 w channel in the l
 
 num_epochs: 10
 
-model_initialisation: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_07__08_56_12_4_1_split/model_2400.pt"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__09_35_15_4_1_split/model_3600.pt"
+# "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_07__08_56_12_4_1_split/model_2400.pt"
 init_from_stable_diffusion: False
 
 
-model:
-  params:
-    first_stage_config:
-      params:
-        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_09__20_01_00_4_1_split/model_1600.pt"
+# model:
+#   params:
+#     first_stage_config:
+#       params:
+#          ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__09_35_15_4_1_split/model_3600.pt"
 
 
 defaults:
