@@ -87,9 +87,10 @@ class ZCombinerObj4Way(torch.nn.Module):
 
 
         # z - w independence loss with MMD
-        mmd_loss = MMDIndependenceLoss()
+        mmd_loss = MMDIndependenceLoss(target_dim=1)
 
         for r, qw_x_r in enumerate(qw_xs):
+            print(f"qz_x shape: {qz_x.mean.shape}   qw_x_r shape: {qw_x_r.mean.shape}")
             lmmd_zw_r = mmd_loss(qz_x.mean, qw_x_r.mean)
             loss_dict["mmd_zw"] -= lmmd_zw_r.detach().cpu().sum().item()
             lws[0] = lws[0] - lmmd_zw_r * self.mmd_ww_weight
