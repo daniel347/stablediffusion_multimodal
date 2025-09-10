@@ -3,6 +3,7 @@ import math
 from typing import Mapping, Any
 
 import numpy as np
+import torch
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
@@ -486,6 +487,7 @@ class UNetModel(nn.Module):
         disable_middle_self_attn=False,
         use_linear_in_transformer=False,
         adm_in_channels=None,
+        n_time_embs=1, # more for modality independent timesteps
     ):
         super().__init__()
         if use_spatial_transformer:
@@ -542,11 +544,14 @@ class UNetModel(nn.Module):
         self.predict_codebook_ids = n_embed is not None
 
         time_embed_dim = model_channels * 4
-        self.time_embed = nn.Sequential(
-            linear(model_channels, time_embed_dim),
+        time_embed_dim_per_tstep = time_embed_dim / n_time_embs
+        self.n_time_embs = n_time_embs
+
+        self.time_embeds = nn.ModuleList([nn.Sequential(
+            linear(model_channels, time_embed_dim_per_tstep),
             nn.SiLU(),
-            linear(time_embed_dim, time_embed_dim),
-        )
+            linear(time_embed_dim, time_embed_dim_per_tstep),
+        ) for _ in range(n_time_embs)])
 
         if self.num_classes is not None:
             if isinstance(self.num_classes, int):
@@ -793,8 +798,19 @@ class UNetModel(nn.Module):
             self.num_classes is not None
         ), "must specify y if and only if the model is class-conditional"
         hs = []
-        t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
-        emb = self.time_embed(t_emb)
+        if isinstance(timesteps, torch.Tensor):
+            # same timestep for all modalities
+            t_emb = timestep_embedding(timesteps, self.model_channels, repeat_only=False)
+            emb = torch.cat([ti(t_emb) for ti in self.time_embeds], dim=1)
+        elif isinstance(timesteps, list):
+            # different timestep for each modality
+            assert len(timesteps) == self.n_time_embs, f'You have {self.n_time_embs} time embedding modules, but you passed {len(timesteps)} different timesteps'
+            emb = []
+            for i, t in enumerate(timesteps):
+                t_emb = timestep_embedding(t, self.model_channels, repeat_only=False)
+                emb.append(self.time_embeds[i](t_emb))
+            emb = torch.cat(emb, dim=1)
+
 
         if self.num_classes is not None:
             assert y.shape[0] == x.shape[0]
