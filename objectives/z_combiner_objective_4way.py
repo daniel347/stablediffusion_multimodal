@@ -87,14 +87,15 @@ class ZCombinerObj4Way(torch.nn.Module):
 
 
         # z - w independence loss with MMD
-        mmd_loss = MMDIndependenceLoss()
+        mmd_loss = MMDIndependenceLoss(target_dim=1)
 
         for r, qw_x_r in enumerate(qw_xs):
+            print(f"qz_x shape: {qz_x.mean.shape}   qw_x_r shape: {qw_x_r.mean.shape}")
             lmmd_zw_r = mmd_loss(qz_x.mean, qw_x_r.mean)
             loss_dict["mmd_zw"] -= lmmd_zw_r.detach().cpu().sum().item()
             lws[0] = lws[0] - lmmd_zw_r * self.mmd_ww_weight
 
-        return torch.stack(lws), torch.stack(us), loss_dict, (posteriors, recons, us)
+        return torch.stack(lws), torch.cat(us, dim=2), loss_dict, (posteriors, recons, us)
 
     def forward(self, model, x, K=1, test=False, **kwargs):
         S = x[0].shape[0] # compute_microbatch_split(x, K)
@@ -102,9 +103,10 @@ class ZCombinerObj4Way(torch.nn.Module):
 
         lw, uss, loss_dicts, model_outs = zip(*[self._m_dreg(model, _x, K, test, **kwargs) for _x in x_split])
         combined_loss_dict = {key: sum([loss_dict[key] for loss_dict in loss_dicts]) for key in loss_dicts[0].keys()}
+        print(f"lw len: {len(lw)} shapes: {[l.shape for l in lw]}, uss shapes: {[u.shape for u in uss]}")
 
         lw = torch.cat(lw, 2)  # concat on batch
-        uss = torch.cat(uss, 2)  # concat on batch
+        uss = torch.cat(uss, 1)  # concat on batch
         model_outs = model_outs[0]
         with torch.no_grad():
             grad_wt = (lw - torch.logsumexp(lw, 1, keepdim=True)).exp()

@@ -1,11 +1,11 @@
 # @package _global_
 
 name: "sample_latents_diff_ema_opt_metrics"
-notes: "We compute metrics with our best ema optimised diffusion model, with the sampled latents"
+notes: "We compute metrics with our best ema optimised diffusion model, with the sampled latents. We use 50000 samples to see if it makes a difference"
 
 function:
   name: test_metrics
-  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True}
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 50000, gen_samples: True}
   
 # folder_name: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_07_02__13_52_48_mmd_ablation_diff_ema_opt_metrics/temp_fid"}
 
@@ -16,7 +16,7 @@ training:
   latent_scale_per_channel: True
   compute_latent_scale: True
 
-model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_07_01__02_38_23_new_hyp_sample_latents/model_it33000_ema_0.125.pt
+model_initialisation: /rds/general/user/ds3119/home/multimodal_generation/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_07_01__02_38_23_new_hyp_sample_latents/model_it33000_ema_0.125.pt
 
 
 defaults:

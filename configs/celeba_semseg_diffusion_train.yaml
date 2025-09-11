@@ -3,8 +3,8 @@ device: "cuda:0" # "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Stable_Diffusion"
 print_freq: 50
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
-name: "new_hyp_sample_latents"
-notes: "We train diffusion with sampled latent distributions, rather than taking the mean"
+name: "correct_mmd_loss"
+notes: "We train diffusion with the autoencoder trained with correct mmd loss over the channel dim"
 
 function:
   name: training_loop # test_metrics  # training_loop  # test_epoch
@@ -31,7 +31,7 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: ../outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_20__22_34_18_new_hyp_z_comb_training/model_4400.pt
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__22_56_48_correct_mmd_loss_z_comb/model_4800.pt"
 
 model_initialisation: # ../outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_06_24__08_18_56_new_hyp_diff_train/model_it6384_ema_0.100.pt
 init_from_stable_diffusion: False
