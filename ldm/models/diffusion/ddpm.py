@@ -79,7 +79,8 @@ class DDPM(pl.LightningModule):
                  ucg_training=None,
                  reset_ema=False,
                  reset_num_ema_updates=False,
-                 sigma_data=0.5
+                 sigma_data=0.5,
+                 t_split_sizes=[3]
                  ):
         super().__init__()
         assert parameterization in ["eps", "x0", "v"], 'currently only supporting "eps" and "x0" and "v"'
@@ -141,6 +142,7 @@ class DDPM(pl.LightningModule):
             self.ucg_prng = np.random.RandomState()
 
         self.sigma_data = sigma_data
+        self.t_split_sizes = t_split_sizes
 
     def register_schedule(self, given_betas=None, beta_schedule="linear", timesteps=1000,
                           linear_start=1e-4, linear_end=2e-2, cosine_s=8e-3):
@@ -362,8 +364,20 @@ class DDPM(pl.LightningModule):
 
     def q_sample(self, x_start, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
-        return (extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
-                extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise)
+        if isinstance(t, list) and len(self.t_split_sizes) == len(t):
+            x_noisy = []
+            c = 0
+            for ti, tsi in zip(t, self.t_split_sizes):
+                sub_latent_shape = [x_start.shape[0], tsi, *x_start.shape[2:]]
+                x_noisy.append(extract_into_tensor(self.sqrt_alphas_cumprod, t, sub_latent_shape) * x_start[:, c:c+tsi] +
+                                extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, sub_latent_shape) * noise[:, c:c+tsi])
+                c += tsi
+
+            x_noisy = torch.cat(x_noisy, dim=1)
+            return x_noisy
+        else:
+            return (extract_into_tensor(self.sqrt_alphas_cumprod, t, x_start.shape) * x_start +
+                    extract_into_tensor(self.sqrt_one_minus_alphas_cumprod, t, x_start.shape) * noise)
 
     def get_v(self, x, noise, t):
         return (
@@ -859,6 +873,7 @@ class LatentDiffusion(DDPM):
         if t_sampler is None:
             t_sampler = lambda x: torch.randint(0, self.num_timesteps, (x.shape[0],))
         t = t_sampler(x).to(self.device).long()
+        print(f"timestep: {t}")
         return self.p_losses(x, c, t, *args, **kwargs)
 
     def apply_model(self, x_noisy, t, cond, return_ids=False):
@@ -905,9 +920,6 @@ class LatentDiffusion(DDPM):
 
     def p_losses(self, x_start, cond, t, noise=None):
         noise = default(noise, lambda: torch.randn_like(x_start))
-        if isinstance(t, list):
-            # sampling different modalities with different timesteps
-
         x_noisy = self.q_sample(x_start=x_start, t=t, noise=noise)
         model_output = self.apply_model(x_noisy, t, cond)
 
@@ -928,7 +940,14 @@ class LatentDiffusion(DDPM):
         loss_simple = self.get_loss(model_output, target, t, mean=False).mean(dim=mean_dims)
         loss_dict.update({f'{prefix}/loss_simple': loss_simple.mean()})
 
-        logvar_t = self.logvar[t.cpu()].to(self.device)
+
+        assert not (isinstance(t, list) and self.learn_logvar), "cannot use learned logvar with independent timesteps currently"
+        if isinstance(t, list):
+            t_val = t[0].cpu()
+        else:
+            t_val = t.cpu()
+
+        logvar_t = self.logvar[t_val].to(self.device)
         loss = loss_simple / torch.exp(logvar_t) + logvar_t
         # loss = loss_simple / torch.exp(self.logvar) + self.logvar
         if self.learn_logvar:
@@ -938,7 +957,7 @@ class LatentDiffusion(DDPM):
         loss = self.l_simple_weight * loss.mean()
 
         loss_vlb = self.get_loss(model_output, target, t, mean=False).mean(dim=mean_dims)
-        loss_vlb = (self.lvlb_weights[t] * loss_vlb).mean()
+        loss_vlb = (self.lvlb_weights[t_val] * loss_vlb).mean()
         loss_dict.update({f'{prefix}/loss_vlb': loss_vlb})
         loss += (self.original_elbo_weight * loss_vlb)
         loss_dict.update({f'{prefix}/loss': loss})

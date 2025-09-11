@@ -293,3 +293,16 @@ class EDM2tsampler():
         tind = torch.argmin(torch.abs(self.sigma_sched[None, :] - sigma[:, None]), dim=1)
         t = torch.clamp(tind, 0, self.t_max)
         return t
+
+
+class IndependentTimestepSampler():
+
+    def __init__(self, n_splits, t_max=999):
+        self.t_max = t_max
+        self.n_splits = n_splits
+
+    def __call__(self, images):
+        t = []
+        for _i in range(self.n_splits):
+            t.append(torch.randint(0, self.t_max+1, (images.shape[0],), device=images.device))
+        return t
