@@ -16,7 +16,7 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_07__20_48_16_4_1_split_z_comb/model_4800.pt"
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__22_37_08_4_1_split_z_combiner/model_6000.pt" 
 
 defaults:
   - override /model: v2-inference-mm-rgb-semseg-4-1-split
