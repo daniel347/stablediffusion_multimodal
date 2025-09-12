@@ -2,8 +2,8 @@
 
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
-name: "celeba_orig_sd_test_latent_std"
-notes: "We check the stds of the latent vectors predicted by the original_stable diffusion autoencoder"
+name: "celeba_orig_sd_test_fid"
+notes: "We check the performance of the original SD model on CelebA images, using FID."
 
 function:
   name: test
