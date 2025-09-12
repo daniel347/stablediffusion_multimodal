@@ -39,3 +39,45 @@ class ZCombinerNet(nn.Module):
         return z
 
 
+class AttentionPoolingZCombiner(nn.Module):
+
+    def __init__(self, z_dim, nz, ch, dist_input_output, attn_dim=64):
+        super(AttentionPoolingZCombiner, self).__init__()
+
+        self.dist_input_output = dist_input_output
+        mult = 2 if dist_input_output else 1
+
+        self.Q = nn.Linear(z_dim * mult, attn_dim)
+        self.K = nn.Linear(z_dim * mult, attn_dim)
+        self.attn_scale = 1.0 / (attn_dim ** 0.5)
+
+    def forward(self, zs):
+        if isinstance(zs[0], DiagonalGaussianDistribution):
+            zs = [torch.cat([z.mean, z.logvar], dim=1).permute((0, 2, 3, 1)) for z in zs]
+
+        zs = torch.stack(zs, dim=-2)
+        q = self.Q(zs)
+        k = self.K(zs)
+
+        attn = torch.softmax(q @ k * self.attn_scale, dim=-2)
+        pool_weights = attn.mean(dim=-1)
+        z = torch.sum(zs * pool_weights.unsqueeze(-1), dim=-2)
+        z = z.permute((0, 3, 1, 2))
+        return z
+
+class AveragingZCombiner(nn.Module):
+
+    def __init__(self, z_dim, nz, ch, dist_input_output):
+        super(AveragingZCombiner, self).__init__()
+
+        self.dist_input_output = dist_input_output
+        mult = 2 if dist_input_output else 1
+
+    def forward(self, zs):
+        if isinstance(zs[0], DiagonalGaussianDistribution):
+            zs = [torch.cat([z.mean, z.logvar], dim=1).permute((0, 2, 3, 1)) for z in zs]
+
+        zs = torch.stack(zs, dim=-2)
+        z = torch.mean(zs, dim=-2)
+        z = z.permute((0, 3, 1, 2))
+        return z

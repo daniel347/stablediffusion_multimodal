@@ -10,12 +10,13 @@ function:
 training:
   precompute_latents: True
   force_recompute: False
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_4_1_split
   latent_scale_per_channel: True
   compute_latent_scale: True
 
 model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_09_11__09_22_11_4_1_split/model_32000.pt"
 
 defaults:
+  - override /model: v2-inference-mm-rgb-semseg-4-1-split
   - override /ema: dummy_ema
   - _self_
