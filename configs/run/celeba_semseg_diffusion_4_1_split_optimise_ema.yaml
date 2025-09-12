@@ -14,6 +14,13 @@ training:
   latent_scale_per_channel: True
   compute_latent_scale: True
 
+# We need to clear this so we dont try to load the wrong model
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path:
+
 model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_09_11__09_22_11_4_1_split_diff/model_32000.pt"
 
 defaults:
