@@ -16,8 +16,7 @@ training:
   latent_scale_per_channel: True
   compute_latent_scale: True
 
-model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_09_11__15_53_49_correct_mmd_loss_ema_opt/model_it25000_ema_0.175.pt
-
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_09_11__11_08_17_correct_mmd_loss/model_it25000_ema_0.175.pt
 
 defaults:
   - override /ema: dummy_ema
