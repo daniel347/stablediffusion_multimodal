@@ -65,19 +65,26 @@ class AttentionPoolingZCombiner(nn.Module):
         z = z.permute((0, 3, 1, 2))
         return z
 
-class AveragingZCombiner(nn.Module):
+
+class MomentMatchingZCombiner(nn.Module):
 
     def __init__(self, z_dim, nz, ch, dist_input_output):
-        super(AveragingZCombiner, self).__init__()
+        super(MomentMatchingZCombiner, self).__init__()
 
         self.dist_input_output = dist_input_output
-        mult = 2 if dist_input_output else 1
 
     def forward(self, zs):
         if isinstance(zs[0], DiagonalGaussianDistribution):
-            zs = [torch.cat([z.mean, z.logvar], dim=1).permute((0, 2, 3, 1)) for z in zs]
+            mean = sum([z.mean for z in zs])/len(zs)
+            vars = [torch.exp(z.logvar) for z in zs]
+            var = (sum(vars) + sum([z.mean**2 for z in zs]))/len(zs) - mean**2
+            logvar = torch.log(var)
 
-        zs = torch.stack(zs, dim=-2)
-        z = torch.mean(zs, dim=-2)
-        z = z.permute((0, 3, 1, 2))
-        return z
+            z = torch.cat([mean, logvar], dim=1)
+            if self.dist_input_output:
+                return DiagonalGaussianDistribution(z)
+            else:
+                return z
+        else:
+            # without variances, just take the mean
+            return torch.mean(torch.stack(zs, dim=0), dim=0)
