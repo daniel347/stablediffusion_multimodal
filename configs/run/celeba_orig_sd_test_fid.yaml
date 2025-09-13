@@ -21,6 +21,6 @@ data:
 
 defaults:
   - override /data: mm_celeba
-  - override /training/discriminator: none
-  - override /training/objective: single_mode_objective
+  - /training/discriminator: none
+  - /training/objective: single_mode_objective
   - override /model: v2-inference-rgb-orig
