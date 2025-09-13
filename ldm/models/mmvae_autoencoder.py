@@ -27,8 +27,11 @@ class MMVAEplus(nn.Module):
         self.vaes = nn.ModuleList([instantiate_from_config(params) for params in vae_params])  # List of unimodal VAEs (one for each modality)
         self.modelName = None  # Filled-in in subclass
 
+        self.llik_scales = [1.0 for _ in range(len(self.vaes))]  # for compatibility with non-disentangled objective
+
         self.w_channels = latent_channel_w
         self.z_channels = latent_channel_z
+        self.u_channels = self.w_channels + self.z_channels
 
         w_shape = (vae_params[0]["params"]["ddconfig"]["w_channels"], vae_params[0]["params"]["embed_spatial_dim"], vae_params[0]["params"]["embed_spatial_dim"])
         z_shape = (vae_params[0]["params"]["ddconfig"]["z_channels"] - vae_params[0]["params"]["ddconfig"]["w_channels"],
