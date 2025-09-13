@@ -40,6 +40,8 @@ class NonDisentanglingObjective(torch.nn.Module):
         loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "adversarial_loss": 0}
         lw = 0
         for r, px_u in enumerate(px_us):
+            if isinstance(px_u, list):
+                px_u = px_u[r]   # if we return a 2D list just take the diagonal
             wlpips_r = self.wlpips[r] if hasattr(self.wlpips, "__getitem__") else self.wlpips
             lpx_u = reconstruction_loss(px_u, x[r], self.mod.llik_scales[r], loss_dict, wlpips_r, self.lpips, self.channel_weighting[r])
             lw = lw + lpx_u
