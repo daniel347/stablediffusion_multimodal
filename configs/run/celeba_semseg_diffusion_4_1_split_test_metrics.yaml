@@ -4,8 +4,8 @@ name: "4_1_split_ema_opt_metrics"
 notes: "We compute metrics with the 4_1 split EMA optimised model"
 
 function:
-  name: test_optimum_EMA
-  kwargs: {out_nimgs: [2304000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256}
+  name: test_metrics
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True}
 
 training:
   precompute_latents: True
@@ -14,7 +14,7 @@ training:
   latent_scale_per_channel: True
   compute_latent_scale: True
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_09_11__09_22_11_4_1_split/model_32000.pt"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_09_11__09_22_11_4_1_split_diff/model_it32000_ema_0.175.pt"
 
 defaults:
   - override /model: v2-inference-mm-rgb-semseg-4-1-split
