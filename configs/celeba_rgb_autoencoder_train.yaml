@@ -30,4 +30,5 @@ defaults:
   - model: v2-inference-rgb-orig
   - training: autoencoder_training_default
   - override training/objective: single_mode_objective
+  - override training/discriminator: rgb_discriminator
   - _self_

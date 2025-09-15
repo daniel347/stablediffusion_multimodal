@@ -1,0 +1,7 @@
+target: ldm.models.discriminator.MMJointDiscriminator
+params:
+  disc_params:
+    target: ldm.models.discriminator.PatchDiscriminator
+    params:
+      input_nc: 3
+discriminator_lr: 4e-4
