@@ -34,18 +34,18 @@ params:
       context_dim:
       legacy: False
 
-    first_stage_config:
-      target: ldm.models.non_disentangled_autoencoder.NonDisentanglingAE
-      params:
-        prior_dist: normal
-        latent_channel_u: 4
-        ckpt_path: #
-        seperable: False
-        lik_dist_splits: [ 3 ]
-        lik_dists: [ Laplace ]
-        final_acts: [ identity ]
-        llik_scales: [ 1.0 ]
-        scale_per_channel: False
+  first_stage_config:
+    target: ldm.models.non_disentangled_autoencoder.NonDisentanglingAE
+    params:
+      prior_dist: normal
+      latent_channel_u: 4
+      ckpt_path: #
+      seperable: False
+      lik_dist_splits: [ 3 ]
+      lik_dists: [ Laplace ]
+      final_acts: [ identity ]
+      llik_scales: [ 1.0 ]
+      scale_per_channel: False
 
       vae_params:
         - target: ldm.models.autoencoder.AutoencoderKL  # RGB images
