@@ -444,7 +444,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 s_disp = display_data_fs[m](img.detach().cpu())
                                 tvu.save_image(s_disp, str(tempdirs[name] / f"sample_{name}_{i * conf.training.batch_size + j}.png"))
 
-                    if i == 25:  # select a different scene
+                    if i == 5:  # select a different scene
                         for m, (name, dbatch) in enumerate(zip(modality, data)):
                             dbatch = dbatch.detach().cpu()
                             dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
@@ -470,7 +470,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             del cg_imgs
 
                         # Also save some example latent vectors and example reconstructions (without averaging z)
-                        latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
+                        latents = model.module("encode", data, avg_z=False, return_dist=False) if data_parallel else model("encode", data, avg_z=False, return_dist=False)
 
                         if mod.factorised_latent_space:
                             num_zs = len(latents) - NUM_VAES
