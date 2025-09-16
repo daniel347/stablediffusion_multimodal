@@ -1,7 +1,7 @@
 # @package _global_
 
-outputdir: ../outputs #  /rds/general/user/ds3119/ephemeral/outputs
-device: "cpu"
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
+device: "cuda:0"
 name: "celeba_orig_sd_lora_train"
 notes: "We check the performance of the original SD model on CelebA images finetuning with LoRAConv."
 
