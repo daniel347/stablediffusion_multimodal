@@ -14,7 +14,7 @@ class NonDisentanglingAE(nn.Module):
     """
     MMVAEplus class definition.
     """
-    def __init__(self, prior_dist, latent_channel_u, lik_dist_splits=None, lik_dists=None, final_acts=None, llik_scales=None, seperable=True, vae_params=None, ckpt_path=None, scale_per_channel=False):
+    def __init__(self, prior_dist, latent_channel_u, lik_dist_splits=None, lik_dists=None, final_acts=None, llik_scales=None, seperable=True, vae_params=None, ckpt_path=None, scale_per_channel=False, **kwargs):
         super(NonDisentanglingAE, self).__init__()
         if isinstance(prior_dist, str):
             if prior_dist == 'normal':

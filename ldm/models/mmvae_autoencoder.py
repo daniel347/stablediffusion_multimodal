@@ -12,7 +12,7 @@ class MMVAEplus(nn.Module):
     """
     MMVAEplus class definition.
     """
-    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False, stop_self_z_grad=False, z_net_params=None, scale_per_channel=False):
+    def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False, stop_self_z_grad=False, z_net_params=None, scale_per_channel=False, **kwargs):
         super(MMVAEplus, self).__init__()
         if isinstance(prior_dist, str):
             if prior_dist == 'normal':

@@ -5,6 +5,9 @@ device: "cuda:0"
 name: "celeba_orig_sd_lora_train"
 notes: "We check the performance of the original SD model on CelebA images finetuning with LoRAConv."
 
+training:
+  lora_finetune: True
+  lora_bias_mode: "none" # none, all, lora_only
 
 defaults:
   - override /model: v2-inference-rgb-orig-lora

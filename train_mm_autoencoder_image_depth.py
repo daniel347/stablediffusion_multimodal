@@ -39,6 +39,7 @@ from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoC
 from objectives import get_objective, get_adversarial_loss, train_discriminator
 from objectives.mmvae_objectives import m_dreg
 from ldm.data import get_dataset
+from ldm.modules.lora_layers import mark_only_lora_as_trainable
 
 from utils import (save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs,
                    move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders,
@@ -93,13 +94,15 @@ def initialise_model(conf):
                 print(f"Missing key: {m}")
             for u in U:
                 print(f"Unused key: {u}")
-        model = MMVAEDataParallelWrapper(model)
 
-        model_parameters = filter(lambda p: p.requires_grad, model.parameters())
-        params = sum([np.prod(p.size()) for p in model_parameters])
-        print(f"Trainable parameter count: {params}")
+    if conf.training.get("lora_finetune", False):
+        print("Using LoRA finetuning for the autoencoder")
+        bias_mode = conf.training.get("lora_bias_mode", "none")
+        mark_only_lora_as_trainable(model, bias=bias_mode)
 
-        return model
+    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+    params = sum([np.prod(p.size()) for p in model_parameters])
+    print(f"Trainable parameter count: {params}")
 
     return MMVAEDataParallelWrapper(model)
 
