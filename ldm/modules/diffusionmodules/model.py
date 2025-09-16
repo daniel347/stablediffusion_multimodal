@@ -7,6 +7,7 @@ from einops import rearrange
 from typing import Optional, Any
 from functools import partial
 import torch.utils.checkpoint
+from ..lora_layers import Conv2d as LoraConv2d
 
 from ldm.modules.attention import MemoryEfficientCrossAttention
 
@@ -91,42 +92,48 @@ class Downsample(nn.Module):
 
 class ResnetBlock(nn.Module):
     def __init__(self, *, in_channels, out_channels=None, conv_shortcut=False,
-                 dropout, temb_channels=512):
+                 dropout, temb_channels=512, use_lora=False, lora_r=4):
         super().__init__()
         self.in_channels = in_channels
         out_channels = in_channels if out_channels is None else out_channels
         self.out_channels = out_channels
         self.use_conv_shortcut = conv_shortcut
 
+        if use_lora:
+            def conv(*args, **kwargs):
+                return LoraConv2d(*args, **kwargs, r=lora_r)
+        else:
+            conv = torch.nn.Conv2d
+
         self.norm1 = Normalize(in_channels)
-        self.conv1 = torch.nn.Conv2d(in_channels,
-                                     out_channels,
-                                     kernel_size=3,
-                                     stride=1,
-                                     padding=1)
+        self.conv1 = conv(in_channels,
+                         out_channels,
+                         kernel_size=3,
+                         stride=1,
+                         padding=1)
         if temb_channels > 0:
             self.temb_proj = torch.nn.Linear(temb_channels,
                                              out_channels)
         self.norm2 = Normalize(out_channels)
         self.dropout = torch.nn.Dropout(dropout)
-        self.conv2 = torch.nn.Conv2d(out_channels,
-                                     out_channels,
-                                     kernel_size=3,
-                                     stride=1,
-                                     padding=1)
+        self.conv2 = conv(out_channels,
+                         out_channels,
+                         kernel_size=3,
+                         stride=1,
+                         padding=1)
         if self.in_channels != self.out_channels:
             if self.use_conv_shortcut:
-                self.conv_shortcut = torch.nn.Conv2d(in_channels,
-                                                     out_channels,
-                                                     kernel_size=3,
-                                                     stride=1,
-                                                     padding=1)
+                self.conv_shortcut = conv(in_channels,
+                                         out_channels,
+                                         kernel_size=3,
+                                         stride=1,
+                                         padding=1)
             else:
-                self.nin_shortcut = torch.nn.Conv2d(in_channels,
-                                                    out_channels,
-                                                    kernel_size=1,
-                                                    stride=1,
-                                                    padding=0)
+                self.nin_shortcut = conv(in_channels,
+                                        out_channels,
+                                        kernel_size=1,
+                                        stride=1,
+                                        padding=0)
 
     def forward(self, x, temb):
         h = x
@@ -152,31 +159,36 @@ class ResnetBlock(nn.Module):
 
 
 class AttnBlock(nn.Module):
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, use_lora=False, lora_r=4):
         super().__init__()
         self.in_channels = in_channels
+        if use_lora:
+            def conv(*args, **kwargs):
+                return LoraConv2d(*args, **kwargs, r=lora_r)
+        else:
+            conv = torch.nn.Conv2d
 
         self.norm = Normalize(in_channels)
-        self.q = torch.nn.Conv2d(in_channels,
+        self.q = conv(in_channels,
                                  in_channels,
                                  kernel_size=1,
                                  stride=1,
                                  padding=0)
-        self.k = torch.nn.Conv2d(in_channels,
+        self.k = conv(in_channels,
                                  in_channels,
                                  kernel_size=1,
                                  stride=1,
                                  padding=0)
-        self.v = torch.nn.Conv2d(in_channels,
+        self.v = conv(in_channels,
                                  in_channels,
                                  kernel_size=1,
                                  stride=1,
                                  padding=0)
-        self.proj_out = torch.nn.Conv2d(in_channels,
-                                        in_channels,
-                                        kernel_size=1,
-                                        stride=1,
-                                        padding=0)
+        self.proj_out = conv(in_channels,
+                                in_channels,
+                                kernel_size=1,
+                                stride=1,
+                                padding=0)
 
     def forward(self, x):
         h_ = x
@@ -211,27 +223,32 @@ class MemoryEfficientAttnBlock(nn.Module):
         Note: this is a single-head self-attention operation
     """
     #
-    def __init__(self, in_channels):
+    def __init__(self, in_channels, use_lora=False, lora_r=4):
         super().__init__()
         self.in_channels = in_channels
+        if use_lora:
+            def conv(*args, **kwargs):
+                return LoraConv2d(*args, **kwargs, r=lora_r)
+        else:
+            conv = torch.nn.Conv2d
 
         self.norm = Normalize(in_channels)
-        self.q = torch.nn.Conv2d(in_channels,
+        self.q = conv(in_channels,
                                  in_channels,
                                  kernel_size=1,
                                  stride=1,
                                  padding=0)
-        self.k = torch.nn.Conv2d(in_channels,
+        self.k = conv(in_channels,
                                  in_channels,
                                  kernel_size=1,
                                  stride=1,
                                  padding=0)
-        self.v = torch.nn.Conv2d(in_channels,
+        self.v = conv(in_channels,
                                  in_channels,
                                  kernel_size=1,
                                  stride=1,
                                  padding=0)
-        self.proj_out = torch.nn.Conv2d(in_channels,
+        self.proj_out = conv(in_channels,
                                         in_channels,
                                         kernel_size=1,
                                         stride=1,
@@ -285,11 +302,10 @@ def make_attn(in_channels, attn_type="vanilla", attn_kwargs=None):
         attn_type = "vanilla-xformers"
     print(f"making attention of type '{attn_type}' with {in_channels} in_channels")
     if attn_type == "vanilla":
-        assert attn_kwargs is None
-        return AttnBlock(in_channels)
+        return AttnBlock(in_channels, **(attn_kwargs if attn_kwargs is not None else {}))
     elif attn_type == "vanilla-xformers":
         print(f"building MemoryEfficientAttnBlock with {in_channels} in_channels...")
-        return MemoryEfficientAttnBlock(in_channels)
+        return MemoryEfficientAttnBlock(in_channels, **(attn_kwargs if attn_kwargs is not None else {}))
     elif type == "memory-efficient-cross-attn":
         attn_kwargs["query_dim"] = in_channels
         return MemoryEfficientCrossAttentionWrapper(**attn_kwargs)
@@ -455,6 +471,7 @@ class Encoder(nn.Module):
     def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
                  attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
                  resolution, z_channels, double_z=True, use_linear_attn=False, attn_type="vanilla", checkpoint=False,
+                 use_lora=False, lora_r=4,
                  **ignore_kwargs):
         super().__init__()
         if use_linear_attn: attn_type = "linear"
@@ -470,12 +487,20 @@ class Encoder(nn.Module):
         else:
             self.checkpoint_fn = lambda fun, *args: fun(*args)
 
+        if use_lora:
+            def conv(*args, **kwargs):
+                return LoraConv2d(*args, **kwargs, r=lora_r)
+        else:
+            conv = torch.nn.Conv2d
+
         # downsampling
-        self.conv_in = torch.nn.Conv2d(in_channels,
-                                       self.ch,
-                                       kernel_size=3,
-                                       stride=1,
-                                       padding=1)
+        if use_lora:
+            self.conv_in = conv(in_channels,
+                               self.ch,
+                               kernel_size=3,
+                               stride=1,
+                               padding=1,
+                                )
 
         curr_res = resolution
         in_ch_mult = (1,)+tuple(ch_mult)
@@ -490,10 +515,12 @@ class Encoder(nn.Module):
                 block.append(ResnetBlock(in_channels=block_in,
                                          out_channels=block_out,
                                          temb_channels=self.temb_ch,
-                                         dropout=dropout))
+                                         dropout=dropout,
+                                         use_lora=use_lora,
+                                         lora_r=lora_r))
                 block_in = block_out
                 if curr_res in attn_resolutions:
-                    attn.append(make_attn(block_in, attn_type=attn_type))
+                    attn.append(make_attn(block_in, attn_type=attn_type, attn_kwargs={"use_lora": use_lora, "lora_r": lora_r}))
             down = nn.Module()
             down.block = block
             down.attn = attn
@@ -507,20 +534,24 @@ class Encoder(nn.Module):
         self.mid.block_1 = ResnetBlock(in_channels=block_in,
                                        out_channels=block_in,
                                        temb_channels=self.temb_ch,
-                                       dropout=dropout)
-        self.mid.attn_1 = make_attn(block_in, attn_type=attn_type)
+                                       dropout=dropout,
+                                       use_lora=use_lora,
+                                       lora_r=lora_r)
+        self.mid.attn_1 = make_attn(block_in, attn_type=attn_type, attn_kwargs={"use_lora": use_lora, "lora_r": lora_r})
         self.mid.block_2 = ResnetBlock(in_channels=block_in,
                                        out_channels=block_in,
                                        temb_channels=self.temb_ch,
-                                       dropout=dropout)
+                                       dropout=dropout,
+                                       use_lora=use_lora,
+                                       lora_r=lora_r)
 
         # end
         self.norm_out = Normalize(block_in)
-        self.conv_out = torch.nn.Conv2d(block_in,
-                                        2*z_channels if double_z else z_channels,
-                                        kernel_size=3,
-                                        stride=1,
-                                        padding=1)
+        self.conv_out = conv(block_in,
+                            2*z_channels if double_z else z_channels,
+                            kernel_size=3,
+                            stride=1,
+                            padding=1)
 
     def forward(self, x):
         # timestep embedding
@@ -554,7 +585,7 @@ class Decoder(nn.Module):
     def __init__(self, *, ch, out_ch, ch_mult=(1,2,4,8), num_res_blocks,
                  attn_resolutions, dropout=0.0, resamp_with_conv=True, in_channels,
                  resolution, z_channels, give_pre_end=False, tanh_out=False, use_linear_attn=False,
-                 attn_type="vanilla", checkpoint=False, **kwargs):
+                 attn_type="vanilla", checkpoint=False, use_lora=False, lora_r=4, **kwargs):
         super().__init__()
         if use_linear_attn: attn_type = "linear"
         self.ch = ch
@@ -571,6 +602,13 @@ class Decoder(nn.Module):
         else:
             self.checkpoint_fn = lambda fun, *args: fun(*args)
 
+        if use_lora:
+            def conv(*args, **kwargs):
+                return LoraConv2d(*args, **kwargs, r=lora_r)
+        else:
+            conv = torch.nn.Conv2d
+
+
         # compute in_ch_mult, block_in and curr_res at lowest res
         in_ch_mult = (1,)+tuple(ch_mult)
         block_in = ch*ch_mult[self.num_resolutions-1]
@@ -580,23 +618,27 @@ class Decoder(nn.Module):
             self.z_shape, np.prod(self.z_shape)))
 
         # z to block_in
-        self.conv_in = torch.nn.Conv2d(z_channels,
-                                       block_in,
-                                       kernel_size=3,
-                                       stride=1,
-                                       padding=1)
+        self.conv_in = conv(z_channels,
+                           block_in,
+                           kernel_size=3,
+                           stride=1,
+                           padding=1)
 
         # middle
         self.mid = nn.Module()
         self.mid.block_1 = ResnetBlock(in_channels=block_in,
                                        out_channels=block_in,
                                        temb_channels=self.temb_ch,
-                                       dropout=dropout)
-        self.mid.attn_1 = make_attn(block_in, attn_type=attn_type)
+                                       dropout=dropout,
+                                       use_lora=use_lora,
+                                       lora_r=lora_r)
+        self.mid.attn_1 = make_attn(block_in, attn_type=attn_type, attn_kwargs={"use_lora": use_lora, "lora_r": lora_r})
         self.mid.block_2 = ResnetBlock(in_channels=block_in,
                                        out_channels=block_in,
                                        temb_channels=self.temb_ch,
-                                       dropout=dropout)
+                                       dropout=dropout,
+                                       use_lora=use_lora,
+                                       lora_r=lora_r)
 
         # upsampling
         self.up = nn.ModuleList()
@@ -608,10 +650,12 @@ class Decoder(nn.Module):
                 block.append(ResnetBlock(in_channels=block_in,
                                          out_channels=block_out,
                                          temb_channels=self.temb_ch,
-                                         dropout=dropout))
+                                         dropout=dropout,
+                                         use_lora=use_lora,
+                                         lora_r=lora_r))
                 block_in = block_out
                 if curr_res in attn_resolutions:
-                    attn.append(make_attn(block_in, attn_type=attn_type))
+                    attn.append(make_attn(block_in, attn_type=attn_type, attn_kwargs={"use_lora": use_lora, "lora_r": lora_r}))
             up = nn.Module()
             up.block = block
             up.attn = attn
@@ -622,11 +666,11 @@ class Decoder(nn.Module):
 
         # end
         self.norm_out = Normalize(block_in)
-        self.conv_out = torch.nn.Conv2d(block_in,
-                                        out_ch,
-                                        kernel_size=3,
-                                        stride=1,
-                                        padding=1)
+        self.conv_out = conv(block_in,
+                            out_ch,
+                            kernel_size=3,
+                            stride=1,
+                            padding=1)
         self.is_semseg = kwargs.get("is_semseg", False)
         self.is_single_class = kwargs.get("is_single_class", False)
         if self.is_semseg:
