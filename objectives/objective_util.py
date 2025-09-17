@@ -41,12 +41,12 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, lpips, chann
     if isinstance(px_u, torch.distributions.Categorical):
         x_num = MMCelebA.one_hot_semseg_to_index(x_d)
         # Todo: implement channel weighting for Categorical
-        recon_log_prob = 0 # px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
+        recon_log_prob = torch.tensor([0.0], device=x_d.device) # px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
     else:
         log_probs = px_u.log_prob(x_d)
         if channel_weighting_d is not None:
             log_probs = log_probs * channel_weighting_d[None, None, :, None, None]
-        recon_log_prob = 0 # log_probs.view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
+        recon_log_prob = torch.tensor([0.0], device=x_d.device) # log_probs.view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
 
     lpx_u_elem = lpx_u_elem + recon_log_prob
     loss_dict["recon_logprob"] += recon_log_prob.detach().cpu().sum().item()
