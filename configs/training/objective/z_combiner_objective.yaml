@@ -3,6 +3,7 @@ params:
   wlpips: [5000, 5000]
   wadversary: 0
   beta: 1
+  start_adv_iter: 400
   off_combination_weight: 0.0
   mmd_zw_weight: 1000.0
   mmd_ww_weight: 1000.0

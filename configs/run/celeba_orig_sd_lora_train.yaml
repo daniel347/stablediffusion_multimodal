@@ -10,8 +10,9 @@ training:
   lora_bias_mode: "none" # none, all, lora_only
 
   objective:
-    wlpips: 10000
-    wadversary: 20000
+    params:
+      wlpips: 50000
+      wadversary: 20000
 
 defaults:
   - override /model: v2-inference-rgb-orig-lora

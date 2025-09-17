@@ -1,6 +1,7 @@
 name: non_disentangling_objective
 params:
-  wlpips: 3000
-  wadversary:  5000
+  wlpips: 10000
+  wadversary:  1000
   beta: 1e-6
+  start_adv_iter: 400
   channel_weighting: #

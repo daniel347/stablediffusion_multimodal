@@ -19,11 +19,6 @@ training:
   test_every_iter: 400
   compute_metrics: True
 
-  objective:
-    params:
-      wadversary: 1000
-      wlpips: 10000
-
   discriminator:
     discriminator_lr: 4e-4
 

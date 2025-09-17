@@ -8,3 +8,4 @@ params:
   off_combination_weight: 0.0
   mmd_zw_weight: 1000.0  # 1000.0
   mmd_ww_weight: 1000.0  # 1000.0
+  start_adv_iter: 400
