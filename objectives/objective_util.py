@@ -34,21 +34,21 @@ def compute_microbatch_split(x, K):
     return min(B, S)
 
 
-def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, lpips, channel_weighting_d, fail_on_nan=True):
+def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, wll_d, lpips, channel_weighting_d, fail_on_nan=True):
     lpx_u_elem = 0
     print(f"px_u batch shape: {px_u.batch_shape}  x_d shape: {x_d.shape}")
 
     if isinstance(px_u, torch.distributions.Categorical):
         x_num = MMCelebA.one_hot_semseg_to_index(x_d)
         # Todo: implement channel weighting for Categorical
-        recon_log_prob = torch.tensor([0.0], device=x_d.device) # px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
+        recon_log_prob = px_u.log_prob(x_num).view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
     else:
         log_probs = px_u.log_prob(x_d)
         if channel_weighting_d is not None:
             log_probs = log_probs * channel_weighting_d[None, None, :, None, None]
-        recon_log_prob = torch.tensor([0.0], device=x_d.device) # log_probs.view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
+        recon_log_prob = log_probs.view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
 
-    lpx_u_elem = lpx_u_elem + recon_log_prob
+    lpx_u_elem = lpx_u_elem + wll_d * recon_log_prob
     loss_dict["recon_logprob"] += recon_log_prob.detach().cpu().sum().item()
 
     if fail_on_nan:

@@ -1,6 +1,7 @@
 name: non_disentangling_objective
 params:
   wlpips: 10000
+  wll: 0.01
   wadversary:  1000
   beta: 1e-6
   start_adv_iter: 400

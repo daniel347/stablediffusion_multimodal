@@ -13,6 +13,7 @@ class NonDisentanglingObjective(torch.nn.Module):
                 device,
                 data_parallel=False,
                 wlpips=0.0,
+                wll=1.0,
                 wadversary=0.0,
                 get_adversarial_loss_f=None,
                 start_adv_iter=0,
@@ -29,6 +30,7 @@ class NonDisentanglingObjective(torch.nn.Module):
             assert self.get_adversarial_loss_f is not None
 
         self.wlpips = wlpips
+        self.wll = wll
         self.wadversary = wadversary
         self.start_adv_iter = start_adv_iter
         self.beta = beta
@@ -43,7 +45,8 @@ class NonDisentanglingObjective(torch.nn.Module):
             if isinstance(px_u, list):
                 px_u = px_u[r]   # if we return a 2D list just take the diagonal
             wlpips_r = self.wlpips[r] if hasattr(self.wlpips, "__getitem__") else self.wlpips
-            lpx_u = reconstruction_loss(px_u, x[r], self.mod.llik_scales[r], loss_dict, wlpips_r, self.lpips, self.channel_weighting[r])
+            wll_r = self.wll[r] if hasattr(self.wll, "__getitem__") else self.wll
+            lpx_u = reconstruction_loss(px_u, x[r], self.mod.llik_scales[r], loss_dict, wlpips_r, wll_r, self.lpips, self.channel_weighting[r])
             lw = lw + lpx_u
 
         # KL divergence loss

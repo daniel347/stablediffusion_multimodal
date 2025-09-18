@@ -11,8 +11,9 @@ training:
 
   objective:
     params:
-      wlpips: 100000
+      wlpips: 10000
       wadversary: 2000
+      wll: 0.01
 
 defaults:
   - override /model: v2-inference-rgb-orig-lora

@@ -1,6 +1,7 @@
 name: disentangling_objective
 params:
   wlpips: [1000, 0.0]
+  wll: 1.0
   wadversary: 0
   beta: 1
   channel_weighting: # semseg_class_freqs.pt

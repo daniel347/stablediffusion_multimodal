@@ -13,6 +13,7 @@ class ZCombinerObj4Way(torch.nn.Module):
                 device,
                 data_parallel=False,
                 wlpips=0.0,
+                wll=1.0,
                 wadversary=0.0,
                 get_adversarial_loss_f=None,
                 start_adv_iter=0,
@@ -34,6 +35,7 @@ class ZCombinerObj4Way(torch.nn.Module):
             assert self.get_adversarial_loss_f is not None
 
         self.wlpips = wlpips
+        self.wll = wll
         self.wadversary = wadversary
         self.start_adv_iter = start_adv_iter
         self.beta = beta
@@ -60,7 +62,8 @@ class ZCombinerObj4Way(torch.nn.Module):
             lpx_u = 0
             for d, px_u in enumerate(recons[r]):
                 wlpips_d = self.wlpips[d] if hasattr(self.wlpips, "__getitem__") else self.wlpips
-                lpx_u = lpx_u + reconstruction_loss(px_u, x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, self.lpips,
+                wll_d = self.wll[d] if hasattr(self.wll, "__getitem__") else self.wll
+                lpx_u = lpx_u + reconstruction_loss(px_u, x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, wll_d, self.lpips,
                                                     self.channel_weighting[d],
                                                     fail_on_nan=True)
 

@@ -13,6 +13,7 @@ class ZCombinerObj(torch.nn.Module):
                 device,
                 data_parallel=False,
                 wlpips=0.0,
+                wll=1.0,
                 wadversary=0.0,
                 get_adversarial_loss_f=None,
                 start_adv_iter=0,
@@ -34,6 +35,7 @@ class ZCombinerObj(torch.nn.Module):
             assert self.get_adversarial_loss_f is not None
 
         self.wlpips = wlpips
+        self.wll = wll
         self.wadversary = wadversary
         self.start_adv_iter = start_adv_iter
         self.beta = beta
@@ -58,7 +60,8 @@ class ZCombinerObj(torch.nn.Module):
         lpx_u = 0
         for r, px_u in enumerate(recons):
             wlpips_d = self.wlpips[r] if hasattr(self.wlpips, "__getitem__") else self.wlpips
-            lpx_u = lpx_u + reconstruction_loss(px_u, x[r], self.mod.vaes[r].llik_scaling, loss_dict, wlpips_d, self.lpips,
+            wll_d = self.wll[r] if hasattr(self.wll, "__getitem__") else self.wll
+            lpx_u = lpx_u + reconstruction_loss(px_u, x[r], self.mod.vaes[r].llik_scaling, loss_dict, wlpips_d, wll_d, self.lpips,
                                         self.channel_weighting[r],
                                         fail_on_nan=True)
 
