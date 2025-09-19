@@ -6,7 +6,7 @@ experiment: "MM_CelebA_Autoencoder"
 print_freq: 50
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 name: "celeba_orig_sd_test_fid"
-notes: "We check the performance of the original SD model on CelebA images, using FID."
+notes: "We check the performance of the original SD model on CelebA images, using FID. we test with 256 size to see if this makes a difference"
 
 function:
   name: test
@@ -28,6 +28,7 @@ init_from_stable_diffusion: False
 
 data:
   modality: ["colour"]
+  input_size: 256
 
 defaults:
   - data: mm_celeba
