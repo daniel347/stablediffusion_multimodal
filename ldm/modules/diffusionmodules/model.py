@@ -494,13 +494,11 @@ class Encoder(nn.Module):
             conv = torch.nn.Conv2d
 
         # downsampling
-        if use_lora:
-            self.conv_in = conv(in_channels,
-                               self.ch,
-                               kernel_size=3,
-                               stride=1,
-                               padding=1,
-                                )
+        self.conv_in = conv(in_channels,
+                           self.ch,
+                           kernel_size=3,
+                           stride=1,
+                           padding=1)
 
         curr_res = resolution
         in_ch_mult = (1,)+tuple(ch_mult)
