@@ -26,20 +26,19 @@ from torchvision.utils import make_grid
 from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 from torch.amp import GradScaler, autocast
 import pandas as pd
-from torch.profiler import record_function
 import torchvision.utils as tvu
 import cmmd_pytorch as cmmd
+from itertools import product
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
-from ldm.util import instantiate_from_config, Timer, save_model_light, GradAutoClipper
+from ldm.modules.ema import DummyEMA
+from ldm.util import instantiate_from_config, Timer, GradAutoClipper
 from objectives import get_objective, get_adversarial_loss, train_discriminator
-from objectives.mmvae_objectives import m_dreg
-from ldm.data import get_dataset
 from ldm.modules.lora_layers import mark_only_lora_as_trainable
+from reconstruct_model_phema import reconstruct_phema
 
 from utils import (save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs,
                    move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders,
@@ -156,6 +155,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         vaes = mod.vaes
         NUM_VAES = len(vaes)
 
+        if "ema" in conf:
+            print(f"Using EMA {conf.ema.target}")
+            ema_conf = OmegaConf.to_container(conf.ema)
+            ema_conf["params"]["net"] = model
+            ema = instantiate_from_config(ema_conf)
+        else:
+            ema = DummyEMA(model)
+
         # Set experiment name if not set
         if not conf.experiment:
             conf.experiment = model.modelName
@@ -237,12 +244,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             if "resume_training" in conf and conf.resume_training:
                 load_kwargs = {"discriminator": disc,
                                "discriminator_optimizer": disc_optimizer} if use_adversary else {}
-                start_iter = load_checkpoint(None, mod, optimizer, scheduler, conf.model_initialisation, **load_kwargs)
+                start_iter = load_checkpoint(ema, mod, optimizer, scheduler, conf.model_initialisation, **load_kwargs)
             else:
                 # just load the model
                 load_kwargs = {"discriminator": disc,
                                "discriminator_optimizer": disc_optimizer} if use_adversary else {}
-                start_iter = load_checkpoint(None, mod, None, None, conf.model_initialisation, **load_kwargs)
+                start_iter = load_checkpoint(ema, mod, None, None, conf.model_initialisation, **load_kwargs)
 
         use_mixed_precision = conf.training.use_mixed_precision
         if use_mixed_precision:
@@ -366,6 +373,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         print(f"loss breakdown: {loss_dict}")
                     train_pbar.set_description("iteration {:04d}: loss: {:6.3f}".format(i, loss.item() / conf.training.batch_size))
 
+                    if ema is not None:
+                        ema.update(conf.training.batch_size)
+
                     if i % scheduler_step_freq == 0:
                         scheduler.step()
 
@@ -418,7 +428,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     tempdir.mkdir(parents=True, exist_ok=True)
                     tempdirs[mode] = tempdir
 
-            with torch.no_grad():
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
                     loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount)
@@ -568,6 +578,31 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             return epoch_loss
 
 
+        def test_optimum_EMA(out_nimgs, out_stds):
+            saves_path = os.path.dirname(conf.model_initialisation)
+            print("saves_path", saves_path)
+
+            out_nimgs, out_stds = zip(*product(out_nimgs, out_stds))
+
+            model_names = [f"model_it{out_es//conf.training.batch_size}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_nimgs, out_stds)]
+
+            it = reconstruct_phema(saves_path, out_std=out_stds, out_nimg=out_nimgs, out_dir=saves_path, epoch_size=conf.training.batch_size)
+            for _ in it:
+                pass
+
+            # latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
+            # model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
+            # model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
+
+            for step, name in enumerate(model_names):
+                print(f"Testing configuration with epochs:{out_nimgs[step]//conf.training.batch_size} and std:{out_stds[step]}")
+                load_checkpoint(ema, model, optimizer, scheduler, os.path.join(saves_path, name))
+                test(step, step, step, compute_metrics=True)
+
+                if enable_wandb:
+                    wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)
+
+
         def run_grad_check(model, **kwargs):
             x = (torch.randn(1, 3, 32, 32, dtype=torch.float32, requires_grad=True, device=device),
                  (torch.randn(1, 18, 32,32, dtype=torch.float32, requires_grad=True, device=device) > 0.0).float())
@@ -583,7 +618,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
 
         def check_z_closeness(n_samples=10):
-            with torch.no_grad():
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
 
                 z_mses = []
                 z_mags = [[] for _ in range(NUM_VAES)]
@@ -641,7 +676,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             # Note this is a simple test designed for unimodal data (ie StableIndigo work)
             # - I should make a different file but im a little lazy
 
-            with torch.no_grad():
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
@@ -706,7 +741,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 return latent
 
 
-            with ((torch.no_grad())):
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
@@ -788,7 +823,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             mae_loss = 0
             lpips_loss = 0
 
-            with ((torch.no_grad())):
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
@@ -907,7 +942,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if rank == 0 or not data_parallel:
                         mod = model.module if data_parallel else model
                         save_kwargs = {"discriminator": disc, "discriminator_optimizer": disc_optimizer} if use_adversary else {}
-                        save_checkpoint(None, mod, optimizer, scheduler, itercount+n_iter, runPath / f"model_{itercount+n_iter}.pt", **save_kwargs)
+                        save_checkpoint(ema, mod, optimizer, scheduler, itercount+n_iter, runPath / f"model_{itercount+n_iter}.pt", **save_kwargs)
 
 
         if conf.function.name is not None:
