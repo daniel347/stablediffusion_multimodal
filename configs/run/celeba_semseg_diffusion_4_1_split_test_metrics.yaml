@@ -14,7 +14,13 @@ training:
   latent_scale_per_channel: True
   compute_latent_scale: True
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_09_11__09_22_11_4_1_split_diff/model_it32000_ema_0.175.pt"
+  model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_09_11__09_22_11_4_1_split_diff/model_it32000_ema_0.175.pt"
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: null
 
 defaults:
   - override /model: v2-inference-mm-rgb-semseg-4-1-split

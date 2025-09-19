@@ -3,17 +3,18 @@
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
 name: "celeba_orig_sd_lora_train"
-notes: "We check the performance of the original SD model on CelebA images finetuning with LoRAConv."
+notes: "We check the performance of the original SD model on CelebA images finetuning with LoRAConv. We try with more L1 and less lpips"
 
 training:
   lora_finetune: True
   lora_bias_mode: "none" # none, all, lora_only
+  lr: 1e-4
 
   objective:
     params:
-      wlpips: 10000
+      wlpips: 1000
       wadversary: 2000
-      wll: 0.01
+      wll: 0.1
 
 defaults:
   - override /model: v2-inference-rgb-orig-lora
