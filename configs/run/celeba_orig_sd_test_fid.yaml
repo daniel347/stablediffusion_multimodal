@@ -3,7 +3,7 @@
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
 name: "celeba_orig_sd_test_fid"
-notes: "We check the performance of the original SD model on CelebA images, using FID."
+notes: "We check the performance of the original SD model on CelebA images, using FID. We test with 256 size to see if this makes a difference"
 
 function:
   name: test
@@ -18,6 +18,7 @@ model_initialisation: # "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_20
 
 data:
   modality: ["colour"]
+  input_size: 256
 
 defaults:
   - override /data: mm_celeba
