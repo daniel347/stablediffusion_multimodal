@@ -551,8 +551,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     scores = []
                     for mod in modality:
                         if mod in ["colour", "depth"]:
-                            split = "test" if dataset_name == "nyu_depth" else "val"
-                            score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
+                            split = "test" if dataset_name == "nyu_depth" else "all" if dataset_name == "mm_celeba" else "val"
+                            score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=128, dataset_split=split, center_crop=True)
                             if enable_wandb:
                                 wandb.log({f"{met}_{mod}": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
