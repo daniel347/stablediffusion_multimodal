@@ -76,10 +76,16 @@ class MMCelebA(Dataset):
         self.partition_hq = self.partition_file.loc[self.index_mapping.orig_idx]
         self.index_mapping["split"] = self.partition_hq.split
 
-        self.split_num = {"train": 0, "val": 1, "test": 2}[self.split]
-        # & (self.index_mapping.orig_file.str.rstrip(".jpg").astype(int).isin(self.index_list))
-        self.index_list = self.index_mapping[(self.index_mapping.split == self.split_num)].idx.values
-        print(f"Selected split {self.split} and found {len(self.index_list)} images")
+        if self.split != "all":
+            self.split_num = {"train": 0, "val": 1, "test": 2}[self.split]
+            # & (self.index_mapping.orig_file.str.rstrip(".jpg").astype(int).isin(self.index_list))
+            self.index_list = self.index_mapping[(self.index_mapping.split == self.split_num)].idx.values
+            print(f"Selected split {self.split} and found {len(self.index_list)} images")
+        else:
+            print(f"Using all data, {len(self.index_list)} images")
+            self.split_num = -1
+            self.index_list = self.index_mapping.idx.values
+
 
         if isinstance(modality, str):
             modality = [modality]
