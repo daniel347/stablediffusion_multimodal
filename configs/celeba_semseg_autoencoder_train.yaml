@@ -19,7 +19,7 @@ training:
       wadversary: 2000
       mmd_zw_weight: 1500.0
       mmd_ww_weight: 1500.0
-      wll: 0.002
+      wll: 0.02
       beta: 1
 
   start_iter: 0
@@ -32,7 +32,7 @@ init_from_stable_diffusion: True
 defaults:
   - data: mm_celeba
   - ema: dummy_ema
-  - model: v2-inference-mm-rgb-semseg-lora
+  - model: v2-inference-mm-rgb-semseg
   - training: autoencoder_training_default
   - override training/discriminator: mm_joint_discriminator_semseg
   - _self_

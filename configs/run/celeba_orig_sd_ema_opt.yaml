@@ -24,3 +24,4 @@ model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoe
 
 defaults:
   - override /model: v2-inference-rgb-orig-lora
+  - override /ema: dummy_ema

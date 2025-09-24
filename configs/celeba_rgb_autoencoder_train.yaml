@@ -30,7 +30,7 @@ data:
 
 defaults:
   - data: mm_celeba
-  - ema: power_ema
+  - ema: dummy_ema
   - model: v2-inference-rgb-orig
   - training: autoencoder_training_default
   - override training/objective: single_mode_objective

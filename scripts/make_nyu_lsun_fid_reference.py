@@ -8,8 +8,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 fid = pyiqa.create_metric("fid", device=device)
 
-nyu_dir = "../../../datasets/nyuv2_processed"
-lsun_dir = "../../../datasets/lsun"
+nyu_dir = "../../datasets/nyuv2_processed"
+lsun_dir = "../../datasets/lsun"
 
 colour_imgs = glob.glob(nyu_dir+"/colour/bedroom_*/*") + glob.glob(lsun_dir+"/colour/**/*")
 depth_imgs = glob.glob(nyu_dir+"/depth/bedroom_*/*") + glob.glob(lsun_dir+"/depth/**/*")
