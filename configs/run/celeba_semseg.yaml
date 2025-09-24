@@ -1,0 +1,4 @@
+# @package _global_
+
+name: "new_hyp_2"
+notes: "We train the autoencoder with lowered L1 loss weight and lowered regularisation"
