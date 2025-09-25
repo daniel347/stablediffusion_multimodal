@@ -8,3 +8,6 @@ model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Auto
 
 training:
   lr: 5e-5
+  objective:
+    params:
+      beta: 0.01

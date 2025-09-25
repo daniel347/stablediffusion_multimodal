@@ -249,7 +249,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 # just load the model
                 load_kwargs = {"discriminator": disc,
                                "discriminator_optimizer": disc_optimizer} if use_adversary else {}
-                start_iter = load_checkpoint(ema, mod, None, None, conf.model_initialisation, **load_kwargs)
+                load_checkpoint(ema, mod, None, None, conf.model_initialisation, **load_kwargs)
 
         use_mixed_precision = conf.training.use_mixed_precision
         if use_mixed_precision:
@@ -922,7 +922,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                    position=rank if data_parallel else 0)
 
             with Timer('MMVAEplus') as t:
-                # test(0, conf.training.start_iter, 0)
+                test(0, conf.training.start_iter, 0, compute_metrics)
 
                 for subepoch, itercount in enumerate(range(start_iter,
                                                            conf.training.num_epochs * n_iter + start_iter,
