@@ -5,3 +5,6 @@ notes: "We finetune the correct mmd loss autoencoder with lowered L1 loss weight
 
 resume_training: False
 model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__09_52_59_correct_mmd_loss/model_2400.pt"
+
+training:
+  lr: 5e-5
