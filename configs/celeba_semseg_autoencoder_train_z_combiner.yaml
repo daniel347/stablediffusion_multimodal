@@ -35,7 +35,7 @@ init_from_stable_diffusion: False
 defaults:
   - data: mm_celeba
   - ema: dummy_ema
-  - model: v2-inference-mm-rgb-semseg-lora
+  - model: v2-inference-mm-rgb-semseg
   - training: autoencoder_training_default
   - override training/objective: 4way_z_combiner_objective
   - override training/discriminator: mm_joint_discriminator_semseg
