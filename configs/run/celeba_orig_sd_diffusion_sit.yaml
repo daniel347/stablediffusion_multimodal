@@ -6,11 +6,14 @@ notes: "We train SiT diffusion model with our disentangling autoencoder"
 training:
   precompute_latents: True
   force_recompute: False
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_rgb
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_rgb_orig_sd
   latent_scale_per_channel: True
   compute_latent_scale: True
 
   patience: 20
+
+data:
+  modality: ["colour"]
 
 model:
   params:
