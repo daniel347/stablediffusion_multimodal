@@ -28,6 +28,7 @@ import torchvision.utils as tvu
 from torch.amp import GradScaler, autocast
 from torchvision.transforms import Resize, InterpolationMode
 
+"""
 import ray
 from ray import tune
 from ray import train
@@ -35,6 +36,7 @@ from ray.train import Checkpoint, get_checkpoint
 from ray.tune.schedulers import ASHAScheduler, HyperBandForBOHB
 from ray.tune.search.bohb import TuneBOHB
 import ray.cloudpickle as pickle
+"""
 import tempfile
 import sys
 import glob

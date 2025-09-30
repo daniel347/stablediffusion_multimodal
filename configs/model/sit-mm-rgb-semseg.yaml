@@ -13,6 +13,11 @@ params:
       patch_size: 2
       num_heads: 12
 
+  unet_config:
+    params:
+      num_classes: null
+      use_fp16: false
+
   first_stage_config:
     target: ldm.models.mmvae_autoencoder.MMVAEplus
     params:

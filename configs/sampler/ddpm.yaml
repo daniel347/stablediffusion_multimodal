@@ -1,5 +1,4 @@
-sampler:
-  target: "ddpm"
-  params: {}
-  run_params:
-    S: 1000
+target: "ddpm"
+params: {}
+run_params:
+  S: 1000
