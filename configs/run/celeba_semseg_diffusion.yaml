@@ -1,0 +1,26 @@
+# @package _global_
+
+name: "sample_latents_diff_retrain"
+notes: "We retrain our best celeba diffusion model for 33000 iterations, with the sampled latents"
+
+function:
+  name: training_loop
+  kwargs: {}
+
+training:
+  precompute_latents: True
+  force_recompute: False
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute
+  latent_scale_per_channel: True
+  compute_latent_scale: True
+
+  num_epochs: 33
+
+model:
+  params:
+    first_stage_conf:
+      params:
+        ckpt_path: "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_20__22_34_18_new_hyp_z_comb_training/model_4400.pt"
+
+defaults:
+  - _self_
