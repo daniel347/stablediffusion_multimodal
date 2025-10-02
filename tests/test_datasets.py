@@ -154,4 +154,5 @@ def test_celeba_single_label_vis_images():
         if i >= 3:
             break
 
-
+def test_celeba_multiple_splits():
+    dataset = get_dataset("mm_celeba", **dataset_opts["mm_celeba"], split=["train", "test"])

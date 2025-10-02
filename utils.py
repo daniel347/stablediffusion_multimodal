@@ -464,7 +464,7 @@ def load_image_datasets(data_conf, precompute_latents=False):
 
     train_dataset = get_dataset(data_conf.dataset_name,
                                 transform=tx,
-                                split="train",
+                                split=["train", "test"],
                                 return_row=precompute_latents,
                                 return_class=return_class,
                                 **train_opts)
