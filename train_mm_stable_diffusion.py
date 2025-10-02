@@ -833,7 +833,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             return metric_scores
 
-        def test_optimum_EMA(dataloaders, out_nimgs, out_stds, **test_metric_kwargs):
+        def test_optimum_EMA(dataloaders, out_nimgs, out_stds, compute_ema_models=True, **test_metric_kwargs):
             saves_path = os.path.dirname(conf.model_initialisation)
             print("saves_path", saves_path)
 
@@ -841,9 +841,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             model_names = [f"model_it{out_es//conf.training.batch_size}_ema_{out_std:.3f}.pt" for out_es, out_std in zip(out_nimgs, out_stds)]
 
-            it = reconstruct_phema(saves_path, out_std=out_stds, out_nimg=out_nimgs, out_dir=saves_path, epoch_size=conf.training.batch_size)
-            for _ in it:
-                pass
+            if compute_ema_models:
+                it = reconstruct_phema(saves_path, out_std=out_stds, out_nimg=out_nimgs, out_dir=saves_path, epoch_size=conf.training.batch_size)
+                for _ in it:
+                    pass
 
             # latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100, per_channel=conf.training.latent_scale_per_channel)
             # model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
