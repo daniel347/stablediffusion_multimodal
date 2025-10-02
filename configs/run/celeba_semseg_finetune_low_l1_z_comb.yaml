@@ -3,9 +3,6 @@
 name: "low_l1_finetune_zcomb"
 notes: "We finetune the correct mmd loss autoencoder z combiner with lowered L1 loss weight to encourage sharper reconstructions"
 
-resume_training: False
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__22_56_48_correct_mmd_loss_z_comb/model_4800.pt"
-
 training:
   lr: 5e-5
   objective:
@@ -17,5 +14,9 @@ training:
       mmd_ww_weight: 1500.0
       wll: 0.05
 
+  compute_metrics: true
 
   lr_decoder: 2e-5
+
+resume_training: True
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_30__10_35_28_low_l1_finetune_zcomb/model_800.pt
