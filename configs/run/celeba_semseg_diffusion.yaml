@@ -1,7 +1,7 @@
 # @package _global_
 
-name: "sample_latents_diff_retrain"
-notes: "We retrain our best celeba diffusion model for 33000 iterations, with the sampled latents"
+name: "sample_latents_finetuned_z_comb"
+notes: "We retrain our best celeba diffusion model with the finetuned z combiner to reduce FID"
 
 function:
   name: training_loop
@@ -18,9 +18,9 @@ training:
 
 model:
   params:
-    first_stage_conf:
+    first_stage_config:
       params:
-        ckpt_path: "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_20__22_34_18_new_hyp_z_comb_training/model_4400.pt"
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_27__12_15_36_mmd_ablation_z_comb/model_5200.pt"
 
 defaults:
   - _self_
