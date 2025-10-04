@@ -260,9 +260,10 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
             # clear gradients of weights
             self.optimizer2.zero_grad()
             # backward pass for GradNorm
-            gradnorm_loss.backward(retain_graph=True)
+            gradnorm_loss.backward(retain_graph=True, inputs=self.weights)
+            self.optimizer2.step()
 
-            print(self.weights)
+            print(f"GradNorm loss: {gradnorm_loss.item()}, weights: {self.weights.detach().cpu().numpy()}")
             combined_loss_dict["weights"] = self.weights.detach().cpu().clone()
 
             weights = (self.weights / self.weights.sum() * self.T).detach()
