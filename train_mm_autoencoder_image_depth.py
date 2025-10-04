@@ -46,7 +46,7 @@ from utils import (save_and_log_latents, save_and_log_img, duplicate_stable_diff
 
 import pyiqa
 
-enable_wandb = True
+enable_wandb = False
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -334,7 +334,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if use_mixed_precision:
                         with autocast(dtype=torch.float16, device_type="cuda"):
-                            loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount)
+                            loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount, set_l0=(i==0 or i==objective.start_adv_iter))
                             loss = -loss
 
                         scaler.scale(loss).backward()
@@ -345,7 +345,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
 
                     else:
-                        loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount)
+                        loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount, set_l0=(i==0 or i==objective.start_adv_iter))
                         loss = -loss
                         loss.backward()
 
@@ -922,7 +922,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                    position=rank if data_parallel else 0)
 
             with Timer('MMVAEplus') as t:
-                test(0, conf.training.start_iter, 0, compute_metrics)
+                # test(0, conf.training.start_iter, 0, compute_metrics)
 
                 for subepoch, itercount in enumerate(range(start_iter,
                                                            conf.training.num_epochs * n_iter + start_iter,

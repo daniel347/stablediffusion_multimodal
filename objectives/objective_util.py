@@ -34,7 +34,7 @@ def compute_microbatch_split(x, K):
     return min(B, S)
 
 
-def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, wll_d, lpips, channel_weighting_d, fail_on_nan=True):
+def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, wll_d, lpips, channel_weighting_d, fail_on_nan=True, return_breakdown=False):
     lpx_u_elem = 0
     print(f"px_u batch shape: {px_u.batch_shape}  x_d shape: {x_d.shape}")
 
@@ -48,8 +48,11 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, wll_d, lpips
             log_probs = log_probs * channel_weighting_d[None, None, :, None, None]
         recon_log_prob = log_probs.view(*px_u.batch_shape[:2], -1).mul(llik_scale).sum(dim=-1)
 
-    lpx_u_elem = lpx_u_elem + wll_d * recon_log_prob
-    loss_dict["recon_logprob"] += recon_log_prob.detach().cpu().sum().item()
+    if return_breakdown:
+        lpx_u_elem = [wll_d * recon_log_prob]
+    else:
+        lpx_u_elem = lpx_u_elem + wll_d * recon_log_prob
+    loss_dict["recon_logprob"] += recon_log_prob.clone().detach().cpu().sum().item()
 
     if fail_on_nan:
         if isinstance(px_u, torch.distributions.Bernoulli) or isinstance(px_u, torch.distributions.Categorical):
@@ -62,8 +65,14 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, wll_d, lpips
 
     if wlpips_d > 0.0:
         lpips_lpx_u_loss = torch.tensor([lpips(x_di, px_ui) for x_di, px_ui in zip(x_d.view(-1, *x_d.shape[1:]), px_u.mode.view(-1, *x_d.shape[1:]))], device=x_d.device).reshape(*px_u.batch_shape[:2])
-        lpx_u_elem = lpx_u_elem - wlpips_d * lpips_lpx_u_loss
-        loss_dict["lpips"] -= lpips_lpx_u_loss.detach().cpu().sum().item()
+        if return_breakdown:
+            lpx_u_elem.append(- wlpips_d * lpips_lpx_u_loss)
+        else:
+            lpx_u_elem = lpx_u_elem - wlpips_d * lpips_lpx_u_loss
+        loss_dict["lpips"] -= lpips_lpx_u_loss.clone().detach().cpu().sum().item()
+
+    if return_breakdown:
+        lpx_u_elem = torch.stack(lpx_u_elem, dim=-1)
 
     if fail_on_nan:
         assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpips)"
@@ -80,7 +89,8 @@ def get_adversarial_loss(px_u, discriminator, device):
 
     fake_outputs = torch.stack(discriminator(px_u_fill), dim=1)
     real_labels = torch.ones(fake_outputs.shape).to(device)
-    autoencoder_loss = torch.nn.functional.binary_cross_entropy(fake_outputs, real_labels)
+    reduce_dim = [i for i in range(1, len(fake_outputs.shape[2:]))]  # mean over all but batch dim
+    autoencoder_loss = torch.nn.functional.binary_cross_entropy(fake_outputs, real_labels, reduction="none").mean(dim=reduce_dim)
 
     return autoencoder_loss
 
