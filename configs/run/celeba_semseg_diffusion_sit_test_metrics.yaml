@@ -1,0 +1,31 @@
+# @package _global_
+
+name: "sit_diff_test_metrics"
+notes: "We compute generation metrics for the SiT diffusion"
+
+function:
+  name: test_metrics
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True}
+
+training:
+  precompute_latents: True
+  force_recompute: False
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_low_l1_finetune
+  latent_scale_per_channel: True
+  compute_latent_scale: True
+
+  patience: 20
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path:
+
+model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_02__21_45_25_sit_diff/model_it48000_ema_0.075.pt" 
+
+defaults:
+  - override /model: sit-mm-rgb-semseg
+  - override /sampler: ddpm
+  - override /ema: dummy_ema
+  - _self_
