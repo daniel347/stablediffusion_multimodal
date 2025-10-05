@@ -5,7 +5,7 @@ notes: "We optimise EMA for the SiT diffusion with our disentangling autoencoder
 
 function:
   name: test_optimum_EMA
-  kwargs: {out_nimgs: [2808000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256}
+  kwargs: {out_nimgs: [3456000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256}
 
 training:
   precompute_latents: True
@@ -22,7 +22,7 @@ model:
       params:
         ckpt_path:
 
-model_initialisation:
+model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_02__21_45_25_sit_diff/model_48000.pt" 
 
 defaults:
   - override /model: sit-mm-rgb-semseg
