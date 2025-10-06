@@ -64,7 +64,7 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
         self.gradnorm_lr = gradnorm_lr
         self.optimizer2 = torch.optim.Adam([weights], lr=gradnorm_lr)
 
-        self.l0 = 1.0
+        self.l0 = torch.ones(7).to(device)
 
         self.gradnorm_layers = self.mod.vae_last_layers
         self.gradnorm_params = []
@@ -223,6 +223,12 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
         self.l0 = l0.clone().detach()
 
     def forward(self, model, x, K=1, test=False, set_l0=False, **kwargs):
+        if not test:
+            self.optimizer2.step()
+            weights = (self.weights / self.weights.sum() * self.T).detach()
+            self.weights = torch.nn.Parameter(weights)
+            self.optimizer2 = torch.optim.Adam([self.weights], lr=self.gradnorm_lr)
+
         S = x[0].shape[0]  # compute_microbatch_split(x, K)
         x_split = zip(*[_x.split(S) for _x in x])
 
@@ -234,12 +240,14 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
         model_outs = model_outs[0]  # doing this concatenation is hard but I reckon ill always fit a batch in memory
         print(f"loss shape: {lw.shape}, uss shape: {uss.shape}")
 
-        lw = lw.mean(0).sum(dim=[0, 1])
+        lw = lw.mean(dim=0).sum(dim=[0, 1])
+        weighted_lw = lw.sum()
+        # weighted_lw = lw @ self.weights
+
         if set_l0:
-            self.set_l0(lw)
+            # self.set_l0(lw)
             print(f"Setting l0 to {self.l0}")
 
-        weighted_lw = lw @ self.weights
         if not test:
             gw = []
             for i in range(len(lw)):
@@ -259,14 +267,9 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
             self.optimizer2.zero_grad()
             # backward pass for GradNorm
             gradnorm_loss.backward(retain_graph=True, inputs=self.weights)
-            print(f"GradNorm loss: {gradnorm_loss.item()}, weight_grad: {self.weights.grad.detach().cpu().numpy()}, weights: {self.weights.detach().cpu().numpy()},")
-            self.optimizer2.step()
+            print(f"GradNorm loss: {gradnorm_loss.item()}, weight_grad: {self.weights.grad.clone().detach().cpu().numpy()}, weights: {self.weights.clone().detach().cpu().numpy()},")
 
-            combined_loss_dict["weights"] = self.weights.detach().cpu().clone()
-
-            weights = (self.weights / self.weights.sum() * self.T).detach()
-            self.weights = torch.nn.Parameter(weights)
-            self.optimizer2 = torch.optim.Adam([self.weights], lr=self.gradnorm_lr)
+            combined_loss_dict["weights"] = self.weights.clone().detach().cpu()
 
         return weighted_lw, combined_loss_dict, model_outs
 

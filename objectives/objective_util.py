@@ -64,7 +64,7 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, wll_d, lpips
         assert not torch.isnan(lpx_u_elem).any(), f"Model output is nan (lpx_u_elem)"
 
     if wlpips_d > 0.0:
-        lpips_lpx_u_loss = torch.tensor([lpips(x_di, px_ui) for x_di, px_ui in zip(x_d.view(-1, *x_d.shape[1:]), px_u.mode.view(-1, *x_d.shape[1:]))], device=x_d.device).reshape(*px_u.batch_shape[:2])
+        lpips_lpx_u_loss = torch.stack([lpips(x_di, px_ui) for x_di, px_ui in zip(x_d.view(-1, *x_d.shape[1:]), px_u.mode.view(-1, *x_d.shape[1:]))]).reshape(*px_u.batch_shape[:2])
         if return_breakdown:
             lpx_u_elem.append(- wlpips_d * lpips_lpx_u_loss)
         else:
