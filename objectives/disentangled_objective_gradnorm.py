@@ -241,8 +241,6 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
 
         weighted_lw = lw @ self.weights
         if not test:
-            weighted_lw.backward(retain_graph=True)
-
             gw = []
             for i in range(len(lw)):
                 dl = torch.autograd.grad(self.weights[i] * lw[i], self.gradnorm_params, retain_graph=True, create_graph=True)[0]
@@ -261,14 +259,14 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
             self.optimizer2.zero_grad()
             # backward pass for GradNorm
             gradnorm_loss.backward(retain_graph=True, inputs=self.weights)
+            print(f"GradNorm loss: {gradnorm_loss.item()}, weight_grad: {self.weights.grad.detach().cpu().numpy()}, weights: {self.weights.detach().cpu().numpy()},")
             self.optimizer2.step()
 
-            print(f"GradNorm loss: {gradnorm_loss.item()}, weights: {self.weights.detach().cpu().numpy()}")
             combined_loss_dict["weights"] = self.weights.detach().cpu().clone()
 
             weights = (self.weights / self.weights.sum() * self.T).detach()
             self.weights = torch.nn.Parameter(weights)
-            self.optimizer2 = torch.optim.Adam([weights], lr=self.gradnorm_lr)
+            self.optimizer2 = torch.optim.Adam([self.weights], lr=self.gradnorm_lr)
 
         return weighted_lw, combined_loss_dict, model_outs
 
