@@ -56,7 +56,7 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
         self.cos_zw_weight = cos_zw_weight
         self.cos_ww_weight = cos_ww_weight
 
-        weights = torch.ones(7)
+        weights = torch.ones(8)
         self.weights = torch.nn.Parameter(weights).to(device).requires_grad_(True)
 
         self.T = weights.sum().detach()  # sum of weights
@@ -64,7 +64,7 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
         self.gradnorm_lr = gradnorm_lr
         self.optimizer2 = torch.optim.Adam([weights], lr=gradnorm_lr)
 
-        self.l0 = torch.ones(7).to(device)
+        self.l0 = torch.ones(8).to(device)
 
         self.gradnorm_layers = self.mod.vae_last_layers
         self.gradnorm_params = []
@@ -121,6 +121,8 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
                     al = self.get_adversarial_loss_f(px_u)
                     lws[r].append(-al)
                     loss_dict["adversarial_loss"] -= al.clone().detach().cpu().sum().item() * self.wadversary
+                else:
+                    lws[r].append(torch.zeros(K, B, dtype=torch.float32, device=px_u[0].mean.device))
 
         # KL divergence loss for w
         for r, qw_x in enumerate(qw_xs):
@@ -190,11 +192,11 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
                 if r != d:
                     lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r.mean, qw_x.mean)
 
-            loss_dict["mmd_zw"] -= lmmd_zw_r.clone().detach().cpu().sum().item()
-            loss_dict["mmd_ww"] -= lmmd_ww_r.clone().detach().cpu().sum().item()
-
             lws[r].append( - lmmd_zw_r * torch.ones(K, B, dtype=torch.float32, device=lmmd_zw_r.device))
             lws[r].append( - lmmd_ww_r * torch.ones(K, B, dtype=torch.float32, device=lmmd_zw_r.device))
+
+            loss_dict["mmd_zw"] -= lmmd_zw_r.clone().detach().cpu().sum().item()
+            loss_dict["mmd_ww"] -= lmmd_ww_r.clone().detach().cpu().sum().item()
 
         """        # z - w cosine similarity loss
         cos_sim = CosSimIndependenceLoss(target_dim=1)
@@ -241,17 +243,19 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
         print(f"loss shape: {lw.shape}, uss shape: {uss.shape}")
 
         lw = lw.mean(dim=0).sum(dim=[0, 1])
-        weighted_lw = lw.sum()
-        # weighted_lw = lw @ self.weights
+        # weighted_lw = lw.sum()
+        weighted_lw = lw @ self.weights
 
         if set_l0:
-            # self.set_l0(lw)
+            self.set_l0(lw)
             print(f"Setting l0 to {self.l0}")
 
         if not test:
             gw = []
             for i in range(len(lw)):
-                dl = torch.autograd.grad(self.weights[i] * lw[i], self.gradnorm_params, retain_graph=True, create_graph=True)[0]
+                dl = torch.autograd.grad(self.weights[i] * lw[i], self.gradnorm_params, retain_graph=True, create_graph=True)
+                dl_flat = [d.flatten() for d in dl]
+                dl = torch.cat(dl_flat)
                 gw.append(torch.norm(dl))
             gw = torch.stack(gw)
             # compute loss ratio per task

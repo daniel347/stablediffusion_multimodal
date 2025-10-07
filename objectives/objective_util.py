@@ -70,6 +70,8 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, wll_d, lpips
         else:
             lpx_u_elem = lpx_u_elem - wlpips_d * lpips_lpx_u_loss
         loss_dict["lpips"] -= lpips_lpx_u_loss.clone().detach().cpu().sum().item()
+    elif return_breakdown:
+        lpx_u_elem.append(torch.zeros_like(recon_log_prob))
 
     if return_breakdown:
         lpx_u_elem = torch.stack(lpx_u_elem, dim=-1)
