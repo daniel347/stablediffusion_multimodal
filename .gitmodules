@@ -1,3 +1,6 @@
 [submodule "SiT"]
 	path = SiT
 	url = ./SiT
+[submodule "mae"]
+	path = mae
+	url = git@github.com:daniel347/mae.git
