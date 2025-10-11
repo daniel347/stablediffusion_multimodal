@@ -12,7 +12,8 @@ def test_masking(mask_fraction, mask_overlap):
     x_device = torch.device("cpu")
     masks, ids_restore = model.overlapped_masking(x_shape, x_device, mask_fraction, mask_overlap)
 
-    print(masks[0] == masks[1])
+    print(f"mask sums{[m.sum() for m in masks]}")
+    print(f"overlap: {(masks[0] * masks[1]).sum()}")
 
     masks_reshaped = [mask.reshape(14, 14) for mask in masks]
     masks_reshaped.append(torch.zeros(14, 14))
