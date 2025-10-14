@@ -1,0 +1,34 @@
+target: SiT.sit_model.SiTModel
+params:
+  path_type: "Linear"
+  prediction: "velocity"
+  loss_weight: null
+  input_shape: [6, 16, 16]
+
+  scorenet_config:
+    target: SiT.models.SiT
+    params:
+      depth: 12
+      hidden_size: 768
+      patch_size: 2
+      num_heads: 12
+      input_size: 16
+      num_classes: null
+      in_channels: 6
+
+  unet_config:
+    params:
+      num_classes: null
+      use_fp16: false
+
+  first_stage_config:
+    target: mae.models_disentangling_mae.DisentanglingMAE
+    params:
+      avg_z: False,
+      lik_dists: [ "torch.distributions.Laplace"]
+      lik_dist_params:
+        - scale: 0.01
+
+      vae_params:
+        - target: mae.models_mae.MaskedAutoencoderViT  # RGB images
+          params:

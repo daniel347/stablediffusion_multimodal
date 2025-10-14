@@ -95,6 +95,27 @@ def initialise_model(conf):
             for u in U:
                 print(f"Unused key: {u}")
 
+    elif conf.training.get("init_from_mae", False):
+        print("Initialising autoencoder weights from pretrained MAE models")
+        mae_state_dict = torch.load("checkpoints/mae.pth")
+
+        for vae in model.vaes:
+            ignore_keys = ["encoder.conv_in", "decoder.conv_out"] if vae.is_semseg else []
+            ignore_keys += ["encoder.conv_out", "quant_conv", "decoder.conv_in", "post_quant_conv"] if vae.decoder.z_shape[1] != 4 else []
+            mae = copy.deepcopy(mae_state_dict)
+            keys = list(mae.keys())
+            for k in keys:
+                for ik in ignore_keys:
+                    if k.startswith(ik):
+                        print("Deleting key {} from state_dict.".format(k))
+                        del mae[k]
+
+            M, U = vae.load_state_dict(mae, strict=False)
+            for m in M:
+                print(f"Missing key: {m}")
+            for u in U:
+                print(f"Unused key: {u}")
+
     if conf.training.get("lora_finetune", False):
         print("Using LoRA finetuning for the autoencoder")
         bias_mode = conf.training.get("lora_bias_mode", "none")

@@ -1,0 +1,31 @@
+# @package _global_
+
+seed: 1
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
+experiment: "MM_CelebA_Autoencoder"
+print_freq: 50
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
+
+function:
+  name: training_loop
+  params: {}
+
+dataset_name: mm_celeba
+
+training:
+  start_iter: 0
+  test_every_iter: 400
+  compute_metrics: True
+
+model_initialisation: # "../outputs/MM_CelebA_Autoencoder/checkpoints/2025_03_21__23_27_35_new_obj_z_dist_mmd/model_10.rar"
+init_from_stable_diffusion: False
+init_from_mae: True
+
+defaults:
+  - data: mm_celeba
+  - ema: dummy_ema
+  - model: mae-sit-mm-rgb-semseg
+  - training: autoencoder_training_default
+  - override training/discriminator: mm_joint_discriminator_semseg
+  - override training/objective: disentangling_objective_mae
+  - _self_
