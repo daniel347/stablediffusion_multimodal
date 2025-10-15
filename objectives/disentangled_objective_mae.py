@@ -46,14 +46,15 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
 
-        self.weights = torch.tensor([1.0,
-                                    1.0,
-                                    self.wadversary,
-                                    self.beta * z_close_weight,
-                                    self.beta * self.mmd_zw_weight,
-                                    self.beta * self.mmd_ww_weight,
-                                    self.beta * self.mmd_zw_weight,
-                                    self.beta * self.mmd_ww_weight]).to(device)
+        weights = [1.0, 1.0, self.wadversary]
+        if self.mod.n_modality == 2:
+            weights.append(self.beta * z_close_weight)
+
+        for r in range(self.mod.n_modality):
+            weights.append(self.beta * self.mmd_zw_weight)
+            weights.append(self.beta * self.mmd_ww_weight)
+
+        self.weights = torch.tensor(weights).to(device)
 
     def _m_dreg(self, model, X, iteration=0, model_params={}, **kwargs):
         loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0,
@@ -129,9 +130,9 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
 
         # stack loss type
         lws = torch.stack(lws, dim=-1)
-        print(f"lws shape: {lws.shape}")
+        print(f"lws shape: {lws.shape}"
 
-        return lws, loss_dict, (W, Z, z_comb, X)
+        return lws, loss_dict, ((W, Z, z_comb), X)
 
 
     def forward(self, model, x, iteration=0, model_params={}, **kwargs):
@@ -147,6 +148,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
 
         lw = lw.mean(dim=0).sum(dim=0)
         weighted_lw = lw @ self.weights
+
 
         return weighted_lw, combined_loss_dict, model_outs
 
