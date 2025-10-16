@@ -137,7 +137,7 @@ def initialise_model(conf):
 def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=True, return_dist=False):
     avg_z = z_mode == "avg"
     random_z = z_mode == "random"
-    channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_channels
+    channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_len
 
     if conf.training.precompute_latents:
         latents = data

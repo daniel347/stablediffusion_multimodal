@@ -1,0 +1,22 @@
+# @package _global_
+
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
+device: "cuda:0"
+name: "celeba_mae_train"
+notes: "We try training our MAE on CelebA rgb images only."
+
+training:
+  lr: 1e-4
+
+  model_opts:
+    total_mask_ratio: 0.5
+    shared_mask_ratio: 0.75
+
+init_from_stable_diffusion: False
+init_from_mae: True
+
+defaults:
+  - override /model: mae-sit-mm-rgb
+  - _self_
+
+

@@ -66,10 +66,15 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
 
         self.l0 = torch.ones(8).to(device)
 
-        self.gradnorm_layers = self.mod.vae_last_layers
-        self.gradnorm_params = []
-        for l in self.gradnorm_layers:
-            self.gradnorm_params += list(l.parameters())
+        self.gradnorm_dec_layers = [self.mod.vaes[r].decoder.conv_out for r in range(len(self.mod.vaes))]
+        self.gradnorm_enc_layers = [self.mod.vaes[r].encoder.conv_out for r in range(len(self.mod.vaes))]
+        self.gradnorm_dec_params = []
+        for l in self.gradnorm_dec_layers:
+            self.gradnorm_dec_params += list(l.parameters())
+
+        self.gradnorm_enc_params = []
+        for l in self.gradnorm_enc_layers:
+            self.gradnorm_enc_params += list(l.parameters())
 
         self.gradnorm_alpha = gradnorm_alpha
 
@@ -253,13 +258,15 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
         if not test:
             gw = []
             for i in range(len(lw)):
-                dl = torch.autograd.grad(self.weights[i] * lw[i], self.gradnorm_params, retain_graph=True, create_graph=True)
+                print(f"Computing gradnorm for task {i}")
+                params = self.gradnorm_dec_params if i < 3 else self.gradnorm_enc_params
+                dl = torch.autograd.grad(self.weights[i] * lw[i], params, retain_graph=True, create_graph=True)
                 dl_flat = [d.flatten() for d in dl]
                 dl = torch.cat(dl_flat)
                 gw.append(torch.norm(dl))
             gw = torch.stack(gw)
             # compute loss ratio per task
-            loss_ratio = lw.detach() / self.l0
+            loss_ratio = (lw.detach() + 1e-4) / (self.l0 + 1e-4)
             # compute the relative inverse training rate per task
             rt = loss_ratio / loss_ratio.mean()
             # compute the average gradient norm

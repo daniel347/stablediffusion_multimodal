@@ -74,8 +74,6 @@ class MMVAEplus(nn.Module):
 
         self.use_z_comb_network = False
 
-        self.vae_last_layers = [vae.decoder.conv_out for vae in self.vaes] + [vae.encoder.conv_out for vae in self.vaes]
-
 
         if ckpt_path is not None:
             print(f"Loading MMVAE checkpoint from {ckpt_path}")

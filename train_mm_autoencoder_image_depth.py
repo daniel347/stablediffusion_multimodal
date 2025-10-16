@@ -47,7 +47,6 @@ from utils import (save_and_log_latents, save_and_log_img, duplicate_stable_diff
 import pyiqa
 
 enable_wandb = True
-# torch.autograd.set_detect_anomaly(True)
 
 def setup(rank, world_size):
     os.environ['MASTER_ADDR'] = 'localhost'
@@ -90,6 +89,27 @@ def initialise_model(conf):
             sd = duplicate_stable_diff_weights(sd, vae, alpha=0.25)
 
             M, U = vae.load_state_dict(sd, strict=False)
+            for m in M:
+                print(f"Missing key: {m}")
+            for u in U:
+                print(f"Unused key: {u}")
+
+    elif conf.get("init_from_mae", False):
+        print("Initialising autoencoder weights from pretrained MAE models")
+        mae_state_dict = torch.load("checkpoints/mae_pretrain_vit_base.pth")
+
+        for vae in model.vaes:
+            ignore_keys = ["patch_embed.proj", "decoder_pred"] if vae.in_chans != 3 else []
+            ignore_keys += ["pos_embed"]
+            mae = copy.deepcopy(mae_state_dict["model"])
+            keys = list(mae.keys())
+            for k in keys:
+                for ik in ignore_keys:
+                    if k.startswith(ik):
+                        print("Deleting key {} from state_dict.".format(k))
+                        del mae[k]
+
+            M, U = vae.load_state_dict(mae, strict=False)
             for m in M:
                 print(f"Missing key: {m}")
             for u in U:
@@ -155,6 +175,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         mod = model.module.module if data_parallel else model.module
         vaes = mod.vaes
         NUM_VAES = len(vaes)
+
+        model_opts = OmegaConf.to_container(conf.training.get("model_opts", {}))
 
         if "ema" in conf:
             print(f"Using EMA {conf.ema.target}")
@@ -335,7 +357,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if use_mixed_precision:
                         with autocast(dtype=torch.float16, device_type="cuda"):
-                            loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount, set_l0=(i==0 or i==objective.start_adv_iter))
+                            loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount, set_l0=(i==0 or i==objective.start_adv_iter), model_params=model_opts)
                             loss = -loss
 
                         scaler.scale(loss).backward()
@@ -346,7 +368,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
 
                     else:
-                        loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount, set_l0=(i==0 or i==objective.start_adv_iter))
+                        loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount, set_l0=(i==0 or i==objective.start_adv_iter), model_params=model_opts)
                         loss = -loss
                         loss.backward()
 
@@ -432,7 +454,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
-                    loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount)
+                    loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount, model_params=model_opts)
                     loss = -loss
 
                     if use_adversary:
@@ -454,7 +476,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     if compute_metrics:
                         for m, name in enumerate(modality):
                             out = model_outs[1][m][m] if isinstance(model_outs[1][0], list) else model_outs[1][m]
-                            for j, img in enumerate(out.mean[0]):
+                            if isinstance(out, torch.distributions.Distribution):
+                                out = out.mean
+                            for j, img in enumerate(out[0]):
                                 s_disp = display_data_fs[m](img.detach().cpu())
                                 tvu.save_image(s_disp, str(tempdirs[name] / f"sample_{name}_{i * conf.training.batch_size + j}.png"))
 
@@ -465,66 +489,73 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             grid = make_grid(dbatch, nrow=conf.training.batch_size)
                             wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
-                        # Compute cross-generations, unless we are using z combiner in which case it will be computed below
-                        if mod.can_cross_generate and not mod.use_z_comb_network:
-                            N_gen = 1
-                            n_samples = conf.training.batch_size // N_gen
-                            limited_data = [d[:n_samples] for d in data]
-
-                            cg_imgs = []
-                            for n in range(N_gen):
-                                cg_imgs.append(model("self_and_cross_modal_generation", limited_data, all_combinations=False))
-
-                            cg_imgs = stack_generation_matrices(cg_imgs, limited_data, display_data_fs)
-
-                            for i in range(NUM_VAES):
-                                for j in range(NUM_VAES):
-                                    if enable_wandb:
-                                        wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=itercount)
-                            del cg_imgs
-
-                        # Also save some example latent vectors and example reconstructions (without averaging z)
-                        latents = model.module("encode", data, avg_z=False, return_dist=False) if data_parallel else model("encode", data, avg_z=False, return_dist=False)
-
-                        if mod.factorised_latent_space:
-                            num_zs = len(latents) - NUM_VAES
-                            for j in range(NUM_VAES):
-                                save_and_log_latents(latents[j], f'Latents/wm{j}', runPath, itercount, run)
-
-                            for j in range(num_zs):  # Choice of z
-                                latent_z_img = latents[j + NUM_VAES]
-
-                                save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, itercount, run)
-
-                                # Reconstructions with known w
-                                ws = latents[:NUM_VAES]
-                                u = torch.cat([*ws, latent_z_img], dim=1)
-                                reconstructions = model.module("decode", u) if data_parallel else model("decode", u)
-
-                                for k in range(NUM_VAES):
-                                    save_and_log_img(reconstructions[k], f'Reconstructions/z{j}/m{k}',
-                                                     runPath, display_data_fs[k], itercount, run)
-
-                                # Reconstructions with random w
-                                W_random = []
-                                for k in range(NUM_VAES):
-                                    pw = vaes[k].pw(*model.module.pw_params)
-                                    latents_w = pw.rsample([latent_z_img.shape[0]]).squeeze(1).to(device)
-                                    W_random.append(latents_w)
-                                latents_random_w = torch.cat([*W_random, latent_z_img], dim=1)
-                                recon_random_w = model.module("decode", latents_random_w) if data_parallel else model(
-                                    "decode", latents_random_w)
-
-                                for k in range(NUM_VAES):
-                                    save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
-                                                     runPath, display_data_fs[k], itercount, run)
+                        if mod.masked_autoencoder:
+                            for m, (name, dbatch) in enumerate(zip(modality, model_outs[1])):
+                                dbatch = dbatch.detach().cpu()
+                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                                grid = make_grid(dbatch, nrow=conf.training.batch_size)
+                                wandb.log({f"Reconstruction/{name}": wandb.Image(grid)}, step=itercount)
                         else:
-                            save_and_log_latents(latents, f'Latents/u', runPath, itercount, run)
-                            reconstructions = model.module("decode", latents) if data_parallel else model("decode", latents)
+                            # Compute cross-generations, unless we are using z combiner in which case it will be computed below
+                            if mod.can_cross_generate and not mod.use_z_comb_network:
+                                N_gen = 1
+                                n_samples = conf.training.batch_size // N_gen
+                                limited_data = [d[:n_samples] for d in data]
 
-                            for k, rec in enumerate(reconstructions):
-                                save_and_log_img(rec, f'Reconstructions/m{k}',
-                                                 runPath, display_data_fs[k], itercount, run)
+                                cg_imgs = []
+                                for n in range(N_gen):
+                                    cg_imgs.append(model("self_and_cross_modal_generation", limited_data, all_combinations=False))
+
+                                cg_imgs = stack_generation_matrices(cg_imgs, limited_data, display_data_fs)
+
+                                for i in range(NUM_VAES):
+                                    for j in range(NUM_VAES):
+                                        if enable_wandb:
+                                            wandb.log({'Cross_Generation/m{}/m{}'.format(i, j): wandb.Image(cg_imgs[i][j])}, step=itercount)
+                                del cg_imgs
+
+                            # Also save some example latent vectors and example reconstructions (without averaging z)
+                            latents = model.module("encode", data, avg_z=False, return_dist=False, **model_opts) if data_parallel else model("encode", data, avg_z=False, return_dist=False, **model_opts)
+
+                            if mod.factorised_latent_space:
+                                num_zs = len(latents) - NUM_VAES
+                                for j in range(NUM_VAES):
+                                    save_and_log_latents(latents[j], f'Latents/wm{j}', runPath, itercount, run)
+
+                                for j in range(num_zs):  # Choice of z
+                                    latent_z_img = latents[j + NUM_VAES]
+
+                                    save_and_log_latents(latent_z_img, f'Latents/zm{j}', runPath, itercount, run)
+
+                                    # Reconstructions with known w
+                                    ws = latents[:NUM_VAES]
+                                    u = torch.cat([*ws, latent_z_img], dim=1)
+                                    reconstructions = model.module("decode", u, **model_opts) if data_parallel else model("decode", u, **model_opts)
+
+                                    for k in range(NUM_VAES):
+                                        save_and_log_img(reconstructions[k], f'Reconstructions/z{j}/m{k}',
+                                                         runPath, display_data_fs[k], itercount, run)
+
+                                    # Reconstructions with random w
+                                    W_random = []
+                                    for k in range(NUM_VAES):
+                                        pw = vaes[k].pw(*model.module.pw_params)
+                                        latents_w = pw.rsample([latent_z_img.shape[0]]).squeeze(1).to(device)
+                                        W_random.append(latents_w)
+                                    latents_random_w = torch.cat([*W_random, latent_z_img], dim=1)
+                                    recon_random_w = model.module("decode", latents_random_w, **model_opts) if data_parallel else model(
+                                        "decode", latents_random_w, **model_opts)
+
+                                    for k in range(NUM_VAES):
+                                        save_and_log_img(recon_random_w[k], f'ReconRandomW/z{j}/m{k}',
+                                                         runPath, display_data_fs[k], itercount, run)
+                            else:
+                                save_and_log_latents(latents, f'Latents/u', runPath, itercount, run)
+                                reconstructions = model.module("decode", latents, **model_opts) if data_parallel else model("decode", latents, **model_opts)
+
+                                for k, rec in enumerate(reconstructions):
+                                    save_and_log_img(rec, f'Reconstructions/m{k}',
+                                                     runPath, display_data_fs[k], itercount, run)
 
                         if use_adversary:
                             # Log discriminator outputs
@@ -540,6 +571,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake", runPath, None,
                                                  itercount,
                                                  run)
+
+
 
             if compute_metrics:
                 metric_scores = {}
@@ -611,7 +644,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             model.train()
 
             def obj_grad_check(t1, t2):
-                loss, loss_dict, model_outs = t_objective(model, [t1, t2], K=conf.training.K, test=False)
+                loss, loss_dict, model_outs = t_objective(model, [t1, t2], K=conf.training.K, test=False, model_params=model_opts)
                 return loss
 
             grad_check = torch.autograd.gradcheck(obj_grad_check, x, eps=1e-6, atol=1e-4, fast_mode=True)
@@ -626,7 +659,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
 
-                    latents = model.module("encode", data, avg_z=False) if data_parallel else model("encode", data, avg_z=False)
+                    latents = model.module("encode", data, avg_z=False, **model_opts) if data_parallel else model("encode", data, avg_z=False, **model_opts)
                     latents_z = latents[NUM_VAES:]
 
                     if enable_wandb:
@@ -684,12 +717,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     mod = model.module if data_parallel else model
 
-                    latents = mod("encode", data, avg_z=True)
+                    latents = mod("encode", data, avg_z=True, **model_opts)
 
                     latents_perturbed = latents + (0.01 * torch.std(latents)) * torch.randn_like(latents)
 
-                    reconstructions = mod("decode", latents)
-                    reconstructions_perturbed = mod("decode", latents_perturbed)
+                    reconstructions = mod("decode", latents, **model_opts)
+                    reconstructions_perturbed = mod("decode", latents_perturbed, **model_opts)
 
                     reencoded_latents = mod("encode", [reconstructions_perturbed[0].mean], avg_z=True)
                     reencoded_latents_perturbed = mod("encode", [reconstructions_perturbed[0].mean], avg_z=True)
@@ -774,7 +807,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                         latent_norm = select_z_channel(latent_norm, c)
 
-                        reconstructions = mod("decode", latent_norm)
+                        reconstructions = mod("decode", latent_norm, **model_opts)
 
                         for k, rec in enumerate(reconstructions):
                             save_and_log_img(rec, f'Reconstructions/m{k}',
@@ -783,7 +816,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         itercount += 1
 
                     # add a fixed amount of noise to each channel and measure the reconstruction error
-                    baseline_recon = mod("decode", latents[:, :w_channels * NUM_VAES + z_channels])
+                    baseline_recon = mod("decode", latents[:, :w_channels * NUM_VAES + z_channels], **model_opts)
                     baseline_error = [torch.nn.functional.mse_loss(d, b.mean) for d, b in zip(data, baseline_recon)]
                     noise = torch.randn_like(latents)
 
@@ -794,7 +827,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         latent_noised[:, c] += 0.2 * noise[:, 0]  # we add the same noise to all channels incase there is a "black hole"
                         latent_noised = select_z_channel(latent_noised, c)
 
-                        recons = mod("decode", latent_noised)
+                        recons = mod("decode", latent_noised, **model_opts)
                         error = [torch.nn.functional.mse_loss(d, r.mean) for d, r in zip(data, recons)]
 
                         wandb.log({"channel": c, **{f"recon_error_mode{m}": error[m].detach().cpu() for m in range(len(modality))}}, step=itercount)
@@ -837,10 +870,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
                     if hasattr(mod.module, "use_z_comb_network") and mod.module.use_z_comb_network:
-                        *qw_xs, qz_xs = mod("encode", data, return_dist=True)
+                        *qw_xs, qz_xs = mod("encode", data, return_dist=True, **model_opts)
                         qz_xs = [qz_xs]
                     else:
-                        u = mod("encode", data, avg_z=False, return_dist=True)
+                        u = mod("encode", data, avg_z=False, return_dist=True, **model_opts)
                         qw_xs = u[:NUM_VAES]
                         qz_xs = u[NUM_VAES:]
                     qw_means = [qw_x.mean for qw_x in qw_xs]
@@ -867,7 +900,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     # Compute reconstruction loss (MSE & LPIPS) with the mean latents
                     latents = torch.cat(qw_means + z_comb_means, dim=1)
-                    recons = mod("decode", latents)
+                    recons = mod("decode", latents, **model_opts)
                     for k, rec in enumerate(recons):
                         save_and_log_img(rec, f'ReconstructionsMean/m{k}',
                                          runPath, display_data_fs[k], i, run)

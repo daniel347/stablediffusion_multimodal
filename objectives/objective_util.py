@@ -104,7 +104,10 @@ def train_discriminator(real_data, px_u, discriminator, optimiser, device, test=
     # print(f"nans in real data: {[torch.any(torch.isnan(rd)) for rd in real_data]}")
     # print(f"nans in px_u: {[torch.any(torch.isnan(px.mode)) for px in px_u]}")
 
-    px_u_fill = [torch.nan_to_num(t.mode, 0.0) for t in px_u]
+    if isinstance(px_u[0], torch.distributions.Distribution):
+        px_u = [t.mode for t in px_u]
+
+    px_u_fill = [torch.nan_to_num(t, 0.0) for t in px_u]
     px_u_detach_fill = [px_u_f.detach() for px_u_f in px_u_fill]
 
     real_output = torch.stack(discriminator(real_data), dim=1)

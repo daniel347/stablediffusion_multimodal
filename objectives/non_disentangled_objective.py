@@ -36,7 +36,7 @@ class NonDisentanglingObjective(torch.nn.Module):
         self.beta = beta
         self.channel_weighting = channel_weighting
 
-    def _m_dreg(self, model, x, K=1, test=False, iteration=0):
+    def _m_dreg(self, model, x, K=1, test=False, iteration=0, **kwargs):
         qu_xs, px_us, uss = model("forward", x, K)
 
         loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "adversarial_loss": 0}
