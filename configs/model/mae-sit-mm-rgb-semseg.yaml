@@ -22,7 +22,7 @@ params:
       use_fp16: false
 
   first_stage_config:
-    target: mae.models_disentangling_mae.DisentanglingMAE
+    target: mae.models_disentangling_mae.DisMAE
     params:
       avg_z: False,
       lik_dists: [ "torch.distributions.Laplace", "torch.distributions.Bernoulli" ]

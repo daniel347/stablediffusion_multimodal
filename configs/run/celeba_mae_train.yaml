@@ -8,15 +8,9 @@ notes: "We try training our MAE on CelebA rgb images only."
 training:
   lr: 1e-4
 
-  objective:
-    params:
-      wlpips: 10000
-      wadversary: 2000
-      wll: 0.05
-
   model_opts:
     total_mask_ratio: 0.5
-    shared_mask_ratio: 0.5
+    shared_mask_ratio: 0.75
 
 init_from_stable_diffusion: False
 init_from_mae: True
@@ -24,4 +18,5 @@ init_from_mae: True
 defaults:
   - override /model: mae-sit-mm-rgb
   - override /training/objective: disentangling_objective_mae_single_mode
+  - _self_
 

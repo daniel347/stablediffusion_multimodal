@@ -22,13 +22,25 @@ params:
       use_fp16: false
 
   first_stage_config:
-    target: mae.models_disentangling_mae.DisentanglingMAE
+    target: mae.models_disentangling_mae.DisMAE
     params:
       avg_z: False,
       lik_dists: [ "torch.distributions.Laplace"]
       lik_dist_params:
         - scale: 0.01
+      w_len: 384
+      z_len: 384
 
       vae_params:
         - target: mae.models_mae.MaskedAutoencoderViT  # RGB images
           params:
+            img_size: 128
+            patch_size: 16
+            in_chans: 3
+            embed_dim: 768
+            depth: 12
+            num_heads: 12
+            decoder_embed_dim: 512
+            decoder_depth: 8
+            decoder_num_heads: 16
+            mlp_ratio: 4

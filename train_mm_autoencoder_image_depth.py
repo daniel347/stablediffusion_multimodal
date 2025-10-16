@@ -95,14 +95,14 @@ def initialise_model(conf):
             for u in U:
                 print(f"Unused key: {u}")
 
-    elif conf.training.get("init_from_mae", False):
+    elif conf.get("init_from_mae", False):
         print("Initialising autoencoder weights from pretrained MAE models")
-        mae_state_dict = torch.load("checkpoints/mae.pth")
+        mae_state_dict = torch.load("checkpoints/mae_pretrain_vit_base.pth")
 
         for vae in model.vaes:
-            ignore_keys = ["encoder.conv_in", "decoder.conv_out"] if vae.is_semseg else []
-            ignore_keys += ["encoder.conv_out", "quant_conv", "decoder.conv_in", "post_quant_conv"] if vae.decoder.z_shape[1] != 4 else []
-            mae = copy.deepcopy(mae_state_dict)
+            ignore_keys = ["patch_embed.proj", "decoder_pred"] if vae.in_chans != 3 else []
+            ignore_keys += ["pos_embed"]
+            mae = copy.deepcopy(mae_state_dict["model"])
             keys = list(mae.keys())
             for k in keys:
                 for ik in ignore_keys:

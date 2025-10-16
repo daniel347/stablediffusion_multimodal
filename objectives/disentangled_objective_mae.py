@@ -113,8 +113,8 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         mmd_loss = MMDIndependenceLoss(target_dim=2)
 
         for r, (qz_x, qw_x_r) in enumerate(zip(Z, W)):
-            lmmd_zw_r = 0
-            lmmd_ww_r = 0
+            lmmd_zw_r = torch.tensor(0.0, device=qz_x.device)
+            lmmd_ww_r = torch.tensor(0.0, device=qz_x.device)
             for d, qw_x in enumerate(W):
                 print(f"qz_x mean: {qz_x.shape}")
                 print(f"qw_x mean: {qw_x.shape}")
@@ -130,7 +130,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
 
         # stack loss type
         lws = torch.stack(lws, dim=-1)
-        print(f"lws shape: {lws.shape}"
+        print(f"lws shape: {lws.shape}")
 
         return lws, loss_dict, ((W, Z, z_comb), X)
 

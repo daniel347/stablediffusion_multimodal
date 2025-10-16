@@ -1,4 +1,4 @@
-name: disentangling_objective
+name: disentangling_objective_mae
 params:
   start_adv_iter: 400
   channel_weighting: # semseg_class_freqs.pt
@@ -6,7 +6,7 @@ params:
 
   wlpips: [ 5000 ]
   wadversary: 2000
-  mmd_zw_weight: 0.0
-  mmd_ww_weight: 1500.0
+  mmd_zw_weight: 1000.0
+  mmd_ww_weight: 0.0
   wll: 0.02
   beta: 1
