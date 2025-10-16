@@ -46,7 +46,7 @@ from utils import (save_and_log_latents, save_and_log_img, duplicate_stable_diff
 
 import pyiqa
 
-enable_wandb = False
+enable_wandb = True
 torch.autograd.set_detect_anomaly(True)
 
 def setup(rank, world_size):

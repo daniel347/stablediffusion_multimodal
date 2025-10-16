@@ -17,6 +17,6 @@ init_from_mae: True
 
 defaults:
   - override /model: mae-sit-mm-rgb
-  - override /training/objective: disentangling_objective_mae_single_mode
   - _self_
+
 

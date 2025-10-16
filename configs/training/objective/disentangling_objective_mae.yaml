@@ -1,4 +1,4 @@
-name: disentangling_objective
+name: disentangling_objective_mae
 params:
   start_adv_iter: 400
   channel_weighting: # semseg_class_freqs.pt
