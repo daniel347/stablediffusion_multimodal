@@ -44,3 +44,10 @@ params:
             decoder_depth: 8
             decoder_num_heads: 16
             mlp_ratio: 4
+
+            quantiser:
+              target: mae.vector_quantiser.VectorQuantiser
+              params:
+                n_e: 8192
+                e_dim: 768
+                beta: 0.25

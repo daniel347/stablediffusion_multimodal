@@ -46,7 +46,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
 
-        weights = [1.0, 1.0, self.wadversary]
+        weights = [1.0, 1.0, self.wadversary, self.beta]
         if self.mod.n_modality == 2:
             weights.append(self.beta * z_close_weight)
 
@@ -62,7 +62,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                      "discriminator_loss": 0, "adversarial_loss": 0,
                      "cos_sim_ww": 0, "cos_sim_zw": 0}
 
-        W, Z, z_comb, Xhat = model("forward", X, **model_params)
+        W, Z, z_comb, Xhat, q_loss = model("forward", X, **model_params)
         px_us = [self.mod.lik_dists[d](Xhat[d].unsqueeze(0), **self.mod.lik_dist_params[d]) for d in range(len(X))]
         print(f"nans: {[torch.any(torch.isnan(Xh)) for Xh in X]}")
 
@@ -95,7 +95,9 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         else:
             lws.append(torch.zeros(K, B, dtype=torch.float32, device=X[0].device))
 
-        # TODO: vector quantisation loss?
+        # VQ loss
+        lws.append(-q_loss * torch.ones(K, B, dtype=torch.float32, device=X[0].device) * self.beta)
+        loss_dict["vq_loss"] = -q_loss.clone().detach().cpu().sum().item()
 
         # Z distance loss (Symmetric kl but only works for 2 modalities)
         if len(Z) != 2:

@@ -5,12 +5,13 @@ from objectives.disentangled_objective_mae import DisentanglingObjectiveMAE
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 import matplotlib.pyplot as plt
 import math
+import yaml
 
-vae_params = [{"target": "mae.models_mae.MaskedAutoencoderViT", "params": {"img_size": 128, "in_chans": 3}},
-              {"target": "mae.models_mae.MaskedAutoencoderViT", "params": {"img_size": 128, "in_chans": 18, "end_act": "sigmoid"}}]
+with open("../configs/model/mae-sit-mm-rgb-semseg.yaml", 'r') as f:
+    model_params = yaml.safe_load(f)["params"]["first_stage_config"]["params"]
 
-model_params = {"vae_params": vae_params, "avg_z": False, "lik_dists": ["torch.distributions.Laplace", "torch.distributions.Bernoulli"], "lik_dist_params": [{"scale": 0.01}, {}]}
-unimodal_model_params = {"vae_params": vae_params[:1], "avg_z": False, "lik_dists": ["torch.distributions.Laplace"], "lik_dist_params": [{"scale": 0.01}]}
+with open('../configs/model/mae-sit-mm-rgb.yaml', 'r') as f:
+    unimodal_model_params = yaml.safe_load(f)["params"]["first_stage_config"]["params"]
 
 objective_params = {"wlpips": [1.0, 0.0], "wll": 1.0, "wadversary": 0.0, "start_adv_iter": 0, "beta": 1.0, "z_close_weight": 50000, "mmd_zw_weight": 1, "mmd_ww_weight": 1, "channel_weighting": [None, None]}
 unimodal_objective_params = {"wlpips": [1.0], "wll": 1.0, "wadversary": 0.0, "start_adv_iter": 0, "beta": 1.0, "z_close_weight": 0, "mmd_zw_weight": 1, "mmd_ww_weight": 0, "channel_weighting": [None]}
@@ -124,13 +125,14 @@ def test_model_forward(unimodal):
         data = [torch.randn(1, 3, img_size, img_size).to(x_device), torch.clamp(torch.randn(1, 18, img_size, img_size), 0, 1).to(x_device)]
         model = DisMAE(**model_params).to(x_device)
 
-
-    W, Z, z_comb, X = model.forward(data, random_z=True)
+    W, Z, z_comb, X, q_loss = model.forward(data, random_z=True)
 
     print(f"W shapes: {[w.shape for w in W]}")
     print(f"Z shapes: {[z.shape for z in Z]}")
     print(f"z_comb shape: {z_comb.shape}")
     print(f"X shapes: {[x.shape for x in X]}")
+    print(f"q_loss shape: {q_loss.shape}")
+    print(f"q_loss: {q_loss}")
 
     assert all([x.shape == data[i].shape for i, x in enumerate(X)])
 

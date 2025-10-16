@@ -29,12 +29,47 @@ params:
       lik_dist_params:
         - scale: 0.01
         - {}
+      w_len: 384
+      z_len: 384
 
       vae_params:
         - target: mae.models_mae.MaskedAutoencoderViT  # RGB images
           params:
+            img_size: 128
+            patch_size: 16
+            in_chans: 3
+            embed_dim: 768
+            depth: 12
+            num_heads: 12
+            decoder_embed_dim: 512
+            decoder_depth: 8
+            decoder_num_heads: 16
+            mlp_ratio: 4
+
+            quantiser:
+              target: mae.vector_quantiser.VectorQuantiser
+              params:
+                n_e: 8192
+                e_dim: 768
+                beta: 0.25
 
         - target: mae.models_mae.MaskedAutoencoderViT  # Semantic Segmentation
           params:
-            in_chans: 18
             end_act: "sigmoid"
+            img_size: 128
+            patch_size: 16
+            in_chans: 18
+            embed_dim: 768
+            depth: 12
+            num_heads: 12
+            decoder_embed_dim: 512
+            decoder_depth: 8
+            decoder_num_heads: 16
+            mlp_ratio: 4
+
+            quantiser:
+              target: mae.vector_quantiser.VectorQuantiser
+              params:
+                n_e: 8192
+                e_dim: 768
+                beta: 0.25
