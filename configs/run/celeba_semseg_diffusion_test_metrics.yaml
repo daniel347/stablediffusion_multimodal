@@ -1,7 +1,7 @@
 # @package _global_
 
-name: "correct_mmd_loss_diff_ema_opt_metrics"
-notes: "We compute metrics with our best ema optimised diffusion model, with the sampled latents. We use 10000 samples again since 50000 didnt seem to make a difference"
+name: "sample_latents_finetuned_z_comb_diff_ema_opt_metrics"
+notes: "We compute metrics with our best ema optimised diffusion model, with the sampled latents and the finetuned z combiner. We use 10000 samples"
 
 function:
   name: test_metrics
@@ -16,7 +16,7 @@ training:
   latent_scale_per_channel: True
   compute_latent_scale: True
 
-model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_09_11__11_08_17_correct_mmd_loss/model_it25000_ema_0.175.pt
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_05__12_54_56_sample_latents_finetuned_z_comb/model_it48000_ema_0.075.pt
 
 defaults:
   - override /ema: dummy_ema
