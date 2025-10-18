@@ -12,6 +12,8 @@ training:
     total_mask_ratio: 0.5
     shared_mask_ratio: 0.75
 
+  test_every_iter: 25
+
 init_from_stable_diffusion: False
 init_from_mae: True
 
