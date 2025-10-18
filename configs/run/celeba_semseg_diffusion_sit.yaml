@@ -1,7 +1,7 @@
 # @package _global_
 
 name: "sit_diff"
-notes: "We train SiT diffusion model with our disentangling autoencoder after finetuning the z combiner to be more realistic"
+notes: "We train SiT diffusion model with our disentangling autoencoder after finetuning the z combiner to be more realistic. We train for a long time to see if there is significant improvement"
 
 training:
   precompute_latents: True
@@ -10,13 +10,18 @@ training:
   latent_scale_per_channel: True
   compute_latent_scale: True
 
-  patience: 20
+  patience: 50
+  test_every_iter: 5000
+  num_epochs: 50
 
 model:
   params:
     first_stage_config:
       params:
         ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_30__20_39_50_low_l1_finetune_zcomb/model_2000.pt"
+
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_02__21_45_25_sit_diff/model_48000.pt"
+
 
 defaults:
   - override /model: sit-mm-rgb-semseg
