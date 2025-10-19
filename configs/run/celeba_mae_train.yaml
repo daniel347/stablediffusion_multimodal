@@ -13,6 +13,9 @@ training:
     shared_mask_ratio: 0.75
 
   test_every_iter: 400
+  objective:
+    params:        
+      start_adv_iter: 0
 
 init_from_stable_diffusion: False
 init_from_mae: True
