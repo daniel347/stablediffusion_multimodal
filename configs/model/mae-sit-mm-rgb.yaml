@@ -38,7 +38,7 @@ params:
             patch_size: 16
             in_chans: 3
             embed_dim: 768
-            depth: 12
+            depth: 8
             num_heads: 12
             decoder_embed_dim: 512
             decoder_depth: 8
