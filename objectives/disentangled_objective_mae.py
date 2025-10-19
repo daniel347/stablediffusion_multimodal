@@ -134,7 +134,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         lws = torch.stack(lws, dim=-1)
         print(f"lws shape: {lws.shape}")
 
-        return lws, loss_dict, ((W, Z, z_comb), X)
+        return lws, loss_dict, ((W, Z, z_comb), Xhat)
 
 
     def forward(self, model, x, iteration=0, model_params={}, **kwargs):
