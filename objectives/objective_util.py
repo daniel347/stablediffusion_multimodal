@@ -91,7 +91,7 @@ def get_adversarial_loss(px_u, discriminator, device):
     
     print(f"px_u shape: {px_u_fill[0].shape}")
 
-    fake_outputs = torch.stack(discriminator(px_u_fill), dim=1)
+    fake_outputs = torch.stack(discriminator(px_u_fill), dim=-1)  # add a modality dimension at the end
     print(f"fake_outputs: {fake_outputs.shape}")
     real_labels = torch.ones(fake_outputs.shape).to(device)
     autoencoder_loss = torch.nn.functional.binary_cross_entropy(fake_outputs, real_labels, reduction="none")

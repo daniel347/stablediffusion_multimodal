@@ -486,14 +486,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         for m, (name, dbatch) in enumerate(zip(modality, data)):
                             dbatch = dbatch.detach().cpu()
                             dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
-                            grid = make_grid(dbatch, nrow=conf.training.batch_size)
+                            grid = make_grid(dbatch, nrow=8)
                             wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
                         if mod.masked_autoencoder:
                             for m, (name, dbatch) in enumerate(zip(modality, model_outs[1])):
                                 dbatch = dbatch.detach().cpu()
                                 dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
-                                grid = make_grid(dbatch, nrow=conf.training.batch_size)
+                                grid = make_grid(dbatch, nrow=8)
                                 wandb.log({f"Reconstruction/{name}": wandb.Image(grid)}, step=itercount)
                         else:
                             # Compute cross-generations, unless we are using z combiner in which case it will be computed below

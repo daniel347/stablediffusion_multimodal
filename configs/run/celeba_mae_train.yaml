@@ -15,7 +15,11 @@ training:
   test_every_iter: 400
   objective:
     params:        
-      start_adv_iter: 0
+      start_adv_iter: 400
+      w_adversary: 500
+
+  discriminator:
+    discriminator_lr: 1e-3
 
 init_from_stable_diffusion: False
 init_from_mae: True
