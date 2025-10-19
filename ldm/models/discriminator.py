@@ -112,4 +112,6 @@ class MMJointDiscriminator(nn.Module):
         x_concat = torch.cat(X, dim=-3)
         if len(x_concat.shape) == 5:
             x_concat = x_concat.squeeze(0)
-        return [self.discriminator(x_concat)]
+            return [self.discriminator(x_concat).unsqueeze(0)]
+        else:
+            return [self.discriminator(x_concat)]

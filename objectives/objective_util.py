@@ -94,9 +94,8 @@ def get_adversarial_loss(px_u, discriminator, device):
     fake_outputs = torch.stack(discriminator(px_u_fill), dim=1)
     print(f"fake_outputs: {fake_outputs.shape}")
     real_labels = torch.ones(fake_outputs.shape).to(device)
-    reduce_dim = [i for i in range(1, len(fake_outputs.shape[2:]))]  # mean over all but batch dim
-    print(f"reduce dim: {reduce_dim}")
-    autoencoder_loss = torch.nn.functional.binary_cross_entropy(fake_outputs, real_labels, reduction="none").mean(dim=reduce_dim)
+    autoencoder_loss = torch.nn.functional.binary_cross_entropy(fake_outputs, real_labels, reduction="none")
+    autoencoder_loss = autoencoder_loss.flatten(start_dim=2).mean(dim=2)
     print(f"loss shape: {autoencoder_loss.shape}")
 
     return autoencoder_loss
