@@ -21,14 +21,11 @@ training:
   discriminator:
     discriminator_lr: 4e-4
 
-
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_19__20_05_57_celeba_mae_train/model_5600.pt" 
 init_from_stable_diffusion: False
-init_from_mae: False
-resume_training: True
+init_from_mae: True
 
 defaults:
-  - override /model: mae-sit-mm-rgb
+  - override /model: mae-sit-mm-rgb-no-quant
   - _self_
 
 

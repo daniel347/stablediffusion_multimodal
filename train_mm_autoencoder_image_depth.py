@@ -32,6 +32,7 @@ import pandas as pd
 import torchvision.utils as tvu
 import cmmd_pytorch as cmmd
 from itertools import product
+import math
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.modules.ema import DummyEMA
@@ -482,7 +483,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 s_disp = display_data_fs[m](img.detach().cpu())
                                 tvu.save_image(s_disp, str(tempdirs[name] / f"sample_{name}_{i * conf.training.batch_size + j}.png"))
 
-                    if i == 5:  # select a different scene
+                    if i == 0:  # select a different scene
                         for m, (name, dbatch) in enumerate(zip(modality, data)):
                             dbatch = dbatch.detach().cpu()
                             dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
@@ -495,6 +496,21 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
                                 grid = make_grid(dbatch, nrow=8)
                                 wandb.log({f"Reconstruction/{name}": wandb.Image(grid)}, step=itercount)
+
+                            for m, (name, dbatch, mask) in enumerate(zip(modality, data, model_outs[0][-1])):
+                                dbatch = dbatch.detach().cpu()
+                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+
+                                patch_size = mod.vaes[0].patch_embed.patch_size[0]
+                                n_patches = int(math.sqrt(mod.vaes[0].patch_embed.num_patches))
+
+                                mask_out = mask.unsqueeze(1).expand((-1, 3, -1)).reshape((*dbatch.shape[:2], n_patches, n_patches))
+                                mask_out = mask_out.repeat_interleave(patch_size, dim=-1).repeat_interleave(patch_size, dim=-2)
+                                dbatch = dbatch * (1 - mask_out)
+                                grid = make_grid(dbatch, nrow=8)
+                                wandb.log({f"DataMasked/{name}": wandb.Image(grid)}, step=itercount)
+
+
                         else:
                             # Compute cross-generations, unless we are using z combiner in which case it will be computed below
                             if mod.can_cross_generate and not mod.use_z_comb_network:

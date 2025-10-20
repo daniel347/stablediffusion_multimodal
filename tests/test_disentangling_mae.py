@@ -65,7 +65,7 @@ def test_model_encode(unimodal):
         data = [torch.randn(1, 3, img_size, img_size).to(x_device), torch.clamp(torch.randn(1, 18, img_size, img_size), 0, 1).to(x_device)]
         model = DisMAE(**model_params).to(x_device)
 
-    W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique = model.encode(data, total_mask_ratio=0.25, shared_mask_ratio=0.5)
+    W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model.encode(data, total_mask_ratio=0.25, shared_mask_ratio=0.5)
 
     print(f"W shapes: {[w.shape for w in W]}")
     print(f"Z shapes: {[z.shape for z in Z]}")
