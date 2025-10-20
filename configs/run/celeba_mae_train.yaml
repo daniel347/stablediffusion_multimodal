@@ -12,17 +12,20 @@ training:
     total_mask_ratio: 0.5
     shared_mask_ratio: 0.75
 
-  test_every_iter: 400
+  test_every_iter: 2000
   objective:
     params:        
-      start_adv_iter: 400
+      start_adv_iter: 10000
       w_adversary: 500
 
   discriminator:
-    discriminator_lr: 1e-3
+    discriminator_lr: 4e-4
 
+
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_19__20_05_57_celeba_mae_train/model_5600.pt" 
 init_from_stable_diffusion: False
-init_from_mae: True
+init_from_mae: False
+resume_training: True
 
 defaults:
   - override /model: mae-sit-mm-rgb
