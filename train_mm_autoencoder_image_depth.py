@@ -505,7 +505,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 n_patches = int(math.sqrt(mod.vaes[0].patch_embed.num_patches))
 
                                 mask_out = mask.unsqueeze(1).expand((-1, 3, -1)).reshape((*dbatch.shape[:2], n_patches, n_patches))
-                                mask_out = mask_out.repeat_interleave(patch_size, dim=-1).repeat_interleave(patch_size, dim=-2)
+                                mask_out = mask_out.repeat_interleave(patch_size, dim=-1).repeat_interleave(patch_size, dim=-2).detach().cpu()
                                 dbatch = dbatch * (1 - mask_out)
                                 grid = make_grid(dbatch, nrow=8)
                                 wandb.log({f"DataMasked/{name}": wandb.Image(grid)}, step=itercount)

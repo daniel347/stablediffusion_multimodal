@@ -2,30 +2,34 @@
 
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
-name: "celeba_mae_train"
-notes: "We try training our MAE on CelebA rgb images only."
+name: "celeba_mae_train_no_vq"
+notes: "We try training our MAE on CelebA rgb images only, without vq or mmd loss. We train with much lower adversarial weight, and for some more time to see if we get better results"
 
 training:
   lr: 1e-4
-
+  num_epochs: 60
+  patience: 60  # dont early stop
+        
   model_opts:
     total_mask_ratio: 0.5
     shared_mask_ratio: 0.75
 
-  test_every_iter: 2000
+  test_every_iter: 200
   objective:
     params:        
       start_adv_iter: 10000
-      w_adversary: 500
+      wadversary: 1
+      mmd_zw_weight: 0.0
 
   discriminator:
     discriminator_lr: 4e-4
 
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_20__20_45_21_celeba_mae_train_no_vq/model_10000.pt"
 init_from_stable_diffusion: False
-init_from_mae: True
+init_from_mae: False
+resume_training: True
+
 
 defaults:
   - override /model: mae-sit-mm-rgb-no-quant
   - _self_
-
-
