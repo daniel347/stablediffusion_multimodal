@@ -452,6 +452,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     tempdir.mkdir(parents=True, exist_ok=True)
                     tempdirs[mode] = tempdir
 
+            enc_counts = [(torch.zeros(vae.quantiser.n_e) if vae.quantiser is not None else None) for vae in
+                          mod.vaes]
+            print(enc_counts)
+
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
@@ -466,6 +470,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         else:
                             disc_loss = train_discriminator_f(data, model_outs[1], test=True)
                         loss_dict["discriminator_loss"] = -disc_loss.detach().cpu().sum().item()
+
+                    for m, enc_count in enumerate(model_outs[0][4]):
+                        if enc_count is not None:
+                            enc_counts[m] += torch.sum(enc_count, dim=0).detach().cpu()
 
                     b_loss += loss.detach().item()
 
@@ -497,7 +505,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 grid = make_grid(dbatch, nrow=8)
                                 wandb.log({f"Reconstruction/{name}": wandb.Image(grid)}, step=itercount)
 
-                            for m, (name, dbatch, mask) in enumerate(zip(modality, data, model_outs[0][-1])):
+                            for m, (name, dbatch, mask) in enumerate(zip(modality, data, model_outs[0][3])):
                                 dbatch = dbatch.detach().cpu()
                                 dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
 
@@ -509,7 +517,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 dbatch = dbatch * (1 - mask_out)
                                 grid = make_grid(dbatch, nrow=8)
                                 wandb.log({f"DataMasked/{name}": wandb.Image(grid)}, step=itercount)
-
 
                         else:
                             # Compute cross-generations, unless we are using z combiner in which case it will be computed below
@@ -617,11 +624,25 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for met, score in metric_scores.items():
                     wandb.log({f"{met}_sum": sum(filter(None, score))}, step=itercount)
 
+            codebook_perplexity = []
+            for enc_count in enc_counts:
+                if enc_count is not None:
+                    enc_count = enc_count / torch.sum(enc_count)
+                    perplexity = torch.exp(-torch.sum(enc_count * torch.log(enc_count + 1e-6)))
+                    codebook_perplexity.append(perplexity.item())
+                else:
+                    codebook_perplexity.append(None)
+
+            print("Codebook perplexities:", codebook_perplexity)
+
             # Epoch test loss
             epoch_loss = b_loss / len(test_loader)
             if enable_wandb:
                 wandb.log({"Loss/test": epoch_loss}, step=itercount)
                 wandb.log({f"Loss/test/breakdown/{key}": val/len(test_loader) for key, val in loss_series.items()}, step=itercount)
+                for m, perp in enumerate(codebook_perplexity):
+                    if perp is not None:
+                        wandb.log({f"Codebook/perplexity_m{m}": perp}, step=itercount)
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
             print(loss_series)
 
