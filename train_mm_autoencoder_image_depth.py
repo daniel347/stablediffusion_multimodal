@@ -454,7 +454,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             enc_counts = [(torch.zeros(vae.quantiser.n_e) if vae.quantiser is not None else None) for vae in
                           mod.vaes]
-            print(enc_counts)
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):

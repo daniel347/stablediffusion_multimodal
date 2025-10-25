@@ -1,0 +1,54 @@
+target: SiT.sit_model.SiTModel
+params:
+  path_type: "Linear"
+  prediction: "velocity"
+  loss_weight: null
+  input_shape: [6, 16, 16]
+
+  scorenet_config:
+    target: SiT.models.SiT
+    params:
+      depth: 12
+      hidden_size: 768
+      patch_size: 2
+      num_heads: 12
+      input_size: 16
+      num_classes: null
+      in_channels: 6
+
+  unet_config:
+    params:
+      num_classes: null
+      use_fp16: false
+
+  first_stage_config:
+    target: mae.models_disentangling_mae.DisMAE
+    params:
+      avg_z: False,
+      lik_dists: [ "torch.distributions.Laplace"]
+      lik_dist_params:
+        - scale: 0.01
+      w_len: 384
+      z_len: 384
+
+      vae_params:
+        - target: mae.models_mae.MaskedAutoencoderViT  # RGB images
+          params:
+            img_size: 128
+            patch_size: 16
+            in_chans: 3
+            embed_dim: 768
+            depth: 8
+            num_heads: 12
+            decoder_embed_dim: 512
+            decoder_depth: 8
+            decoder_num_heads: 16
+            mlp_ratio: 4
+
+            quantiser:
+              target: mae.vector_quantiser.GumbelSoftmaxQuantiser
+              params:
+                n_e: 768
+                e_dim: 768
+                temp: 0.3
+                beta: 1.0
