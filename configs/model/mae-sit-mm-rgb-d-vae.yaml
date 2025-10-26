@@ -51,4 +51,4 @@ params:
                 n_e: 768
                 e_dim: 768
                 temp: 0.3
-                beta: 1.0
+                beta: 0.25

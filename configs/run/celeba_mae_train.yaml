@@ -6,7 +6,7 @@ name: "celeba_mae_train_contract_vq"
 notes: "We try training our MAE on CelebA rgb images only, with VQ after linear projection."
 
 training:
-  lr: 1e-4
+  lr: 0.5e-5
   num_epochs: 60
   patience: 60  # dont early stop
         
