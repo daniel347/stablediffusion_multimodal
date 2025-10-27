@@ -50,5 +50,6 @@ params:
               params:
                 n_e: 768
                 e_dim: 768
-                temp: 2
-                beta: 2.5
+                temp: 0.5
+                beta: 1
+                norm_z: True
