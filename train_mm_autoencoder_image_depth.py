@@ -413,6 +413,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 grid = make_grid(dbatch, nrow=8)
                                 wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
+                        if mod.masked_autoencoder:
+                            z_avg_mag = [torch.mean(torch.linalg.vector_norm(z, dim=-1)) for z in model_outs[0][1]]
+                            wandb.log({"encoder_z_mag_avg": z_avg_mag}, step=itercount)
+
                     itercount += 1
                     if itercount >= n_stopiter:
                         break
