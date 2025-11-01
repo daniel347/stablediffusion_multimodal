@@ -339,6 +339,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             b_loss = 0
             loss_series = None
 
+            mod = model.module.module if data_parallel else model.module
+
             n_stopiter = n_iter + itercount
 
             if enable_wandb:
