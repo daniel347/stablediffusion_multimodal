@@ -3,7 +3,7 @@
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
 name: "celeba_mae_train_contract_vq"
-notes: "We try training our MAE on CelebA rgb images only, with VQ after linear projection."
+notes: "We try training our MAE on CelebA rgb images only, with VQ with low kl reg and no parameter checking"
 
 training:
   lr: 0.5e-5
@@ -14,7 +14,7 @@ training:
     total_mask_ratio: 0.5
     shared_mask_ratio: 0.75
 
-  test_every_iter: 100
+  test_every_iter: 1000
   objective:
     params:        
       start_adv_iter: 2000
@@ -24,7 +24,7 @@ training:
   discriminator:
     discriminator_lr: 4e-4
 
-# model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_20__20_45_21_celeba_mae_train_no_vq/model_10000.pt"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_31__17_46_00_celeba_mae_train_contract_vq/model_2200.pt"
 init_from_stable_diffusion: False
 init_from_mae: True
 # resume_training: True
