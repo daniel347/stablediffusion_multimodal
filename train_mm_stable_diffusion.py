@@ -138,13 +138,15 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
     avg_z = z_mode == "avg"
     random_z = z_mode == "random"
     channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_len
+    model_opts = {"avg_z": avg_z, "total_mask_ratio": 0.0, "shared_mask_ratio": 0.0, "return_dist": sample, "no_mask": True}
+    split_dim = -1 if model_first_stage.masked_autoencoder else 1
 
     if conf.training.precompute_latents:
         latents = data
     else:
-        latents = model_first_stage.encode(data, avg_z=avg_z, return_dist=sample)
+        latents = model_first_stage.encode(data, **model_opts)
    
-    if isinstance(latents, dict):
+    if isinstance(latents, dict) and "mean" in latents and "std" in latents:
         # Assume dict of mean and std of Normal distribution
         if sample:
             print("sampling latents")
@@ -154,12 +156,14 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
             return torch.distributions.Normal(latents["mean"], latents["std"])
         else:
             latents = latents["mean"]
+    elif isinstance(latents, dict) and "latent" in latents:
+        latents = latents["latent"]
 
     if isinstance(latents, torch.Tensor):
         if latents.shape[1] == channel_u:
             return latents
         else:
-            latents = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels for _ in range(NUM_VAES)], dim=1)
+            latents = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels for _ in range(NUM_VAES)], dim=split_dim)
         
     if isinstance(latents, list) or isinstance(latents, tuple):
         if len(latents) > NUM_VAES + 1:
@@ -168,20 +172,27 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
 
         if sample:
             print("sampling chosen latents")
-            return cat_dists_or_tensor_latents([l.sample() for l in latents])
+            latents = cat_dists_or_tensor_latents([l.sample() for l in latents], dim=split_dim)
         elif return_dist:
             print("returning chosen latents as distributions")
-            means = cat_dists_or_tensor_latents(latents)
+            means = cat_dists_or_tensor_latents(latents, dim=split_dim)
             try:
                 # DiagonalGaussianDistribution has std
-                stds = cat_dists_or_tensor_latents([l.std for l in latents])
+                stds = cat_dists_or_tensor_latents([l.std for l in latents], dim=split_dim)
             except AttributeError:
                 # torch.distributions.Normal does not have std, so we use stddev
-                stds = cat_dists_or_tensor_latents([l.stddev for l in latents])
+                stds = cat_dists_or_tensor_latents([l.stddev for l in latents], dim=split_dim)
             return torch.distributions.Normal(means, stds)
         else:
             print("concatenating chosen latents")
-            return cat_dists_or_tensor_latents(latents)
+            latents = cat_dists_or_tensor_latents(latents, dim=split_dim)
+
+        if model_first_stage.masked_autoencoder:
+            # Reshape to an image shape
+            N, L, T = latents.shape
+            side_len = int(math.sqrt(L))
+            latents = latents.permute((0, 2, 1)).reshape((N, T, side_len, side_len))
+        return latents
 
 
 def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=False, enable_pbars=True):
@@ -401,21 +412,23 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             channel_means = 0
             channel_vars = 0
 
-            with torch.no_grad():
+            with (torch.no_grad()):
                 for i, dataT in pbar:
                     if return_class:
                         data, classes = move_data_to_device(dataT, device=device)
                     else:
                         data = move_data_to_device(dataT, device=device)
 
-                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES,
+                                               z_mode=conf.training.z_mode,
+                                               sample=not model_first_stage.masked_autoencoder)
 
-                    if per_channel:
-                        channel_means += latents.mean(dim=(0, 2, 3))
-                        channel_vars += latents.var(dim=(0, 2, 3))
-                    else:
-                        channel_means += latents.mean(dim=(0, 1, 2, 3))
-                        channel_vars += latents.var(dim=(0, 1, 2, 3))
+                    avg_dims = [0, 2, 3]
+                    if not per_channel:
+                        avg_dims += [1]
+
+                    channel_means += latents.mean(dim=avg_dims)
+                    channel_vars += latents.var(dim=avg_dims)
 
                     if i >= n_batches:
                         break
@@ -453,25 +466,30 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
+                    model_opts = {"avg_z": avg_z, "total_mask_ratio": 0.0, "shared_mask_ratio": 0.0, "return_dist": True}
+
                     if use_mixed_precision:
                         with autocast(dtype=torch.float16, device_type="cuda"):
-                            latents = model_first_stage.encode(data, avg_z=avg_z)
+                            latents = model_first_stage.encode(data, **model_opts)
                     else:
-                        latents = model_first_stage.encode(data, avg_z=avg_z, return_dist=True)
-                    
+                        latents = model_first_stage.encode(data, **model_opts)
+
                     dists = False
-                    if isinstance(latents, list):
-                        if isinstance(latents[0], torch.Tensor):
-                            latents = torch.cat(latents, dim=1)
-                            print(latents.shape)
-                        else:
-                            # We have distributions
-                            print("Latents are distributions")
-                            dists = True
-                            latents = torch.cat([l.mean for l in latents] + [l.std for l in latents], dim=1)
-                            # latents = {"mean": latent_means, "std": latent_stds}  # Means then stds
-                            # print(f"latent meat shape: {latent_means.shape} std shape: {latent_stds.shape}")
-                            print(latents.shape)
+                    if model_first_stage.masked_autoencoder:
+                        latents = torch.cat(latents[0] + latents[1], dim=-1)
+                    else:
+                        if isinstance(latents, list):
+                            if isinstance(latents[0], torch.Tensor):
+                                latents = torch.cat(latents, dim=1)
+                                print(latents.shape)
+                            else:
+                                # We have distributions
+                                print("Latents are distributions")
+                                dists = True
+                                latents = torch.cat([l.mean for l in latents] + [l.std for l in latents], dim=1)
+                                # latents = {"mean": latent_means, "std": latent_stds}  # Means then stds
+                                # print(f"latent meat shape: {latent_means.shape} std shape: {latent_stds.shape}")
+                                print(latents.shape)
 
                     for latent, r in zip(latents, row[f"{modality[0]}_path"]):
                         save_path = Path(r.replace(modality[0], "latent"))
@@ -514,7 +532,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
-                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
+                                               sample=not model_first_stage.masked_autoencoder)
                     latents = model_first_stage.scale_latents(latents)
 
                     # print(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latents.mean(dim=(0, 2, 3))}")
@@ -567,7 +586,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr()[0]}, step=itercount)
 
                     if i == 0:
-                        if conf.training.precompute_latents:
+                        if conf.training.precompute_latents and not model_first_stage.masked_autoencoder:
+                            # TODO: Find a way to visualise the latent space of the masked autoencoder
                             if model_first_stage.factorised_latent_space and False:
                                 *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
                                 for j, latent in enumerate(latents_w):
@@ -622,7 +642,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         data = move_data_to_device(dataT, device=device)
 
-                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
+                                               sample=not model_first_stage.masked_autoencoder)
                     latents = model_first_stage.scale_latents(latents)
 
                     loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
@@ -1131,7 +1152,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         else:
                             data = move_data_to_device(dataT, device=device)
 
-                        latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode)
+                        latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
+                                                   sample=not model_first_stage.masked_autoencoder)
                         latents = model_first_stage.scale_latents(latents)
                         n_chans = latents.shape[1]
                         batch_size = latents.shape[0]

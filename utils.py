@@ -498,13 +498,13 @@ def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, ra
     return train_loader, test_loader
 
 
-def cat_dists_or_tensor_latents(latents):
+def cat_dists_or_tensor_latents(latents, dim=1):
     if all([isinstance(l, torch.Tensor) for l in latents]):
         # Tensorble
-        latents = torch.cat(latents, dim=1)
+        latents = torch.cat(latents, dim=dim)
     else:
         # Distributions
-        latents = torch.cat([l.mean for l in latents], dim=1)
+        latents = torch.cat([l.mean for l in latents], dim=dim)
     return latents
 
 
