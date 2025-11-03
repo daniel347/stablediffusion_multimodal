@@ -24,10 +24,10 @@ training:
   discriminator:
     discriminator_lr: 4e-4
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt" # "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/MM_CelebA_Autoencoder/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt" #
 init_from_stable_diffusion: False
 init_from_mae: False
-# resume_training: True
+resume_training: False
 
 
 defaults:

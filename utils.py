@@ -398,6 +398,9 @@ def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu', 
 
     try:
         if "model" in sd:
+            if "module.vaes.0.decoder_embed.weight" in sd["model"]:
+                # A little hack to test something - please remove soon
+                del sd["model"]["module.vaes.0.decoder_embed.weight"]
             model.load_state_dict(sd["model"], strict=False)
         else:
             logger.warning(f"No model key found in checkpoint, assuming only the model is saved")
