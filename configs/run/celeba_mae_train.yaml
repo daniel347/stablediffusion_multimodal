@@ -2,8 +2,8 @@
 
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
-name: "celeba_mae_train_contract_vq"
-notes: "We try training our MAE on CelebA rgb images only, with VQ with low kl reg and no parameter checking"
+name: "celeba_mae_train_contract_vq_warm_start"
+notes: "We try training our MAE on CelebA rgb images, initialising the model from a vq free trained checkpoint"
 
 training:
   lr: 0.5e-5
@@ -24,12 +24,12 @@ training:
   discriminator:
     discriminator_lr: 4e-4
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_31__17_46_00_celeba_mae_train_contract_vq/model_2200.pt"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"
 init_from_stable_diffusion: False
-init_from_mae: True
+init_from_mae: False
 # resume_training: True
 
 
 defaults:
-  - override /model: mae-sit-mm-rgb-d-vae
+  - override /model: mae-sit-mm-rgb
   - _self_

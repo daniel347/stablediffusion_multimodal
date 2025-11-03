@@ -710,8 +710,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             save_and_log_latents(samples_zw_2, f'Generation/reencoded_latent',
                                                  runPath, itercount, run, wandb_kwargs=wandb_kwargs)
 
-
-
                         for m in range(len(samples_x)):
                             save_and_log_img(samples_x[m], f'Generation/m{m}',
                                              runPath, display_data_fs[m], itercount, run, wandb_kwargs=wandb_kwargs, save_kwargs={}, nrow=4)

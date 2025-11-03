@@ -24,7 +24,7 @@ params:
   first_stage_config:
     target: mae.models_disentangling_mae.DisMAE
     params:
-      avg_z: False,
+      z_mode: "random"  # one of ["average", "random" or "z_combiner" ]
       lik_dists: [ "torch.distributions.Laplace"]
       lik_dist_params:
         - scale: 0.01

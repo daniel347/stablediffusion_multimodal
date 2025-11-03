@@ -398,7 +398,7 @@ def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu', 
 
     try:
         if "model" in sd:
-            model.load_state_dict(sd["model"])
+            model.load_state_dict(sd["model"], strict=False)
         else:
             logger.warning(f"No model key found in checkpoint, assuming only the model is saved")
             model.load_state_dict(sd)
