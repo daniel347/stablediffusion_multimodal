@@ -503,12 +503,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             grid = make_grid(dbatch, nrow=8)
                             wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
+                        # Perform a full reconstruction (no masking)
+                        W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model("encode", data, no_mask=True)
+                        z_comb = model("z_combine", Z, len_keep_shared, len_mask_unique, ids_restore)
+                        X, _, _ = model("decode", W, z_comb, ids_restore, cls_tokens, len_keep_shared, len_mask_unique)
+
+                        for m, (name, x) in enumerate(zip(modality, X)):
+
+
                         if mod.masked_autoencoder:
                             for m, (name, dbatch) in enumerate(zip(modality, model_outs[1])):
-                                dbatch = dbatch.detach().cpu()
-                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
-                                grid = make_grid(dbatch, nrow=8)
-                                wandb.log({f"Reconstruction/{name}": wandb.Image(grid)}, step=itercount)
+                                save_and_log_img(dbatch, f"Reconstruction/{name}", runPath, display_data_fs[m], itercount, run)
 
                             for m, (name, dbatch, mask) in enumerate(zip(modality, data, model_outs[0][3])):
                                 dbatch = dbatch.detach().cpu()
@@ -793,6 +798,43 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print(prof.key_averages().table(sort_by="cuda_time_total", row_limit=10))
             prof.export_chrome_trace(str(runPath / "train_trace.json"))
 
+        def check_encoder_vector_distribution(n_latents=1000):
+            from sklearn.decomposition import PCA, TSNE
+
+            latents = []
+            n_batches = n_latents // conf.training.batch_size
+
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
+                    data = move_data_to_device(dataT, device=device)
+
+                    W, Z, _, cls_token, _, _, _  = model.encode(data, no_mask=True)
+
+                    full_latent = torch.cat(Z + W, dim=-1)
+                    N, L, T = full_latent.shape
+                    full_latent = full_latent.reshape(-1, T)  # treat all spatial tokens independently
+                    latents.append(full_latent.detach().cpu().numpy())
+
+                    if i > n_batches:
+                        break
+
+            latents = np.concatenate(latents)
+            pca = PCA(n_components=2).fit(latents)
+            latents_proj = pca.transform(latents)
+            print("===== PCA =====")
+            print(f"explained variance ratio: {pca.explained_variance_ratio_}")
+
+            tsne = TSNE(n_components=2, perplexity=10).fit(latents)
+            latents_tsne = tsne.fit_transform(latents)
+
+            fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+            ax[0].set_title("PCA")
+            sns.scatterplot(x=latents_proj[:, 0], y=latents_proj[:, 1], ax=ax[0])
+            ax[1].set_title("TSNE")
+            sns.scatterplot(x=latents_tsne[:, 0], y=latents_tsne[:, 1], ax=ax[1])
+
+            fig.tight_layout()
+            fig.savefig(str(runPath / "latents_dim_reduce.png"))
 
         def check_decoder_scaling():
             """We do a test to see if the decoder is more sensitive to low-std channels or if the low-std channels are ignored"""
