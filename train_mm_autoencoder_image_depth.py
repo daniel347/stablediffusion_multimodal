@@ -417,7 +417,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 grid = make_grid(dbatch, nrow=8)
                                 wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
-                        if mod.masked_autoencoder:
+                        if getattr(mod, "masked_autoencoder", False):
                             z_avg_mag = [torch.mean(torch.linalg.vector_norm(z, dim=-1)) for z in model_outs[0][1]]
                             wandb.log({"encoder_z_mag_avg": z_avg_mag}, step=itercount)
 
@@ -502,7 +502,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         for m, (name, dbatch) in enumerate(zip(modality, data)):
                             save_and_log_img(dbatch, f"Data/{name}", runPath, display_data_fs[m], itercount, run)
 
-                        if mod.masked_autoencoder:
+                        if getattr(mod, "masked_autoencoder", False):
                             for m, (name, dbatch) in enumerate(zip(modality, model_outs[1])):
                                 save_and_log_img(dbatch, f"Reconstruction/{name}", runPath, display_data_fs[m], itercount, run)
 
@@ -800,6 +800,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         def check_encoder_vector_distribution(n_latents=1000):
             latents = []
+            positions = []
             n_batches = n_latents // conf.training.batch_size
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
@@ -814,10 +815,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     full_latent = full_latent.reshape(-1, T)  # treat all spatial tokens independently
                     latents.append(full_latent.detach().cpu().numpy())
 
+                    position = np.stack([np.arange(L) for _ in range(N)], axis=0)
+                    positions.append(position.flatten())
+
                     if i > n_batches:
                         break
 
+            print(f"obtained {latents.shape[0]} latents")
+
             latents = np.concatenate(latents)
+            positions = np.concatenate(positions)
+
             pca = PCA(n_components=2).fit(latents)
             latents_proj = pca.transform(latents)
             print("===== PCA =====")
@@ -828,9 +836,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
             fig, ax = plt.subplots(1, 2, figsize=(10, 5))
             ax[0].set_title("PCA")
-            sns.scatterplot(x=latents_proj[:, 0], y=latents_proj[:, 1], ax=ax[0])
+            sns.scatterplot(x=latents_proj[:, 0], y=latents_proj[:, 1], hue=positions, ax=ax[0])
             ax[1].set_title("TSNE")
-            sns.scatterplot(x=latents_tsne[:, 0], y=latents_tsne[:, 1], ax=ax[1])
+            sns.scatterplot(x=latents_tsne[:, 0], y=latents_tsne[:, 1], hue=positions, ax=ax[1])
 
             fig.tight_layout()
             fig.savefig(str(runPath / "latents_dim_reduce.png"))

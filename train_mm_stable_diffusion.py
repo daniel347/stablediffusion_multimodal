@@ -50,8 +50,9 @@ import pyiqa
 from pyiqa.archs.fid_arch import frechet_distance, kernel_distance
 import cmmd_pytorch as cmmd
 from utils import (save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config,
-                   save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders, cat_dists_or_tensor_latents,
-                   DiversityMetrics)
+                   save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders,
+                   cat_dists_or_tensor_latents,
+                   DiversityMetrics, DisplayMAELatent)
 from reconstruct_model_phema import reconstruct_phema
 import ldm.models.diffusion as diffusion
 import cv2
@@ -138,13 +139,15 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
     avg_z = z_mode == "avg"
     random_z = z_mode == "random"
     channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_len
-    model_opts = {"avg_z": avg_z, "total_mask_ratio": 0.0, "shared_mask_ratio": 0.0, "return_dist": sample, "no_mask": True}
-    split_dim = -1 if model_first_stage.masked_autoencoder else 1
+    model_opts = {"avg_z": avg_z, "random_z": random_z, "return_dist": sample, "total_mask_ratio": 0.0, "shared_mask_ratio": 0.0, "no_mask": True}
+    split_dim = -1 if getattr(model_first_stage, "masked_autoencoder", False) else 1
 
     if conf.training.precompute_latents:
         latents = data
     else:
         latents = model_first_stage.encode(data, **model_opts)
+        if getattr(model_first_stage, "masked_autoencoder", False):
+            latents = latents[0] + latents[1]  # W + Z, ignore other returns
    
     if isinstance(latents, dict) and "mean" in latents and "std" in latents:
         # Assume dict of mean and std of Normal distribution
@@ -167,8 +170,12 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
         
     if isinstance(latents, list) or isinstance(latents, tuple):
         if len(latents) > NUM_VAES + 1:
+            # TODO: z_mo
             assert (random_z or isinstance(z_mode, int)), "One of average or random z must be set or a integer supplied to choose one z, or the z-combiner must be used"
-            latents = [*latents[:NUM_VAES], random.choice(latents[NUM_VAES:])]
+            if random_z:
+                latents = [*latents[:NUM_VAES], random.choice(latents[NUM_VAES:])]
+            elif isinstance(z_mode, int):
+                latents = [*latents[:NUM_VAES], latents[NUM_VAES + z_mode]]
 
         if sample:
             print("sampling chosen latents")
@@ -187,8 +194,8 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
             print("concatenating chosen latents")
             latents = cat_dists_or_tensor_latents(latents, dim=split_dim)
 
-        if model_first_stage.masked_autoencoder:
-            # Reshape to an image shape
+        if getattr(model_first_stage, "masked_autoencoder", False):
+            # Reshape to an image shape (B, C, H, W)
             N, L, T = latents.shape
             side_len = int(math.sqrt(L))
             latents = latents.permute((0, 2, 1)).reshape((N, T, side_len, side_len))
@@ -399,6 +406,40 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                        "train_loader": train_loader,
                        "test_loader": test_loader}
 
+        if getattr(model_first_stage, "masked_autoencoder", False):
+            mae_latent_disp = DisplayMAELatent()
+
+
+        def fit_mae_latent_disp(dataloaders, split="train", n_batches=20):
+            data_loader = dataloaders["train_loader" if split == "train" else "test_loader"]
+            all_latents = []
+
+            if enable_pbars:
+                pbar = tqdm.tqdm(enumerate(data_loader), total=len(data_loader),
+                                 position=rank if data_parallel else 0)
+            else:
+                pbar = enumerate(data_loader)
+
+            with (torch.no_grad()):
+                for i, dataT in pbar:
+                    if return_class:
+                        data, classes = move_data_to_device(dataT, device=device)
+                    else:
+                        data = move_data_to_device(dataT, device=device)
+
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES,
+                                               z_mode=conf.training.z_mode,
+                                               sample=not getattr(model_first_stage, "masked_autoencoder", False))
+                    latents = model_first_stage.scale_latents(latents)
+                    all_latents.append(latents)
+
+                    if i >= n_batches:
+                        break
+
+            latents = torch.cat(all_latents, dim=0)
+            mae_latent_disp.fit(latents)
+
+
         def get_latent_scale_factor(dataloaders, split="train", n_batches=1, per_channel=True):
 
             data_loader = dataloaders["train_loader" if split == "train" else "test_loader"]
@@ -421,7 +462,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES,
                                                z_mode=conf.training.z_mode,
-                                               sample=not model_first_stage.masked_autoencoder)
+                                               sample=not getattr(model_first_stage, "masked_autoencoder", False))
 
                     avg_dims = [0, 2, 3]
                     if not per_channel:
@@ -466,7 +507,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
-                    model_opts = {"avg_z": avg_z, "total_mask_ratio": 0.0, "shared_mask_ratio": 0.0, "return_dist": True}
+                    # TODO: A slightly gross mix of MAE and VAE options
+                    model_opts = {"avg_z": avg_z, "total_mask_ratio": 0.0, "shared_mask_ratio": 0.0, "return_dist": True, "no_mask": True}
 
                     if use_mixed_precision:
                         with autocast(dtype=torch.float16, device_type="cuda"):
@@ -475,8 +517,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         latents = model_first_stage.encode(data, **model_opts)
 
                     dists = False
-                    if model_first_stage.masked_autoencoder:
-                        latents = torch.cat(latents[0] + latents[1], dim=-1)
+                    if getattr(model_first_stage, "masked_autoencoder", False):
+                        latents = torch.cat(latents[0] + latents[1], dim=-1)  # W + Z
                     else:
                         if isinstance(latents, list):
                             if isinstance(latents[0], torch.Tensor):
@@ -504,7 +546,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             mean, std = torch.chunk(latent, 2, dim=0)
                             data_to_save = {"mean": mean.contiguous().cpu(), "std": std.contiguous().cpu()}
                         else:
-                            data_to_save = {"latent": latent.contiguous().cpu()}  # This might break something
+                            data_to_save = {"latent": latent.contiguous().cpu()}
 
                         if return_class:
                             data_to_save["class"] = classes[r].contiguous().cpu()
@@ -533,7 +575,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     optimizer.zero_grad()
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
-                                               sample=not model_first_stage.masked_autoencoder)
+                                               sample=not getattr(model_first_stage, "masked_autoencoder", False))
                     latents = model_first_stage.scale_latents(latents)
 
                     # print(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latents.mean(dim=(0, 2, 3))}")
@@ -586,20 +628,24 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr()[0]}, step=itercount)
 
                     if i == 0:
-                        if conf.training.precompute_latents and not model_first_stage.masked_autoencoder:
-                            # TODO: Find a way to visualise the latent space of the masked autoencoder
-                            if model_first_stage.factorised_latent_space and False:
+                        if getattr(model_first_stage, "masked_autoencoder", False):
+                            latents_disp = mae_latent_disp.transform(latents)
+                            save_and_log_latents(latents_disp, f'Latents/u', runPath, itercount, run)
+                        else:
+                            # TODO: Find a way to visualise the latent space of the masked autoencoder - maybe a PCA idk?
+                            if model_first_stage.factorised_latent_space:
                                 *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
+
                                 for j, latent in enumerate(latents_w):
                                     save_and_log_latents(latent, f'Latents/wm{j}', runPath, itercount, run)
                                 if latents_z.shape[1] > 0:
                                     save_and_log_latents(latents_z, f'Latents/z', runPath, itercount, run)
                             else:
                                 save_and_log_latents(latents, f'Latents/u', runPath, itercount, run)
-                        else:
-                            for m, (name, dbatch) in enumerate(zip(modality, data)):
-                                save_and_log_img(dbatch, f"Data/{name}", runPath,
-                                                 display_data_fs[m], step=itercount, wandb_run=run)
+
+                        for m, (name, dbatch) in enumerate(zip(modality, data)):
+                            save_and_log_img(dbatch, f"Data/{name}", runPath,
+                                             display_data_fs[m], step=itercount, wandb_run=run)
 
                     itercount += 1
                     if itercount >= n_stopiter:
@@ -643,7 +689,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         data = move_data_to_device(dataT, device=device)
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
-                                               sample=not model_first_stage.masked_autoencoder)
+                                               sample=not getattr(model_first_stage, "masked_autoencoder", False))
                     latents = model_first_stage.scale_latents(latents)
 
                     loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
@@ -690,6 +736,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         # print(f"Generated latent scale: {samples_zw.std(dim=(0, 2, 3))}   mean: {samples_zw.mean(dim=(0, 2, 3))}")
 
                         samples_zw_scaled = model_first_stage.scale_latents(samples_zw, reverse=True)
+
                         samples_x = model_first_stage.decode(samples_zw_scaled)
 
                         if return_class:
@@ -1151,7 +1198,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             data = move_data_to_device(dataT, device=device)
 
                         latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
-                                                   sample=not model_first_stage.masked_autoencoder)
+                                                   sample=not getattr(model_first_stage, "masked_autoencoder", False))
                         latents = model_first_stage.scale_latents(latents)
                         n_chans = latents.shape[1]
                         batch_size = latents.shape[0]
@@ -1326,6 +1373,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     # torch.save(model_first_stage.state_dict(), conf.model.params.first_stage_config.params.ckpt_path)
 
                 print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
+
+                if getattr(model_first_stage, "masked_autoencoder", False):
+                    fit_mae_latent_disp(dataloaders, n_batches=5)
 
                 epochcount = 0
                 n_iter = conf.training.test_every_iter if "test_every_iter" in conf.training else len(dataloaders["train_loader"])

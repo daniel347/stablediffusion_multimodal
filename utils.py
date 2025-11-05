@@ -6,6 +6,7 @@ import sys
 import time
 import numpy as np
 import torch
+from sklearn.manifold import TSNE
 from torch import nn
 import torch.nn.functional as F
 import random
@@ -23,6 +24,8 @@ logger = logging.getLogger(__name__)
 from torch.utils.data import DistributedSampler
 from image_diversity import ClipMetrics, InceptionMetrics
 from pathlib import Path
+from sklearn.decomposition import PCA
+from sklearn.manifold import TSNE
 
 # Constants
 class Constants(object):
@@ -62,6 +65,23 @@ class Timer:
               .format(self.name,
                       self.elapsed,
                       time.strftime("%H:%M:%S", self.elapsedH)))
+
+
+class DisplayMAELatent():
+    def __init__(self, n_comp=6):
+        self.dim_reduce = PCA(n_components=n_comp)
+        self.n_comp = n_comp
+
+    def fit(self, latents):
+        latents_reshape = latents.permute((0, 2, 3, 1)).flatten(end_dim=2)
+        self.dim_reduce = self.dim_reduce.fit(latents_reshape.detach().cpu().numpy())
+
+
+    def transform(self, latents):
+        B, C, H, W = latents.shape
+        latents_reshape = latents.permute((0, 2, 3, 1)).flatten(end_dim=2)
+        latents_disp = self.dim_reduce.transform(latents_reshape)
+        return latents_disp.reshape(B, H, W, self.n_comp)
 
 
 def save_vars(vs, filepath):
