@@ -25,6 +25,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                 z_close_weight=50000,
                 mmd_zw_weight=1,
                 mmd_ww_weight=1,
+                freq_vq_resample=3000,
                 **kwargs):
         super(DisentanglingObjectiveMAE, self).__init__()
 
@@ -45,6 +46,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.z_close_weight = z_close_weight
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
+        self.freq_vq_resample = freq_vq_resample
 
         weights = [1.0, 1.0, self.wadversary, self.beta]
         if self.mod.n_modality == 2:
@@ -56,11 +58,21 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
 
         self.weights = torch.tensor(weights).to(device)
 
+        self.min_encs = [None, None]
+
     def _m_dreg(self, model, X, iteration=0, model_params={}, **kwargs):
         loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0,
                      "mmd_zw": 0, "mmd_ww": 0, "z_dist_normed_euclidean": 0,
                      "discriminator_loss": 0, "adversarial_loss": 0,
                      "cos_sim_ww": 0, "cos_sim_zw": 0}
+
+        if iteration % self.freq_vq_resample == 0 and iteration > 0:
+            for m, vae in enumerate(self.mod.vaes):
+                if hasattr(vae, "quantiser"):
+                    print("resampling!")
+                    print(self.min_encs[m].sum())
+                    vae.quantiser.resample_embeddings(self.min_encs[m])
+                    self.min_encs[m] = None
 
         W, Z, z_comb, Xhat, masks, q_loss, min_encs = model("forward", X, **model_params)
         px_us = [self.mod.lik_dists[d](Xhat[d].unsqueeze(0), **self.mod.lik_dist_params[d]) for d in range(len(X))]
@@ -98,6 +110,11 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         # VQ loss
         lws.append(-q_loss * torch.ones(K, B, dtype=torch.float32, device=X[0].device) * self.beta)
         loss_dict["vq_loss"] = -q_loss.clone().detach().cpu().sum().item()
+        for m, me in enumerate(min_encs):
+            if self.min_encs[m] is not None:
+                self.min_encs[m] += me.sum(dim=0)
+            else:
+                self.min_encs[m] = me.sum(dim=0)
 
         # Z distance loss (Symmetric kl but only works for 2 modalities)
         if len(Z) != 2:
