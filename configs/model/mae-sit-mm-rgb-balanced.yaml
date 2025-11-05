@@ -15,6 +15,7 @@ params:
       input_size: 16
       num_classes: null
       in_channels: 6
+      learn_sigma: False
 
   unet_config:
     params:

@@ -26,6 +26,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                 mmd_zw_weight=1,
                 mmd_ww_weight=1,
                 freq_vq_resample=3000,
+                stop_vq_resample=15000,
                 **kwargs):
         super(DisentanglingObjectiveMAE, self).__init__()
 
@@ -47,6 +48,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
         self.freq_vq_resample = freq_vq_resample
+        self.stop_vq_resample = stop_vq_resample
 
         weights = [1.0, 1.0, self.wadversary, self.beta]
         if self.mod.n_modality == 2:
@@ -66,7 +68,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                      "discriminator_loss": 0, "adversarial_loss": 0,
                      "cos_sim_ww": 0, "cos_sim_zw": 0}
 
-        if iteration % self.freq_vq_resample == 0 and iteration > 0:
+        if iteration % self.freq_vq_resample == 0 and iteration > 0 and iteration <= self.stop_vq_resample:
             for m, vae in enumerate(self.mod.vaes):
                 if hasattr(vae, "quantiser"):
                     print("resampling!")
