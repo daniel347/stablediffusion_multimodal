@@ -74,14 +74,18 @@ def test_sample(patch_size, in_channels, n_cls):
 
     model = SiTModel(**test_params)
     model.to(device)
+    b = 1
 
-    samples = model.sample(verbose=False, shape=[in_channels, 16, 16], batch_size=2, n_cls=n_cls)
-    print(f"samples len: {len(samples)}, shape: {[s.shape for s in samples]}")
+    samples = model.sample(verbose=False, shape=[in_channels, 16, 16], batch_size=b, n_cls=n_cls)
+    print(f"samples type: {type(samples)}")
     if n_cls > 0:
+        print(f"sample ps len: {len(samples)}, shape: {[s.shape for s in samples]}")
         x_samples = samples[0]
         cls_samples = samples[1]
-        assert cls_samples.shape == (2, 1, model.embed_dim)
-        assert x_samples.shape == torch.Size((2, in_channels, 16, 16))
+        assert cls_samples.shape == (b, n_cls, model.model.hidden_size)
+        assert x_samples.shape == torch.Size((b, in_channels, 16, 16))
+    else:
+        assert samples.shape == torch.Size((b, in_channels, 16, 16))
 
 
 
