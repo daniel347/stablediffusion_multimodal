@@ -27,6 +27,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                 mmd_ww_weight=1,
                 freq_vq_resample=3000,
                 stop_vq_resample=15000,
+                vq_resample_noise=0.2, # as a proportion of the MSE codebook error
                 **kwargs):
         super(DisentanglingObjectiveMAE, self).__init__()
 
@@ -49,6 +50,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.mmd_ww_weight = mmd_ww_weight
         self.freq_vq_resample = freq_vq_resample
         self.stop_vq_resample = stop_vq_resample
+        self.vq_resample_noise = vq_resample_noise
 
         weights = [1.0, 1.0, self.wadversary, self.beta]
         if self.mod.n_modality == 2:
@@ -61,6 +63,8 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.weights = torch.tensor(weights).to(device)
 
         self.min_encs = [None, None]
+        self.last_mse_codebook_err = 0
+        self.vq_betas = [vae.quantiser.beta if hasattr(vae, "quantiser") else None for vae in self.mod.vaes]
 
     def _m_dreg(self, model, X, iteration=0, model_params={}, **kwargs):
         loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0,
@@ -73,7 +77,8 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                 if hasattr(vae, "quantiser"):
                     print("resampling!")
                     print(self.min_encs[m].sum())
-                    vae.quantiser.resample_embeddings(self.min_encs[m])
+                    resample_noise = self.vq_resample_noise * self.last_mse_codebook_err / (1 + self.vq_betas[m])
+                    vae.quantiser.resample_embeddings(self.min_encs[m], noise_scale=resample_noise)
                     self.min_encs[m] = None
 
         W, Z, z_comb, Xhat, masks, q_loss, min_encs = model("forward", X, **model_params)
@@ -112,6 +117,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         # VQ loss
         lws.append(-q_loss * torch.ones(K, B, dtype=torch.float32, device=X[0].device) * self.beta)
         loss_dict["vq_loss"] = -q_loss.clone().detach().cpu().sum().item()
+        self.last_mse_codebook_err = loss_dict["vq_loss"]
         for m, me in enumerate(min_encs):
             if self.min_encs[m] is not None:
                 self.min_encs[m] += me.sum(dim=0)
