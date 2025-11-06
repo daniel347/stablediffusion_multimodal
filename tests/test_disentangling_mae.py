@@ -98,7 +98,7 @@ def test_model_z_comb(mask_fraction, mask_overlap, random_z, unimodal):
         data = [torch.randn(1, 3, img_size, img_size).to(x_device), torch.clamp(torch.randn(1, 18, img_size, img_size), 0, 1).to(x_device)]
         model = DisMAE(**model_params).to(x_device)
 
-    W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique = model.encode(data, total_mask_ratio=mask_fraction, shared_mask_ratio=mask_overlap)
+    W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model.encode(data, total_mask_ratio=mask_fraction, shared_mask_ratio=mask_overlap)
     print(ids_restore)
     z_comb = model.z_combine(Z, len_keep_shared, len_mask_unique, ids_restore, avg_z=(not random_z), random_z=random_z)
 
@@ -125,7 +125,7 @@ def test_model_forward(unimodal):
         data = [torch.randn(1, 3, img_size, img_size).to(x_device), torch.clamp(torch.randn(1, 18, img_size, img_size), 0, 1).to(x_device)]
         model = DisMAE(**model_params).to(x_device)
 
-    W, Z, z_comb, X, q_loss = model.forward(data, random_z=True)
+    W, Z, z_comb, X, masks, q_loss, min_encs = model.forward(data, random_z=True)
 
     print(f"W shapes: {[w.shape for w in W]}")
     print(f"Z shapes: {[z.shape for z in Z]}")
@@ -133,6 +133,7 @@ def test_model_forward(unimodal):
     print(f"X shapes: {[x.shape for x in X]}")
     print(f"q_loss shape: {q_loss.shape}")
     print(f"q_loss: {q_loss}")
+    print(f"min_encs shapes: {[me.shape for me in min_encs]}")
 
     assert all([x.shape == data[i].shape for i, x in enumerate(X)])
 

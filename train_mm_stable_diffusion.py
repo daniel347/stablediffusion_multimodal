@@ -135,7 +135,7 @@ def initialise_model(conf):
     return model
 
 
-def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=True, return_dist=False):
+def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=True, return_dist=False, cls_tokens=False):
     avg_z = z_mode == "avg"
     random_z = z_mode == "random"
     channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_len
@@ -154,16 +154,28 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
         if sample:
             print("sampling latents")
             latents = torch.distributions.Normal(latents["mean"], latents["std"]).sample()
+            if cls_tokens:
+                cls = torch.distributions.Normal(latents["cls_mean"], latents["cls_std"]).sample()
             sample = False  # We have finished sampling, so don't try to sample again
         elif return_dist:
+            latents = torch.distributions.Normal(latents["mean"], latents["std"])
+            if cls_tokens:
+                cls = torch.distributions.Normal(latents["cls_mean"], latents["cls_std"])
+                return latents, cls
             return torch.distributions.Normal(latents["mean"], latents["std"])
         else:
             latents = latents["mean"]
+            if cls_tokens:
+                cls = latents["cls_mean"]
     elif isinstance(latents, dict) and "latent" in latents:
         latents = latents["latent"]
+        if cls_tokens:
+            cls = latents["cls"]
 
     if isinstance(latents, torch.Tensor):
         if latents.shape[1] == channel_u:
+            if cls_tokens:
+                return latents, cls
             return latents
         else:
             latents = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels for _ in range(NUM_VAES)], dim=split_dim)
@@ -182,6 +194,7 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
             latents = cat_dists_or_tensor_latents([l.sample() for l in latents], dim=split_dim)
         elif return_dist:
             print("returning chosen latents as distributions")
+            assert not getattr(model_first_stage, "masked_autoencoder", False), "Cannot return dists for split latents with masked autoencoder yet"
             means = cat_dists_or_tensor_latents(latents, dim=split_dim)
             try:
                 # DiagonalGaussianDistribution has std
@@ -199,6 +212,9 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
             N, L, T = latents.shape
             side_len = int(math.sqrt(L))
             latents = latents.permute((0, 2, 1)).reshape((N, T, side_len, side_len))
+
+        if cls_tokens:
+            return latents, cls
         return latents
 
 
@@ -244,6 +260,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             t_sampler = None
 
         model_first_stage = model.module.first_stage_model if data_parallel else model.first_stage_model
+        model_scorenet = model.module.model if data_parallel else model.model
 
         NUM_VAES = len(model_first_stage.vaes)
         print(f"Using {NUM_VAES} vaes")
@@ -409,6 +426,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if getattr(model_first_stage, "masked_autoencoder", False):
             mae_latent_disp = DisplayMAELatent()
 
+        n_cls_tokens = model_scorenet.n_cls_tokens
 
         def fit_mae_latent_disp(dataloaders, split="train", n_batches=20):
             data_loader = dataloaders["train_loader" if split == "train" else "test_loader"]
@@ -429,7 +447,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES,
                                                z_mode=conf.training.z_mode,
-                                               sample=not getattr(model_first_stage, "masked_autoencoder", False))
+                                               sample=not getattr(model_first_stage, "masked_autoencoder", False),
+                                               cls_tokens=False)
                     latents = model_first_stage.scale_latents(latents)
                     all_latents.append(latents)
 
@@ -462,7 +481,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES,
                                                z_mode=conf.training.z_mode,
-                                               sample=not getattr(model_first_stage, "masked_autoencoder", False))
+                                               sample=not getattr(model_first_stage, "masked_autoencoder", False),
+                                               cls_tokens=False)
 
                     avg_dims = [0, 2, 3]
                     if not per_channel:
@@ -518,6 +538,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     dists = False
                     if getattr(model_first_stage, "masked_autoencoder", False):
+                        cls_tokens = latents[3] if n_cls_tokens > 0 else None
                         latents = torch.cat(latents[0] + latents[1], dim=-1)  # W + Z
                     else:
                         if isinstance(latents, list):
@@ -533,7 +554,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                 # print(f"latent meat shape: {latent_means.shape} std shape: {latent_stds.shape}")
                                 print(latents.shape)
 
-                    for latent, r in zip(latents, row[f"{modality[0]}_path"]):
+                    for k, (latent, r) in enumerate(zip(latents, row[f"{modality[0]}_path"])):
                         save_path = Path(r.replace(modality[0], "latent"))
                         for root in data_root_dirs:
                             if save_path.is_relative_to(root):
@@ -545,8 +566,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         if dists:
                             mean, std = torch.chunk(latent, 2, dim=0)
                             data_to_save = {"mean": mean.contiguous().cpu(), "std": std.contiguous().cpu()}
+                            if n_cls_tokens > 0:
+                                cls_mean, cls_std = torch.chunk(cls_tokens[k], 2, dim=-1)
+                                data_to_save = {"cls_mean": cls_mean.contiguous.cpu(),
+                                                "cls_std": cls_std.contiguous.cpu(),
+                                                **data_to_save}
                         else:
                             data_to_save = {"latent": latent.contiguous().cpu()}
+                            if n_cls_tokens > 0:
+                                data_to_save["cls"] = cls_tokens[k].contiguous().cpu()
 
                         if return_class:
                             data_to_save["class"] = classes[r].contiguous().cpu()
@@ -575,14 +603,20 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     optimizer.zero_grad()
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
-                                               sample=not getattr(model_first_stage, "masked_autoencoder", False))
+                                               sample=not getattr(model_first_stage, "masked_autoencoder", False),
+                                               cls_tokens=n_cls_tokens)
                     latents = model_first_stage.scale_latents(latents)
+                    forward_kwargs = {}
+
+                    if n_cls_tokens > 0:
+                        latents, cls_tokens = latents
+                        forward_kwargs["cls"] = cls_tokens
 
                     # print(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latents.mean(dim=(0, 2, 3))}")
 
                     if use_mixed_precision:
                         with autocast(dtype=torch.float16, device_type="cuda"):
-                            loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
+                            loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler, **forward_kwargs)
 
                         scaler.scale(loss).backward()
 
@@ -591,7 +625,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             grad_clipper.autoclip_grad()
                         scaler.step(optimizer)
                     else:
-                        loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
+                        loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler, **forward_kwargs)
                         loss.backward()
 
                         if grad_clipper is not None:
@@ -689,7 +723,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         data = move_data_to_device(dataT, device=device)
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
-                                               sample=not getattr(model_first_stage, "masked_autoencoder", False))
+                                               sample=not getattr(model_first_stage, "masked_autoencoder", False),
+                                               cls_tokens=n_cls_tokens)
                     latents = model_first_stage.scale_latents(latents)
 
                     loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
@@ -731,13 +766,21 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                                     conditioning=(classes if return_class else None),
                                                     img_callback=img_callback,
                                                     manifold_proj_f=manifold_proj_f,
+                                                    n_cls=n_cls_tokens,
                                                     **run_params)
+                        if n_cls_tokens > 0:
+                            samples_zw, cls_tokens = samples_zw
+                        else:
+                            cls_tokens = None
 
                         # print(f"Generated latent scale: {samples_zw.std(dim=(0, 2, 3))}   mean: {samples_zw.mean(dim=(0, 2, 3))}")
 
                         samples_zw_scaled = model_first_stage.scale_latents(samples_zw, reverse=True)
 
-                        samples_x = model_first_stage.decode(samples_zw_scaled)
+                        if getattr(model_first_stage, "masked_autoencoder", False):
+                            samples_x = model_first_stage.decode_no_mask(samples_zw_scaled, cls_tokens=cls_tokens)
+                        else:
+                            samples_x = model_first_stage.decode(samples_zw_scaled)
 
                         if return_class:
                             wandb_kwargs = {"caption": "\n".join(
@@ -837,15 +880,27 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                              batch_size=gen_batch_size,
                                              shape=model.module.input_shape if data_parallel else model.input_shape,
                                              conditioning=(classes if return_class else None),
+                                             n_cls=n_cls_tokens,
                                              **run_params)
+
+                    if n_cls_tokens > 0:
+                        samples_zw, cls_tokens = samples_zw
+                    else:
+                        cls_tokens = None
 
                     latents = model_first_stage.scale_latents(latents, reverse=True)
                     if save_latents:
                         for b, latent in enumerate(latents):
                             save_path = Path(tempdirs["latent"]) / f"latent_{n * gen_batch_size + b}.pt"
-                            torch.save(latent.contiguous().cpu(), save_path)
+                            data = {"latent": latent.contiguous().cpu()}
+                            if n_cls_tokens > 0:
+                                data["cls"] = cls_tokens.contiguous().cpu()
+                            torch.save(data, save_path)
 
-                    samples_x = model_first_stage.decode(latents)
+                    if getattr(model_first_stage, "masked_autoencoder", False):
+                        samples_x = model_first_stage.decode_no_mask(latents, cls_tokens=cls_tokens)
+                    else:
+                        samples_x = model_first_stage.decode(latents)
 
                     for m, (name, samples) in enumerate(zip(modality, samples_x)):
                         for i, s in enumerate(samples.mean):
@@ -1112,7 +1167,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         data = move_data_to_device(dataT, device=device)
 
-                    latent_dist = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, return_dist=True, sample=False)
+                    latent_dist = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, return_dist=True, sample=False, cls_tokens=False)
                     latents = latent_dist.sample()
                     
                     print(f"latent dist means: {latent_dist.mean.mean(dim=(0, 2, 3))} stds: {latent_dist.stddev.mean(dim=(0, 2, 3))}")
@@ -1198,7 +1253,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             data = move_data_to_device(dataT, device=device)
 
                         latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
-                                                   sample=not getattr(model_first_stage, "masked_autoencoder", False))
+                                                   sample=not getattr(model_first_stage, "masked_autoencoder", False),
+                                                    cls_tokens=False)
                         latents = model_first_stage.scale_latents(latents)
                         n_chans = latents.shape[1]
                         batch_size = latents.shape[0]
@@ -1289,7 +1345,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     else:
                         data = move_data_to_device(dataT, device=device)
 
-                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, sample=False)
+                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, sample=False, cls_tokens=False)
                     latents = model_first_stage.scale_latents(latents)
                     latent_shape = latents.shape[1:]
 

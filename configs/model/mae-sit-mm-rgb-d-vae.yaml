@@ -15,11 +15,7 @@ params:
       input_size: 16
       num_classes: null
       in_channels: 768
-
-  unet_config:
-    params:
-      num_classes: null
-      use_fp16: false
+      n_cls_tokens: 1
 
   first_stage_config:
     target: mae.models_disentangling_mae.DisMAE
