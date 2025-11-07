@@ -3,7 +3,7 @@
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
 name: "celeba_mae_train_resample_vq"
-notes: "We try training our MAE on CelebA rgb images, initialising the model from a vq free trained checkpoint. We also resample the code book every 1000"
+notes: "We try training our MAE on CelebA rgb images, initialising the model from a vq free trained checkpoint. We also resample the code book every 2000"
 
 training:
   lr: 0.5e-5
@@ -18,10 +18,10 @@ training:
   objective:
     params:        
       start_adv_iter: 2000
-      wadversary: 2
+      wadversary: 50
       mmd_zw_weight: 0.0
       freq_vq_resample: 2000
-      stop_vq_resample: 15000
+      stop_vq_resample: 5000
 
   discriminator:
     discriminator_lr: 4e-4
