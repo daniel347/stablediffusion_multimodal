@@ -7,7 +7,7 @@ notes: "We try visualising the latent space of the mae trained on celeba rgb ima
 
 function:
   name: check_encoder_vector_distribution
-  params: {}
+  kwargs: {}
 
 training:
   lr: 0.5e-5

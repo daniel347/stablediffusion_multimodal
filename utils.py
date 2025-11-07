@@ -80,8 +80,8 @@ class DisplayMAELatent():
     def transform(self, latents):
         B, C, H, W = latents.shape
         latents_reshape = latents.permute((0, 2, 3, 1)).flatten(end_dim=2)
-        latents_disp = self.dim_reduce.transform(latents_reshape)
-        return latents_disp.reshape(B, H, W, self.n_comp)
+        latents_disp = self.dim_reduce.transform(latents_reshape.detach().cpu().numpy())
+        return torch.from_numpy(latents_disp.reshape(B, H, W, self.n_comp))
 
 
 def save_vars(vs, filepath):

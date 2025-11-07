@@ -168,9 +168,9 @@ def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=Tru
             if cls_tokens:
                 cls = latents["cls_mean"]
     elif isinstance(latents, dict) and "latent" in latents:
-        latents = latents["latent"]
         if cls_tokens:
             cls = latents["cls"]
+        latents = latents["latent"]
 
     if isinstance(latents, torch.Tensor):
         if latents.shape[1] == channel_u:
@@ -538,7 +538,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     dists = False
                     if getattr(model_first_stage, "masked_autoencoder", False):
-                        cls_tokens = latents[3] if n_cls_tokens > 0 else None
+                        cls_tokens = torch.cat(latents[3], dim=1) if n_cls_tokens > 0 else None
                         latents = torch.cat(latents[0] + latents[1], dim=-1)  # W + Z
                     else:
                         if isinstance(latents, list):
@@ -605,12 +605,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
                                                sample=not getattr(model_first_stage, "masked_autoencoder", False),
                                                cls_tokens=n_cls_tokens)
-                    latents = model_first_stage.scale_latents(latents)
-                    forward_kwargs = {}
 
+                    forward_kwargs = {}
                     if n_cls_tokens > 0:
                         latents, cls_tokens = latents
                         forward_kwargs["cls"] = cls_tokens
+
+                    latents = model_first_stage.scale_latents(latents)
 
                     # print(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latents.mean(dim=(0, 2, 3))}")
 
@@ -676,10 +677,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                     save_and_log_latents(latents_z, f'Latents/z', runPath, itercount, run)
                             else:
                                 save_and_log_latents(latents, f'Latents/u', runPath, itercount, run)
-
-                        for m, (name, dbatch) in enumerate(zip(modality, data)):
+                        """
+                        for m, (name, dbatch) in enumerate(zip(modality, latent)):
                             save_and_log_img(dbatch, f"Data/{name}", runPath,
                                              display_data_fs[m], step=itercount, wandb_run=run)
+                        """
 
                     itercount += 1
                     if itercount >= n_stopiter:
@@ -725,9 +727,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
                                                sample=not getattr(model_first_stage, "masked_autoencoder", False),
                                                cls_tokens=n_cls_tokens)
+
+                    forward_kwargs = {}
+                    if n_cls_tokens > 0:
+                        latents, cls_tokens = latents
+                        forward_kwargs["cls"] = cls_tokens
+
                     latents = model_first_stage.scale_latents(latents)
 
-                    loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler)
+                    loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler, **forward_kwargs)
                     b_loss += loss.detach().item()
 
                     if i == 0 and gen:
@@ -778,7 +786,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         samples_zw_scaled = model_first_stage.scale_latents(samples_zw, reverse=True)
 
                         if getattr(model_first_stage, "masked_autoencoder", False):
-                            samples_x = model_first_stage.decode_no_mask(samples_zw_scaled, cls_tokens=cls_tokens)
+                            samples_x = model_first_stage.decode_no_mask(samples_zw_scaled, cls_tokens=cls_tokens)[0]
                         else:
                             samples_x = model_first_stage.decode(samples_zw_scaled)
 
@@ -884,7 +892,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                              **run_params)
 
                     if n_cls_tokens > 0:
-                        samples_zw, cls_tokens = samples_zw
+                        latents, cls_tokens = latents
                     else:
                         cls_tokens = None
 
@@ -898,12 +906,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             torch.save(data, save_path)
 
                     if getattr(model_first_stage, "masked_autoencoder", False):
-                        samples_x = model_first_stage.decode_no_mask(latents, cls_tokens=cls_tokens)
+                        samples_x = model_first_stage.decode_no_mask(latents, cls_tokens=cls_tokens)[0]
                     else:
                         samples_x = model_first_stage.decode(latents)
 
                     for m, (name, samples) in enumerate(zip(modality, samples_x)):
-                        for i, s in enumerate(samples.mean):
+                        if isinstance(samples, torch.distributions.Distribution):
+                            samples = samples.mean
+                        for i, s in enumerate(samples):
                             s_disp = display_data_fs[m](s.detach().cpu(), opencv=True)
                             cv2.imwrite(os.path.join(tempdirs[name], f"sample_{name}_{n * gen_batch_size + i}.png"),
                                         s_disp)
@@ -925,12 +935,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 
             metric_scores = {}
             for met in metrics:
-                if met == "cmmd":
-                    metric = partial(cmmd.compute_cmmd, device=device)
-                elif met in ["tce", "tie"]:
-                    metric = DiversityMetrics(met)
-                else:
-                    metric = pyiqa.create_metric(met, device=device)
+                try:
+                    if met == "cmmd":
+                        metric = partial(cmmd.compute_cmmd, device=device)
+                    elif met in ["tce", "tie"]:
+                        metric = DiversityMetrics(met)
+                    else:
+                        metric = pyiqa.create_metric(met, device=device)
+                except Exception as e:
+                    print(e)
+                    print(f"Error creating metric {met}, skipping")
+                    continue
 
                 scores = []
                 for mod in modality:
