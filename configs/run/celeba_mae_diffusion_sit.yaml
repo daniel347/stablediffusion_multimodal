@@ -14,7 +14,7 @@ training:
 
   patience: 20
 
-  test_every_iter: 25
+  test_every_iter: 3000
 
 data:
   modality: ["colour"]
