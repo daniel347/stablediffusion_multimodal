@@ -15,6 +15,7 @@ params:
       input_size: 16
       num_classes: null
       in_channels: 6
+      n_cls_tokens: 0
 
   unet_config:
     params:

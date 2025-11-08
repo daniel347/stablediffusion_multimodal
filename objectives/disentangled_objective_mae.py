@@ -64,7 +64,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
 
         self.min_encs = [None, None]
         self.last_mse_codebook_err = 0
-        self.vq_betas = [vae.quantiser.beta if hasattr(vae, "quantiser") else None for vae in self.mod.vaes]
+        self.vq_betas = [getattr(getattr(vae, "quantiser", None), "beta", None) for vae in self.mod.vaes]
 
     def _m_dreg(self, model, X, iteration=0, model_params={}, **kwargs):
         loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0,
