@@ -48,6 +48,6 @@ params:
               params:
                 n_e: 8192
                 e_dim_in: 768
-                e_dim: 128
+                e_dim: 64
                 beta: 1
-                normalise: True
+                normalise: False

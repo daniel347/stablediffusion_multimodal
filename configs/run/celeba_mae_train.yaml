@@ -21,7 +21,8 @@ training:
       wadversary: 50
       mmd_zw_weight: 0.0
       freq_vq_resample: 2000
-      stop_vq_resample: 5000
+      stop_vq_resample: 7000
+      vq_resample_noise: 0.1
 
   discriminator:
     discriminator_lr: 4e-4
