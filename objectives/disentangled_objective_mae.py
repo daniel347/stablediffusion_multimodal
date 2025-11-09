@@ -77,7 +77,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                 if hasattr(vae, "quantiser"):
                     print("resampling!")
                     print(self.min_encs[m].sum())
-                    resample_noise = self.vq_resample_noise * self.last_mse_codebook_err / (1 + self.vq_betas[m])
+                    resample_noise = self.vq_resample_noise #  * self.last_mse_codebook_err / (1 + self.vq_betas[m])
                     vae.quantiser.resample_embeddings(self.min_encs[m], noise_scale=resample_noise)
                     self.min_encs[m] = None
 
