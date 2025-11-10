@@ -666,6 +666,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr()[0]}, step=itercount)
 
                     if i == 0:
+                        # test decode the saved latents
+                        if getattr(model_first_stage, "masked_autoencoder", False):
+                            latents_unscaled = model_first_stage.scale_latents(latents, reverse=True)
+                            decoded_imgs = model_first_stage.decode_no_mask(latents_unscaled, cls_tokens=cls_tokens)[0]
+
+                            for m, (name, dbatch) in enumerate(zip(modality, decoded_imgs)):
+                                save_and_log_img(dbatch, f"DataDecoded/{name}", runPath,
+                                                 display_data_fs[m], step=itercount, wandb_run=run)
+
                         if getattr(model_first_stage, "masked_autoencoder", False):
                             latents_disp = mae_latent_disp.transform(latents)
                             save_and_log_latents(latents_disp, f'Latents/u', runPath, itercount, run)
@@ -742,6 +751,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     b_loss += loss.detach().item()
 
                     if i == 0 and gen:
+
                         # Perform test generations
                         if save_intermediate_z0t:
                             saver = DiffusionIntermediateLogger(10, n_save=16)

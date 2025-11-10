@@ -7,7 +7,7 @@ notes: "We try training diffusion on the MAE latent space with no regularisation
 
 training:
   precompute_latents: True
-  force_recompute: False
+  force_recompute: True
   precompute_latents_path: latents_precompute_rgb_mae_no_reg  # /rds/general/user/ds3119/ephemeral/
   latent_scale_per_channel: False
   compute_latent_scale: True
@@ -23,7 +23,7 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"  # /rds/general/user/ds3119/ephemeral/
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"  # /rds/general/user/ds3119/ephemeral/
 
 defaults:
   - override /model: mae-sit-mm-rgb-no-quant
