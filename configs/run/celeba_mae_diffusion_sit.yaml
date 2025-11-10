@@ -23,7 +23,7 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"  # /rds/general/user/ds3119/ephemeral/
+        ckpt_path: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"  # /rds/general/user/ds3119/ephemeral/
 
 defaults:
   - override /model: mae-sit-mm-rgb-no-quant

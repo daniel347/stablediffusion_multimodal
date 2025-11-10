@@ -299,7 +299,7 @@ class MMVAEplus(nn.Module):
 
         return [*w_dists, z_comb_dist], px_us, [*[w.mean.unsqueeze(0) for w in w_dists], z_comb_dist.mean.unsqueeze(0)]
 
-    def encode(self, data, avg_z=None, return_dist=False, use_z_combnet=None):
+    def encode(self, data, avg_z=None, return_dist=False, use_z_combnet=None, **kwargs):
         if avg_z is None: avg_z = self.avg_z
         if use_z_combnet is None: use_z_combnet = self.use_z_comb_network
 

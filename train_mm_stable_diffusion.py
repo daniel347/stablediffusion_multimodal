@@ -397,6 +397,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         already_precomputed = False
         if conf.training.precompute_latents:
+            if conf.function.name != "training_loop":
+                print(" !!!!! Warning : Precompute latents is set but function is not training loop - this can cause problems !!!!! ")
+
             latents_train_path = Path(conf.training.precompute_latents_path + "_train") / conf.dataset_name
             latents_val_path = Path(conf.training.precompute_latents_path + "_val") / conf.dataset_name
             if latents_train_path.exists() and latents_val_path.exists() and not conf.training.force_recompute:

@@ -1,10 +1,14 @@
 # @package _global_
 
 name: "sit_diff"
-notes: "We train SiT diffusion model with our disentangling autoencoder after finetuning the z combiner to be more realistic. We train for a long time to see if there is significant improvement"
+notes: "We test SiT diffusion model with the code modifications for the mae (but test without mae)"
+
+function:
+  name: test_epoch
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0}
 
 training:
-  precompute_latents: True
+  precompute_latents: False
   force_recompute: False
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_low_l1_finetune
   latent_scale_per_channel: True
@@ -18,10 +22,9 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_30__20_39_50_low_l1_finetune_zcomb/model_2000.pt"
+        ckpt_path: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_30__20_39_50_low_l1_finetune_zcomb/model_2000.pt"
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_02__21_45_25_sit_diff/model_48000.pt"
-
+model_initialisation: "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_11__16_00_55_sit_diff/model_it138000_ema_0.175.pt"  # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_02__21_45_25_sit_diff/model_48000.pt"
 
 defaults:
   - override /model: sit-mm-rgb-semseg
