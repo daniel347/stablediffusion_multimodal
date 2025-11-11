@@ -3,7 +3,7 @@
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
 name: "celeba_mae_train_resample_vq_warm_start"
-notes: "We try training our MAE on CelebA rgb images, initialising the model from a vq free trained checkpoint. We project the codewords up to the right size and also resample the code book every 1000. We start from an unregularised checkpoint"
+notes: "We try training our MAE on CelebA rgb images, initialising the model from a vq free trained checkpoint. We project the codewords up to the right size and also resample the code book every 1000. We start with 6000 unquantised iterations"
 
 training:
   lr: 2e-5
@@ -21,13 +21,14 @@ training:
       wadversary: 50
       mmd_zw_weight: 0.0
       freq_vq_resample: 2000
-      stop_vq_resample: 7000
+      stop_vq_resample: 12000
       vq_resample_noise: 0.1
+      start_vq: 6000
 
   discriminator:
     discriminator_lr: 4e-4
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"
+model_initialisation: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"
 
 
 # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_04__17_09_45_celeba_mae_train_contract_vq_warm_start/model_29000.pt"

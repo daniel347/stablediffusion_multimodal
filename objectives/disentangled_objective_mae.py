@@ -12,23 +12,24 @@ eta = 1e-20
 @register_objective("disentangling_objective_mae")
 class DisentanglingObjectiveMAE(torch.nn.Module):
     def __init__(self,
-                model,
-                device,
-                data_parallel=False,
-                wlpips=0.0,
-                wll=1.0,
-                wadversary=0.0,
-                get_adversarial_loss_f=None,
-                start_adv_iter=0,
-                beta=1.0,
-                channel_weighting=None,
-                z_close_weight=50000,
-                mmd_zw_weight=1,
-                mmd_ww_weight=1,
-                freq_vq_resample=3000,
-                stop_vq_resample=15000,
-                vq_resample_noise=0.2, # as a proportion of the MSE codebook error
-                **kwargs):
+                 model,
+                 device,
+                 data_parallel=False,
+                 wlpips=0.0,
+                 wll=1.0,
+                 wadversary=0.0,
+                 get_adversarial_loss_f=None,
+                 start_adv_iter=0,
+                 beta=1.0,
+                 channel_weighting=None,
+                 z_close_weight=50000,
+                 mmd_zw_weight=1,
+                 mmd_ww_weight=1,
+                 freq_vq_resample=3000,
+                 stop_vq_resample=25000,  # stop resampling the codebook after this time
+                 start_vq=6000,  # train for start_quantise iterations before enabling the qunatiser
+                 vq_resample_noise=0.2,  # as a proportion of the MSE codebook error
+                 **kwargs):
         super(DisentanglingObjectiveMAE, self).__init__()
 
         self.lpips = pyiqa.create_metric("lpips", device=device, as_loss=True)
@@ -51,6 +52,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.freq_vq_resample = freq_vq_resample
         self.stop_vq_resample = stop_vq_resample
         self.vq_resample_noise = vq_resample_noise
+        self.start_vq = start_vq
 
         weights = [1.0, 1.0, self.wadversary, self.beta]
         if self.mod.n_modality == 2:
@@ -72,7 +74,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                      "discriminator_loss": 0, "adversarial_loss": 0,
                      "cos_sim_ww": 0, "cos_sim_zw": 0}
 
-        if iteration % self.freq_vq_resample == 0 and iteration > 0 and iteration <= self.stop_vq_resample:
+        if iteration % self.freq_vq_resample == 0 and iteration > self.start_vq and iteration <= self.stop_vq_resample:
             for m, vae in enumerate(self.mod.vaes):
                 if hasattr(vae, "quantiser"):
                     print("resampling!")
@@ -80,6 +82,8 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                     resample_noise = self.vq_resample_noise #  * self.last_mse_codebook_err / (1 + self.vq_betas[m])
                     vae.quantiser.resample_embeddings(self.min_encs[m], noise_scale=resample_noise)
                     self.min_encs[m] = None
+
+        model_params["quantise"] = iteration > self.start_vq
 
         W, Z, z_comb, Xhat, masks, q_loss, min_encs = model("forward", X, **model_params)
         px_us = [self.mod.lik_dists[d](Xhat[d].unsqueeze(0), **self.mod.lik_dist_params[d]) for d in range(len(X))]
