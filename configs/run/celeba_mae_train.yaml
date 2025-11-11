@@ -2,11 +2,11 @@
 
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
-name: "celeba_mae_train_resample_vq"
-notes: "We try training our MAE on CelebA rgb images, initialising the model from a vq free trained checkpoint. We also resample the code book every 2000"
+name: "celeba_mae_train_resample_vq_warm_start"
+notes: "We try training our MAE on CelebA rgb images, initialising the model from a vq free trained checkpoint. We project the codewords up to the right size and also resample the code book every 1000. We start from an unregularised checkpoint"
 
 training:
-  lr: 0.5e-5
+  lr: 2e-5
   num_epochs: 60
   patience: 60  # dont early stop
         
@@ -27,7 +27,10 @@ training:
   discriminator:
     discriminator_lr: 4e-4
 
-model_initialisation: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_04__17_09_45_celeba_mae_train_contract_vq_warm_start/model_29000.pt"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"
+
+
+# "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_04__17_09_45_celeba_mae_train_contract_vq_warm_start/model_29000.pt"
 
 # "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/MM_CelebA_Autoencoder/2025_11_04__17_09_45_celeba_mae_train_contract_vq_warm_start/model_29000.pt"
 # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt" # "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/MM_CelebA_Autoencoder/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt" #
