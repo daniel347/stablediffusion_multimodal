@@ -124,9 +124,9 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.last_mse_codebook_err = loss_dict["vq_loss"]
         for m, me in enumerate(min_encs):
             if self.min_encs[m] is not None:
-                self.min_encs[m] += me.sum(dim=0)
+                self.min_encs[m] += me.flatten(end_dim=-2).sum(dim=0)
             else:
-                self.min_encs[m] = me.sum(dim=0)
+                self.min_encs[m] = me.flatten(end_dim=-2).sum(dim=0)
 
         # Z distance loss (Symmetric kl but only works for 2 modalities)
         if len(Z) != 2:

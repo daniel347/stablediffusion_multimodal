@@ -8,6 +8,7 @@ D = 1000
 N = 768
 M = 32
 Nc = 256
+B = 64
 temp = 0.001
 
 u_e = torch.randn(D, M)
@@ -24,24 +25,30 @@ resample_interval = 100
 resample_keep_thresh = 0.1/Nc
 noise_scale = 0.1
 
+j = 0
+
+perplexities = []
+losses = []
+ts = []
+
 for i in range(N_iter):
     optim.zero_grad()
 
+    batch_start = j*B
+    batch_end = (j+1)*B
+    if batch_end > D:
+        j = 0  # restart
+    else:
+        j += 1
+
     c_proj = Pu(codebook)
-    u_proj = u # @ Pu.T
+    u_proj = u[batch_start:batch_end] # @ Pu.T
 
     similarity = torch.sum(u_proj ** 2, dim=1, keepdim=True) + torch.sum(c_proj ** 2, dim=1) - 2 * u_proj @ c_proj.T
 
     code_responsibilities = torch.nn.functional.softmax(-similarity/temp, dim=1)
     min_inds = torch.argmax(code_responsibilities, dim=1)
     loss = torch.sum(code_responsibilities * similarity)
-
-    """
-    min_inds = torch.argmin(similarity, dim=1)
-    codes_proj = c_proj[min_inds]
-
-    loss = torch.sum((codes_proj - u_proj) ** 2)
-    """
 
     loss.backward()
     optim.step()
@@ -58,7 +65,7 @@ for i in range(N_iter):
         new_codes = new_codes + noise_scale * torch.randn_like(new_codes)
         codebook = F.normalize(new_codes).detach()
 
-    if i % 25 == 0:
+    if i % 50 == 0:
 
         fig, ax = plt.subplots(1, 1, figsize=(5, 5))
         print(f"Iter {i}, loss: {loss.item()}")
@@ -74,6 +81,10 @@ for i in range(N_iter):
         perplexity = torch.exp(-torch.sum(e_mean * torch.log(e_mean + 1e-10)))
         print(f"perplexity: {perplexity}")
 
+        perplexities.append(perplexity.item())
+        losses.append(loss.item())
+        ts.append(i)
+
         ax.set_title("In Manifold Dimensions")
         ax.plot(c_proj[:, 0].detach().numpy(), c_proj[:, 1].detach().numpy(), "rx", label="Codebook")
         ax.scatter(u_proj[:, 0].detach().numpy(), u_proj[:, 1].detach().numpy(), c=min_inds.detach().numpy(), label="Data")
@@ -82,6 +93,24 @@ for i in range(N_iter):
         plt.show()
 
 print(Pu.weight)
+print("Mag of rows of Pu")
+row_mag = torch.linalg.vector_norm(Pu.weight, dim=-1)
+print(torch.linalg.vector_norm(Pu.weight, dim=-1))
+
+plt.plot(row_mag.detach().cpu().numpy())
+plt.xlabel("Rows")
+plt.ylabel("Magnitude")
+plt.show()
+
+plt.plot(ts, perplexities)
+plt.ylabel("Perplexity")
+plt.xlabel("Iteration")
+plt.show()
+
+plt.plot(ts, losses)
+plt.ylabel("Loss")
+plt.xlabel("Iteration")
+plt.show()
 
 
 

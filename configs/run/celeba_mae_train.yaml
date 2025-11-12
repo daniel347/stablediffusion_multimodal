@@ -6,7 +6,7 @@ name: "celeba_mae_train_resample_vq_warm_start"
 notes: "We try training our MAE on CelebA rgb images, initialising the model from a vq free trained checkpoint. We project the codewords up to the right size and also resample the code book every 1000. We start with 6000 unquantised iterations"
 
 training:
-  lr: 2e-5
+  lr: 1e-4
   num_epochs: 60
   patience: 60  # dont early stop
         
@@ -22,8 +22,9 @@ training:
       mmd_zw_weight: 0.0
       freq_vq_resample: 2000
       stop_vq_resample: 12000
-      vq_resample_noise: 0.1
+      vq_resample_noise: 0.03
       start_vq: 6000
+
 
   discriminator:
     discriminator_lr: 4e-4
