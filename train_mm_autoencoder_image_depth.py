@@ -480,7 +480,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     for m, enc_count in enumerate(model_outs[0][4]):
                         if enc_counts[m] is not None:
-                            enc_counts[m] += torch.flatten(end_dim=-2).sum(enc_count, dim=0).detach().cpu()
+                            enc_counts[m] += enc_count.flatten(end_dim=-2).sum(dim=0).detach().cpu()
 
                     b_loss += loss.detach().item()
 
