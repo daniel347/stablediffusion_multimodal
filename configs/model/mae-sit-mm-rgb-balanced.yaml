@@ -29,6 +29,7 @@ params:
       z_len: 384
       scale_per_channel: false
       ckpt_path:
+      is_variational: False
 
       vae_params:
         - target: mae.models_mae.MaskedAutoencoderViT  # RGB images

@@ -1,6 +1,7 @@
 import pytest
 import torch
 from mae.models_disentangling_mae import DisMAE
+from mae.distribution import DiagonalGaussian
 from objectives.disentangled_objective_mae import DisentanglingObjectiveMAE
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 import matplotlib.pyplot as plt
@@ -54,16 +55,16 @@ def test_masking(mask_fraction, mask_overlap, unimodal):
     plt.imshow(masks_reshaped)
     plt.savefig(f"masks_reshaped_{mask_fraction}_{mask_overlap}_{'unimodal' if unimodal else ''}.png")
 
-@pytest.mark.parametrize("unimodal", (False, True))
-def test_model_encode(unimodal):
+@pytest.mark.parametrize("unimodal, is_variational", ([False, False], [True, False], [False, True], [True, True]))
+def test_model_encode(unimodal, is_variational):
     x_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     if unimodal:
         data = [torch.randn(1, 3, img_size, img_size).to(x_device)]
-        model = DisMAE(**unimodal_model_params).to(x_device)
+        model = DisMAE(is_variational=is_variational, **unimodal_model_params).to(x_device)
     else:
         data = [torch.randn(1, 3, img_size, img_size).to(x_device), torch.clamp(torch.randn(1, 18, img_size, img_size), 0, 1).to(x_device)]
-        model = DisMAE(**model_params).to(x_device)
+        model = DisMAE(is_variational=is_variational, **model_params).to(x_device)
 
     W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model.encode(data, total_mask_ratio=0.25, shared_mask_ratio=0.5)
 
@@ -84,19 +85,25 @@ def test_model_encode(unimodal):
     for ct in cls_tokens:
         assert ct.shape == torch.Size([1, 1, model.u_len])
 
+    if is_variational:
+        assert all([isinstance(z, DiagonalGaussian) for z in Z])
+        assert all([isinstance(w, DiagonalGaussian) for w in W])
+        assert all([isinstance(ct, DiagonalGaussian) for ct in cls_tokens])
+
     assert ids_restore.shape[-1] == model.vaes[0].patch_embed.num_patches
 
-@pytest.mark.parametrize("mask_fraction, mask_overlap, random_z, unimodal", ([0.25, 0.5, False, True], [0.5, 0.8, False, True], [0.75, 0.9, False, True], [0.25, 0.5, True, True], [0.5, 0.8, True, True], [0.75, 0.9, True, True],
-                                                                             [0.25, 0.5, False, False], [0.5, 0.8, False, False], [0.75, 0.9, False, False], [0.25, 0.5, True, False], [0.5, 0.8, True, False], [0.75, 0.9, True, False]))
-def test_model_z_comb(mask_fraction, mask_overlap, random_z, unimodal):
+@pytest.mark.parametrize("mask_fraction, mask_overlap, random_z, unimodal, is_variational",
+                         ([0.25, 0.5, False, True, False], [0.5, 0.8, False, True, False], [0.75, 0.9, False, True, True], [0.25, 0.5, True, True, True], [0.5, 0.8, True, True, False], [0.75, 0.9, True, True, False],
+                          [0.25, 0.5, False, False, False], [0.5, 0.8, False, False, True], [0.75, 0.9, False, False, False], [0.25, 0.5, True, False, False], [0.5, 0.8, True, False, True], [0.75, 0.9, True, False, True]))
+def test_model_z_comb(mask_fraction, mask_overlap, random_z, unimodal, is_variational):
     x_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     if unimodal:
         data = [torch.randn(1, 3, img_size, img_size).to(x_device)]
-        model = DisMAE(**unimodal_model_params).to(x_device)
+        model = DisMAE(is_variational=is_variational, **unimodal_model_params).to(x_device)
     else:
         data = [torch.randn(1, 3, img_size, img_size).to(x_device), torch.clamp(torch.randn(1, 18, img_size, img_size), 0, 1).to(x_device)]
-        model = DisMAE(**model_params).to(x_device)
+        model = DisMAE(is_variational=is_variational, **model_params).to(x_device)
 
     W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model.encode(data, total_mask_ratio=mask_fraction, shared_mask_ratio=mask_overlap)
     print(ids_restore)
@@ -110,12 +117,20 @@ def test_model_z_comb(mask_fraction, mask_overlap, random_z, unimodal):
     assert z_comb.shape[-1] == model.z_len
 
     if unimodal:
-        assert torch.allclose(z_comb, Z[0])
+        if is_variational:
+            assert torch.allclose(z_comb.mean, Z[0].mean)
+            assert torch.allclose(z_comb.logvar, Z[0].logvar)
+        else:
+            assert torch.allclose(z_comb, Z[0])
     else:
         assert z_comb.shape[1] == len_keep_shared
 
-@pytest.mark.parametrize("unimodal", (False, True))
-def test_model_forward(unimodal):
+    if is_variational:
+        assert all([isinstance(z, DiagonalGaussian) for z in Z])
+        assert isinstance(z_comb, DiagonalGaussian)
+
+@pytest.mark.parametrize("unimodal, is_variational", ([False, False], [True, False], [False, True], [True, True]))
+def test_model_forward(unimodal, is_variational):
     x_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     if unimodal:
@@ -137,8 +152,8 @@ def test_model_forward(unimodal):
 
     assert all([x.shape == data[i].shape for i, x in enumerate(X)])
 
-@pytest.mark.parametrize("unimodal", (False, True))
-def test_objective(unimodal):
+@pytest.mark.parametrize("unimodal, is_variational", ([False, False], [True, False], [False, True], [True, True]))
+def test_objective(unimodal, is_variational):
     x_device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     if unimodal:
