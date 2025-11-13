@@ -8,7 +8,7 @@ function:
   kwargs: {subepoch: 0, itercount: 0, epochcount: 0}
 
 training:
-  precompute_latents: False
+  precompute_latents: True
   force_recompute: False
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_low_l1_finetune
   latent_scale_per_channel: True

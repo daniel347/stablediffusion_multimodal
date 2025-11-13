@@ -8,14 +8,14 @@ import matplotlib.pyplot as plt
 import math
 import yaml
 
-with open("../configs/model/mae-sit-mm-rgb-semseg.yaml", 'r') as f:
+with open("configs/model/mae-sit-mm-rgb-semseg.yaml", 'r') as f:
     model_params = yaml.safe_load(f)["params"]["first_stage_config"]["params"]
 
-with open('../configs/model/mae-sit-mm-rgb.yaml', 'r') as f:
+with open('configs/model/mae-sit-mm-rgb.yaml', 'r') as f:
     unimodal_model_params = yaml.safe_load(f)["params"]["first_stage_config"]["params"]
 
-objective_params = {"wlpips": [1.0, 0.0], "wll": 1.0, "wadversary": 0.0, "start_adv_iter": 0, "beta": 1.0, "z_close_weight": 50000, "mmd_zw_weight": 1, "mmd_ww_weight": 1, "channel_weighting": [None, None]}
-unimodal_objective_params = {"wlpips": [1.0], "wll": 1.0, "wadversary": 0.0, "start_adv_iter": 0, "beta": 1.0, "z_close_weight": 0, "mmd_zw_weight": 1, "mmd_ww_weight": 0, "channel_weighting": [None]}
+objective_params = {"wlpips": [1.0, 0.0], "wll": 1.0, "wadversary": 0.0, "start_adv_iter": 0, "beta": 1.0, "z_close_weight": 50000, "mmd_zw_weight": 1, "mmd_ww_weight": 1, "kl_weight": 2.0, "channel_weighting": [None, None]}
+unimodal_objective_params = {"wlpips": [1.0], "wll": 1.0, "wadversary": 0.0, "start_adv_iter": 0, "beta": 1.0, "z_close_weight": 0, "mmd_zw_weight": 1, "mmd_ww_weight": 0, "kl_weight": 2.0, "channel_weighting": [None]}
 
 img_size = 128
 
@@ -135,10 +135,10 @@ def test_model_forward(unimodal, is_variational):
 
     if unimodal:
         data = [torch.randn(1, 3, img_size, img_size).to(x_device)]
-        model = DisMAE(**unimodal_model_params).to(x_device)
+        model = DisMAE(is_variational=is_variational, **unimodal_model_params).to(x_device)
     else:
         data = [torch.randn(1, 3, img_size, img_size).to(x_device), torch.clamp(torch.randn(1, 18, img_size, img_size), 0, 1).to(x_device)]
-        model = DisMAE(**model_params).to(x_device)
+        model = DisMAE(is_variational=is_variational, **model_params).to(x_device)
 
     W, Z, z_comb, X, masks, q_loss, min_encs = model.forward(data, random_z=True)
 
@@ -150,6 +150,14 @@ def test_model_forward(unimodal, is_variational):
     print(f"q_loss: {q_loss}")
     print(f"min_encs shapes: {[me.shape for me in min_encs]}")
 
+    assert all([isinstance(x, torch.Tensor) for x in X])
+
+    if is_variational:
+        assert all([isinstance(z, DiagonalGaussian) for z in Z])
+        assert isinstance(z_comb, DiagonalGaussian)
+        assert all([isinstance(w, DiagonalGaussian) for w in W])
+
+
     assert all([x.shape == data[i].shape for i, x in enumerate(X)])
 
 @pytest.mark.parametrize("unimodal, is_variational", ([False, False], [True, False], [False, True], [True, True]))
@@ -158,11 +166,11 @@ def test_objective(unimodal, is_variational):
 
     if unimodal:
         data = [torch.randn(1, 3, img_size, img_size).to(x_device)]
-        model = MMVAEDataParallelWrapper(DisMAE(**unimodal_model_params).to(x_device))
+        model = MMVAEDataParallelWrapper(DisMAE(is_variational=is_variational, **unimodal_model_params).to(x_device))
         objective = DisentanglingObjectiveMAE(model, x_device, **unimodal_objective_params)
     else:
         data = [torch.randn(1, 3, img_size, img_size).to(x_device), (torch.randn(1, 18, img_size, img_size) > 0).to(dtype=torch.float32, device=x_device)]
-        model = MMVAEDataParallelWrapper(DisMAE(**model_params).to(x_device))
+        model = MMVAEDataParallelWrapper(DisMAE(is_variational=is_variational, **model_params).to(x_device))
         objective = DisentanglingObjectiveMAE(model, x_device, **objective_params)
 
     wlw, ld, mo = objective(model, data, model_params=dict(total_mask_ratio=0.5, shared_mask_ratio=0.5, random_z=True))

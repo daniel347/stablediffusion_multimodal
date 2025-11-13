@@ -1,7 +1,9 @@
 import pytest
 from mae.distribution import DiagonalGaussian
+from torch.distributions import Normal
 import torch
 import numpy as np
+
 
 def test_dist():
     a = torch.randn(3, 64, 768)
@@ -124,3 +126,19 @@ def test_assign_slice():
 
     assert torch.allclose(d1.mean[:, inds, :], d2.mean)
     assert torch.allclose(d1.variance[:, inds, :], d2.variance)
+
+
+def test_kl_divergence():
+    a = torch.randn(3, 64, 768)
+    b = torch.randn(3, 64, 768)
+
+    d1 = DiagonalGaussian(a)
+    d2 = DiagonalGaussian(b)
+
+    kl = torch.distributions.kl.kl_divergence(d1, d2)
+
+    true_kl = torch.distributions.kl.kl_divergence(Normal(a[:, :, :384], torch.exp(a[:, :, 384:]/2.0)),
+                                                   Normal(b[:, :, :384], torch.exp(b[:, :, 384:]/2.0))).sum(dim=(-1, -2))
+
+    assert torch.allclose(kl, true_kl)
+    assert kl.shape == torch.Size([3])

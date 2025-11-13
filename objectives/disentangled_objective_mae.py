@@ -2,9 +2,12 @@
 import torch
 from torch.profiler import record_function
 from numpy import prod
+
+from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
 from .objective_util import compute_microbatch_split, reconstruction_loss, register_objective, log_mean_exp, \
     MMDIndependenceLoss, CosSimIndependenceLoss
 import pyiqa
+from mae.distribution import DiagonalGaussian
 
 eta = 1e-20
 
@@ -25,6 +28,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                  z_close_weight=50000,
                  mmd_zw_weight=1,
                  mmd_ww_weight=1,
+                 kl_weight=1.0,
                  freq_vq_resample=3000,
                  stop_vq_resample=25000,  # stop resampling the codebook after this time
                  start_vq=6000,  # train for start_quantise iterations before enabling the qunatiser
@@ -49,12 +53,16 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.z_close_weight = z_close_weight
         self.mmd_zw_weight = mmd_zw_weight
         self.mmd_ww_weight = mmd_ww_weight
+        self.kl_weight = kl_weight
         self.freq_vq_resample = freq_vq_resample
         self.stop_vq_resample = stop_vq_resample
         self.vq_resample_noise = vq_resample_noise
         self.start_vq = start_vq
 
         weights = [1.0, 1.0, self.wadversary, self.beta]
+        for r in range(self.mod.n_modality):
+            weights.append(self.beta * self.kl_weight)
+
         if self.mod.n_modality == 2:
             weights.append(self.beta * z_close_weight)
 
@@ -119,7 +127,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
             lws.append(torch.zeros(K, B, dtype=torch.float32, device=X[0].device))
 
         # VQ loss
-        lws.append(-q_loss * torch.ones(K, B, dtype=torch.float32, device=X[0].device) * self.beta)
+        lws.append(-q_loss * torch.ones(K, B, dtype=torch.float32, device=X[0].device))
         loss_dict["vq_loss"] = -q_loss.clone().detach().cpu().sum().item()
         self.last_mse_codebook_err = loss_dict["vq_loss"]
         for m, me in enumerate(min_encs):
@@ -128,13 +136,34 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
             else:
                 self.min_encs[m] = me.flatten(end_dim=-2).sum(dim=0)
 
+        # KL loss
+        if self.mod.is_variational:
+            for w, z in zip(W, Z):
+                prior_w = DiagonalGaussian(mean=torch.zeros_like(w.mean), logvar=torch.zeros_like(w.logvar))
+                kl_div_w = torch.distributions.kl.kl_divergence(w, prior_w).unsqueeze(0) # unsqueeze for K
+
+                prior_z = DiagonalGaussian(mean=torch.zeros_like(z.mean), logvar=torch.zeros_like(z.logvar))
+                kl_div_z = torch.distributions.kl.kl_divergence(z, prior_z).unsqueeze(0) # unsqueeze for K
+
+                lws.append(-kl_div_w - kl_div_z)
+                loss_dict["prior"] -= (kl_div_w + kl_div_z).detach().cpu().sum().item()
+        else:
+            for _ in Z:
+                lws.append(torch.zeros(K, B, dtype=torch.float32, device=X[0].device))
+
+
         # Z distance loss (Symmetric kl but only works for 2 modalities)
         if len(Z) != 2:
             print("WARNING: Z distance loss only works for 2 modalities, skipping")
         else:
-            z1_norm = torch.linalg.vector_norm(Z[0], dim=(1, 2))
-            z2_norm = torch.linalg.vector_norm(Z[1], dim=(1, 2))
-            z_dist_loss = torch.sum((Z[0] - Z[1])**2, dim=(1, 2))/(z1_norm * z2_norm)
+            if self.mod.is_variational:
+                z1_norm = torch.linalg.vector_norm(Z[0].mean, dim=(1, 2))
+                z2_norm = torch.linalg.vector_norm(Z[1].mean, dim=(1, 2))
+                z_dist_loss = torch.sum((Z[0].mean - Z[1].mean) ** 2, dim=(1, 2)) / (z1_norm * z2_norm)
+            else:
+                z1_norm = torch.linalg.vector_norm(Z[0], dim=(1, 2))
+                z2_norm = torch.linalg.vector_norm(Z[1], dim=(1, 2))
+                z_dist_loss = torch.sum((Z[0] - Z[1])**2, dim=(1, 2))/(z1_norm * z2_norm)
 
             lws.append(-z_dist_loss.unsqueeze(0)/2)
             loss_dict["z_dist_normed_euclidean"] = -z_dist_loss.clone().detach().cpu().sum().item()
@@ -149,9 +178,14 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
             for d, qw_x in enumerate(W):
                 print(f"qz_x mean: {qz_x.shape}")
                 print(f"qw_x mean: {qw_x.shape}")
-                lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x, qw_x)
-                if r != d:
-                    lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r, qw_x)
+                if self.mod.is_variational:
+                    lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x.mean, qw_x.mean)
+                    if r != d:
+                        lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r.mean, qw_x.mean)
+                else:
+                    lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x, qw_x)
+                    if r != d:
+                        lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r, qw_x)
 
             lws.append( - lmmd_zw_r * torch.ones(K, B, dtype=torch.float32, device=lmmd_zw_r.device))
             lws.append( - lmmd_ww_r * torch.ones(K, B, dtype=torch.float32, device=lmmd_zw_r.device))

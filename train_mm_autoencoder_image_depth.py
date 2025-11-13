@@ -418,7 +418,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
                         if getattr(mod, "masked_autoencoder", False):
-                            z_avg_mag = [torch.mean(torch.linalg.vector_norm(z, dim=-1)) for z in model_outs[0][1]]
+                            if getattr(mod, "is_variational"):
+                                z_avg_mag = [torch.mean(torch.linalg.vector_norm(z.mean, dim=-1)) for z in model_outs[0][1]]
+                            else:
+                                z_avg_mag = [torch.mean(torch.linalg.vector_norm(z, dim=-1)) for z in model_outs[0][1]]
                             wandb.log({"encoder_z_mag_avg": z_avg_mag}, step=itercount)
 
                     itercount += 1
@@ -509,6 +512,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             # Perform a full reconstruction (no masking)
                             W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model("encode", data, no_mask=True)
                             z_comb = model("z_combine", Z, len_keep_shared, len_mask_unique, ids_restore)
+                            z_comb, W, cls_tokens = model("sample_latent", z_comb, W, cls_tokens)
                             X, _, _ = model("decode", W, z_comb, ids_restore, cls_tokens, len_keep_shared, len_mask_unique)
 
                             for m, (name, x) in enumerate(zip(modality, X)):
@@ -604,8 +608,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake", runPath, None,
                                                  itercount,
                                                  run)
-
-
 
             if compute_metrics:
                 metric_scores = {}

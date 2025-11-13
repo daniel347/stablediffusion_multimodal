@@ -1,0 +1,36 @@
+# @package _global_
+
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
+device: "cuda:0"
+name: "celeba_var_mae_train"
+notes: "We try training a variational MAE on CelebA."
+
+training:
+  lr: 1e-4
+  num_epochs: 60
+  patience: 60  # dont early stop
+        
+  model_opts:
+    total_mask_ratio: 0.5
+    shared_mask_ratio: 0.75
+
+  test_every_iter: 3000
+  objective:
+    params:        
+      start_adv_iter: 2000
+      wadversary: 50
+      mmd_zw_weight: 0.0
+      kl_weight: 1.0
+
+  discriminator:
+    discriminator_lr: 4e-4
+
+model_initialisation:
+init_from_stable_diffusion: False
+init_from_mae: True
+resume_training: False
+
+
+defaults:
+  - override /model: mae-sit-mm-rgb-vae
+  - _self_
