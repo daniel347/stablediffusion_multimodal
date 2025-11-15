@@ -3,7 +3,7 @@ params:
   path_type: "Linear"
   prediction: "velocity"
   loss_weight: null
-  input_shape: [6, 16, 16]
+  input_shape: [768, 8, 8]
 
   scorenet_config:
     target: SiT.models.SiT
@@ -12,11 +12,12 @@ params:
       hidden_size: 768
       patch_size: 1  # put tokens in directly ( with projection )
       num_heads: 12
-      input_size: 16
+      input_size: 8
       num_classes: null
-      in_channels: 6
+      in_channels: 768
       learn_sigma: False
       n_cls_tokens: 1
+      use_fp16: False
 
   first_stage_config:
     target: mae.models_disentangling_mae.DisMAE

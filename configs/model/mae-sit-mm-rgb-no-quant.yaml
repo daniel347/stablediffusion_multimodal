@@ -17,6 +17,7 @@ params:
       in_channels: 768
       learn_sigma: False
       n_cls_tokens: 1
+      use_fp16: False
 
   unet_config:
     params:

@@ -3,7 +3,7 @@ params:
   path_type: "Linear"
   prediction: "velocity"
   loss_weight: null
-  input_shape: [6, 16, 16]
+  input_shape: [768, 8, 8]
 
   scorenet_config:
     target: SiT.models.SiT
@@ -17,6 +17,7 @@ params:
       in_channels: 768
       learn_sigma: False
       n_cls_tokens: 1
+      use_fp16: False
 
   first_stage_config:
     target: mae.models_disentangling_mae.DisMAE

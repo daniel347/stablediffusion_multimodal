@@ -226,7 +226,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         print("Working directory: ", os.getcwd())
 
         use_mixed_precision = conf.training.use_mixed_precision
-        conf["model"]["params"]["unet_config"]["params"]["use_fp16"] = use_mixed_precision
+        conf["model"]["params"]["scorenet_config"]["params"]["use_fp16"] = use_mixed_precision
         if use_mixed_precision:
             print("Using mixed precision training")
             scaler = GradScaler()
@@ -777,7 +777,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         N_gen = 16
                         if return_class:
                             classes = torch.randint(low=0,
-                                                    high=conf.model.params.unet_config.params.num_classes,
+                                                    high=conf.model.params.scorenet_config.params.num_classes,
                                                     size=(N_gen,),
                                                     device=device)
 
@@ -893,7 +893,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 for n in pbar:
                     if return_class:
                         classes = torch.randint(low=0,
-                                                high=conf.model.params.unet_config.params.num_classes,
+                                                high=conf.model.params.scorenet_config.params.num_classes,
                                                 size=(gen_batch_size,),
                                                 device=device)
 

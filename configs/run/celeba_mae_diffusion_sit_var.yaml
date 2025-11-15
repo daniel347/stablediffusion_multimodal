@@ -1,0 +1,33 @@
+# @package _global_
+
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
+device: "cuda:0"
+name: "celeba_mae_sit_train"
+notes: "We try training diffusion on the MAE latent space with kl regularisation"
+
+training:
+  precompute_latents: True
+  force_recompute: True
+  precompute_latents_path: latents_precompute_rgb_mae_kl # /rds/general/user/ds3119/ephemeral/
+  latent_scale_per_channel: False
+  compute_latent_scale: True
+
+  patience: 20
+
+  test_every_iter: 3000
+
+data:
+  modality: ["colour"]
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/MM_CelebA_Autoencoder/2025_11_14__19_18_21_celeba_var_mae_train/model_51000.pt"  # /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/
+
+model_initialisation: #
+
+defaults:
+  - override /model: mae-sit-mm-rgb-vae
+  - override /sampler: ddpm
+  - _self_
