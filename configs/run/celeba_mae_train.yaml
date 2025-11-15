@@ -14,7 +14,7 @@ training:
     total_mask_ratio: 0.5
     shared_mask_ratio: 0.75
 
-  test_every_iter: 1000
+  test_every_iter: 3000
   objective:
     params:        
       start_adv_iter: 2000
@@ -29,13 +29,7 @@ training:
   discriminator:
     discriminator_lr: 4e-4
 
-model_initialisation: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"
-
-
-# "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_04__17_09_45_celeba_mae_train_contract_vq_warm_start/model_29000.pt"
-
-# "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/MM_CelebA_Autoencoder/2025_11_04__17_09_45_celeba_mae_train_contract_vq_warm_start/model_29000.pt"
-# "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt" # "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/MM_CelebA_Autoencoder/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt" #
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_14__09_39_14_celeba_mae_train_resample_vq_warm_start/model_12000.pt"
 init_from_stable_diffusion: False
 init_from_mae: True
 resume_training: False

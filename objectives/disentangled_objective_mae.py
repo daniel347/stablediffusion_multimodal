@@ -84,7 +84,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
 
         if iteration % self.freq_vq_resample == 0 and iteration > self.start_vq and iteration <= self.stop_vq_resample:
             for m, vae in enumerate(self.mod.vaes):
-                if hasattr(vae, "quantiser"):
+                if getattr(vae, "quantiser", None) is not None:
                     print("resampling!")
                     print(self.min_encs[m].sum())
                     resample_noise = self.vq_resample_noise #  * self.last_mse_codebook_err / (1 + self.vq_betas[m])

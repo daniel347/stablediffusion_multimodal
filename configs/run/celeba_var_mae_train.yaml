@@ -20,15 +20,15 @@ training:
       start_adv_iter: 2000
       wadversary: 50
       mmd_zw_weight: 0.0
-      kl_weight: 1.0
+      kl_weight: 0.1
 
   discriminator:
     discriminator_lr: 4e-4
 
-model_initialisation:
+model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_14__09_39_14_celeba_var_mae_train/model_6000.pt"
 init_from_stable_diffusion: False
-init_from_mae: True
-resume_training: False
+init_from_mae: False
+resume_training: True
 
 
 defaults:
