@@ -383,11 +383,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if use_adversary:
                         disc_loss = 0
-                        if isinstance(model_outs[1][0], list):
-                            for px_u in model_outs[1]:
+                        if isinstance(model_outs["Xhat"][0], list):
+                            for px_u in model_outs["Xhat"]:
                                 disc_loss = disc_loss + train_discriminator_f(data, px_u)
                         else:
-                            disc_loss = train_discriminator_f(data, model_outs[1])
+                            disc_loss = train_discriminator_f(data, model_outs["Xhat"])
                         loss_dict["discriminator_loss"] = -disc_loss.detach().cpu().sum().item()
 
                     if loss_series is None:
@@ -419,9 +419,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                         if getattr(mod, "masked_autoencoder", False):
                             if getattr(mod, "is_variational"):
-                                z_avg_mag = [torch.mean(torch.linalg.vector_norm(z.mean, dim=-1)) for z in model_outs[0][1]]
+                                z_avg_mag = [torch.mean(torch.linalg.vector_norm(z.mean, dim=-1)) for z in model_outs["Z"]]
                             else:
-                                z_avg_mag = [torch.mean(torch.linalg.vector_norm(z, dim=-1)) for z in model_outs[0][1]]
+                                z_avg_mag = [torch.mean(torch.linalg.vector_norm(z, dim=-1)) for z in model_outs["Z"]]
                             wandb.log({"encoder_z_mag_avg": z_avg_mag}, step=itercount)
 
                     itercount += 1
@@ -463,7 +463,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     tempdir.mkdir(parents=True, exist_ok=True)
                     tempdirs[mode] = tempdir
 
-            enc_counts = [(torch.zeros(vae.quantiser.n_e) if vae.quantiser is not None else None) for vae in
+            enc_counts = [(torch.zeros(vae.quantiser.n_e) if getattr(vae, "quantiser", None) is not None else None) for vae in
                           mod.vaes]
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
@@ -474,16 +474,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if use_adversary:
                         disc_loss = 0
-                        if isinstance(model_outs[1][0], list):
-                            for px_u in model_outs[1]:
+                        if isinstance(model_outs["Xhat"][0], list):
+                            for px_u in model_outs["Xhat"]:
                                 disc_loss = disc_loss + train_discriminator_f(data, px_u, test=True)
                         else:
-                            disc_loss = train_discriminator_f(data, model_outs[1], test=True)
+                            disc_loss = train_discriminator_f(data, model_outs["Xhat"], test=True)
                         loss_dict["discriminator_loss"] = -disc_loss.detach().cpu().sum().item()
 
-                    for m, enc_count in enumerate(model_outs[0][4]):
-                        if enc_counts[m] is not None:
-                            enc_counts[m] += enc_count.flatten(end_dim=-2).sum(dim=0).detach().cpu()
+                    if "min_encs" in model_outs:
+                        # If we have a VQ component, accumulate the encoding counts
+                        for m, enc_count in enumerate(model_outs["min_encs"]):
+                            if enc_counts[m] is not None:
+                                enc_counts[m] += enc_count.flatten(end_dim=-2).sum(dim=0).detach().cpu()
 
                     b_loss += loss.detach().item()
 
@@ -494,7 +496,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if compute_metrics:
                         for m, name in enumerate(modality):
-                            out = model_outs[1][m][m] if isinstance(model_outs[1][0], list) else model_outs[1][m]
+                            out = model_outs["Xhat"][m][m] if isinstance(model_outs["Xhat"][0], list) else model_outs["Xhat"][m]
                             if isinstance(out, torch.distributions.Distribution):
                                 out = out.mean
                             for j, img in enumerate(out[0]):
@@ -506,7 +508,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             save_and_log_img(dbatch, f"Data/{name}", runPath, display_data_fs[m], itercount, run)
 
                         if getattr(mod, "masked_autoencoder", False):
-                            for m, (name, dbatch) in enumerate(zip(modality, model_outs[1])):
+                            for m, (name, dbatch) in enumerate(zip(modality, model_outs["Xhat"])):
                                 save_and_log_img(dbatch, f"Reconstruction/{name}", runPath, display_data_fs[m], itercount, run)
 
                             # Perform a full reconstruction (no masking)
@@ -519,7 +521,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 save_and_log_img(x, f"Reconstruction_Full/{name}", runPath, display_data_fs[m],
                                                  itercount, run)
 
-                            for m, (name, dbatch, mask) in enumerate(zip(modality, data, model_outs[0][3])):
+                            for m, (name, dbatch, mask) in enumerate(zip(modality, data, model_outs["masks"])):
                                 dbatch = dbatch.detach().cpu()
                                 dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
 
@@ -599,12 +601,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             real_disc_outs = torch.cat(disc(data), dim=0)
                             save_and_log_img(real_disc_outs.detach().cpu(), f"Discriminator/real", runPath, None, itercount,
                                              run)
-                            if isinstance(model_outs[1][0], list):
-                                for m, px_u in enumerate(model_outs[1]):
+                            if isinstance(model_outs["Xhat"][0], list):
+                                for m, px_u in enumerate(model_outs["Xhat"]):
                                     fake_disc_out = torch.cat(disc(px_u), dim=0)
                                     save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake_m{m}", runPath, None, itercount, run)
                             else:
-                                fake_disc_out = torch.cat(disc(model_outs[1]), dim=0)
+                                fake_disc_out = torch.cat(disc(model_outs["Xhat"]), dim=0)
                                 save_and_log_img(fake_disc_out.detach().cpu(), f"Discriminator/fake", runPath, None,
                                                  itercount,
                                                  run)

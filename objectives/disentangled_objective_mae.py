@@ -93,7 +93,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
 
         model_params["quantise"] = iteration > self.start_vq
 
-        W, Z, z_comb, Xhat, masks, q_loss, min_encs = model("forward", X, **model_params)
+        W, Z, z_comb, cls_tokens, Xhat, masks, q_loss, min_encs = model("forward", X, **model_params)
         px_us = [self.mod.lik_dists[d](Xhat[d].unsqueeze(0), **self.mod.lik_dist_params[d]) for d in range(len(X))]
         print(f"nans: {[torch.any(torch.isnan(Xh)) for Xh in X]}")
 
@@ -197,7 +197,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         lws = torch.stack(lws, dim=-1)
         print(f"lws shape: {lws.shape}")
 
-        return lws, loss_dict, ((W, Z, z_comb, masks, min_encs), Xhat)
+        return lws, loss_dict, {"W": W, "Z": Z, "z_comb": z_comb, "cls_tokens": cls_tokens, "masks": masks, "min_encs": min_encs, "Xhat": Xhat}
 
 
     def forward(self, model, x, iteration=0, model_params={}, **kwargs):

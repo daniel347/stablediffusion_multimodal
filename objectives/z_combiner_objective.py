@@ -94,7 +94,7 @@ class ZCombinerObj(torch.nn.Module):
             loss_dict["mmd_zw"] -= lmmd_zw_r.detach().cpu().sum().item()
             lws[0] = lws[0] - lmmd_zw_r * self.mmd_ww_weight
 
-        return torch.stack(lws), torch.stack(us), loss_dict, (posteriors, recons, us)
+        return torch.stack(lws), torch.stack(us), loss_dict, {"U_dist": posteriors, "Xhat": recons, "U_samp": us}
 
     def forward(self, model, x, K=1, test=False, **kwargs):
         S = x[0].shape[0] # compute_microbatch_split(x, K)

@@ -224,7 +224,7 @@ class DisentanglingObjectiveGradNorm(torch.nn.Module):
         # stack loss type
         lws = [torch.stack(lw, -1) for lw in lws]
 
-        return torch.stack(lws), torch.stack(uss), loss_dict, (qu_xs, px_us, uss)
+        return torch.stack(lws), torch.stack(uss), loss_dict, {"U_dist": qu_xs, "Xhat": px_us, "U_samp": uss}
 
     def set_l0(self, l0):
         self.l0 = l0.clone().detach()

@@ -62,7 +62,7 @@ class NonDisentanglingObjective(torch.nn.Module):
                 lw = lw - al * self.wadversary
                 loss_dict["adversarial_loss"] -= al.detach().cpu().sum().item() * self.wadversary
 
-        return lw.unsqueeze(0), torch.stack(uss), loss_dict, (qu_xs, px_us, uss)
+        return lw.unsqueeze(0), torch.stack(uss), loss_dict, {"U_dist": qu_xs, "Xhat": px_us, "U_samp": uss}
 
     def forward(self, model, x, K=1, test=False, **kwargs):
         S = x[0].shape[0]  # compute_microbatch_split(x, K)

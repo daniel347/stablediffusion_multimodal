@@ -198,7 +198,7 @@ class DisentanglingObjective(torch.nn.Module):
             lws[r] = lws[r] - lcos_zw_r * self.cos_ww_weight
             lws[r] = lws[r] - lcos_ww_r * self.cos_zw_weight
 
-        return torch.stack(lws), torch.stack(uss), loss_dict, (qu_xs, px_us, uss)
+        return torch.stack(lws), torch.stack(uss), loss_dict, {"U_dist": qu_xs, "Xhat": px_us, "U_samp": uss}
 
     def forward(self, model, x, K=1, test=False, **kwargs):
         S = x[0].shape[0]  # compute_microbatch_split(x, K)
