@@ -23,9 +23,9 @@ params:
     target: mae.models_disentangling_mae.DisMAE
     params:
       z_mode: "random"  # one of ["average", "random" or "z_combiner" ]
-      lik_dists: [ "torch.distributions.Laplace"]
+      lik_dists: [ "torch.distributions.Laplace"]  # Laplace = L1 loss, Normal = L2 loss
       lik_dist_params:
-        - scale: 0.01
+        - scale: 1
       w_len: 384
       z_len: 384
       scale_per_channel: false

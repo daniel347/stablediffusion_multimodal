@@ -35,6 +35,7 @@ import torchvision.utils as tvu
 import cmmd_pytorch as cmmd
 from itertools import product
 import math
+import timm.optim.optim_factory as optim_factory
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.modules.ema import DummyEMA
@@ -104,6 +105,7 @@ def initialise_model(conf):
         for vae in model.vaes:
             ignore_keys = ["patch_embed.proj", "decoder_pred"] if vae.in_chans != 3 else []
             ignore_keys += ["pos_embed"]
+            ignore_keys += ["norm.weight", "norm.bias"] if vae.norm.weight.shape[-1] != vae.embed_dim else []
             mae = copy.deepcopy(mae_state_dict["model"])
             keys = list(mae.keys())
             for k in keys:
@@ -239,10 +241,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             optim_args = [{"params": vae.decoder.parameters(), "lr": conf.training.lr_decoder} for vae in vaes]
             optim_args += [{"params": vae.post_quant_conv.parameters(), "lr": conf.training.lr_decoder} for vae in vaes]
             optim_args += [{"params": mod.z_comb_net.parameters(), "lr": conf.training.lr}]
+            # TODO: Add weight decay here?
             optimizer = optim.Adam(optim_args, lr=conf.training.lr, amsgrad=True)
         else:
-            optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()),
-                                   lr=conf.training.lr, amsgrad=True)
+            param_groups = optim_factory.param_groups_weight_decay(model, conf.training.weight_decay)
+            param_groups = [{"params": filter(lambda p: p.requires_grad, pg["params"]), "weight_decay": pg["weight_decay"]} for pg in param_groups]
+            optimizer = optim.AdamW(param_groups, lr=conf.training.lr, amsgrad=True)
 
         scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=10),
                                       ExponentialLR(optimizer, 0.99)])

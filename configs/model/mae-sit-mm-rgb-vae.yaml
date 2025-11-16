@@ -3,18 +3,18 @@ params:
   path_type: "Linear"
   prediction: "velocity"
   loss_weight: null
-  input_shape: [384, 8, 8]
+  input_shape: [32, 8, 8]
 
   scorenet_config:
     target: SiT.models.SiT
     params:
       depth: 12
-      hidden_size: 384
+      hidden_size: 768
       patch_size: 1  # put tokens in directly ( with projection )
       num_heads: 12
       input_size: 8
       num_classes: null
-      in_channels: 384
+      in_channels: 32
       learn_sigma: False
       n_cls_tokens: 1
       use_fp16: False
@@ -25,11 +25,12 @@ params:
       z_mode: "random"  # one of ["average", "random" or "z_combiner" ]
       lik_dists: [ "torch.distributions.Laplace"]
       lik_dist_params:
-        - scale: 0.01
-      w_len: 192
-      z_len: 192
+        - scale: 1
+      w_len: 16
+      z_len: 16
       scale_per_channel: false
       is_variational: true
+      predict_logvar: false  # ~1e-3 std
       ckpt_path:
 
       vae_params:
@@ -38,10 +39,11 @@ params:
             img_size: 128
             patch_size: 16
             in_chans: 3
-            embed_dim: 384
+            embed_dim: 768
             depth: 8
             num_heads: 12
             decoder_embed_dim: 512
             decoder_depth: 8
             decoder_num_heads: 16
             mlp_ratio: 4
+            latent_dim: 32

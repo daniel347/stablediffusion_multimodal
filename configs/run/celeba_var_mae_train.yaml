@@ -11,24 +11,26 @@ training:
   patience: 60  # dont early stop
         
   model_opts:
-    total_mask_ratio: 0.5
-    shared_mask_ratio: 0.75
+    total_mask_ratio: 0.75
+    shared_mask_ratio: 1.0
 
-  test_every_iter: 3000
+  test_every_iter: 30
   objective:
     params:        
       start_adv_iter: 2000
-      wadversary: 50
+      wadversary: 0.1
+      wlpips: [1.0]
       mmd_zw_weight: 0.0
-      kl_weight: 0.1
+      wll: 1.0
+      kl_weight: 1e-6
 
   discriminator:
     discriminator_lr: 4e-4
 
-model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_14__09_39_14_celeba_var_mae_train/model_6000.pt"
+model_initialisation:  # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_14__09_39_14_celeba_var_mae_train/model_6000.pt"
 init_from_stable_diffusion: False
-init_from_mae: False
-resume_training: True
+init_from_mae: True
+resume_training: False
 
 
 defaults:
