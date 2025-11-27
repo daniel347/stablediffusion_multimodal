@@ -1,0 +1,4 @@
+dataset_name: nyu_depth
+root_data_dir: ../datasets/nyuv2_processed/
+input_size: 128
+modality: ["colour", "depth"]

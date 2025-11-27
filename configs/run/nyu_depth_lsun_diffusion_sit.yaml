@@ -1,0 +1,24 @@
+# @package _global_
+
+name: "sit_diff"
+notes: "We retrain our best nyu lsun autoencoder using the SiT diffusion model."
+
+function:
+  name: training_loop
+  kwargs: {}
+
+training:
+  num_epochs: 48
+  resume_training: False
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: "output_checkpoints/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt" # "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt"
+model_initialisation:
+
+defaults:
+  - override /model: sit-mm-rgb-depth
+  - override /sampler: ddpm
+  - _self_
