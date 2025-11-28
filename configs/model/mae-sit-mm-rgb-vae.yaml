@@ -37,13 +37,14 @@ params:
         - target: mae.models_mae.MaskedAutoencoderViT  # RGB images
           params:
             img_size: 128
-            patch_size: 16
+            patch_size: 8
             in_chans: 3
-            embed_dim: 768
+            embed_dim: 192
             depth: 8
             num_heads: 12
-            decoder_embed_dim: 512
-            decoder_depth: 8
-            decoder_num_heads: 16
+            decoder_embed_dim: 192
+            decoder_depth: 12
+            decoder_num_heads: 12
             mlp_ratio: 4
             latent_dim: 32
+            smooth_output: True

@@ -29,7 +29,7 @@ training:
 
 model_initialisation:  # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_14__09_39_14_celeba_var_mae_train/model_6000.pt"
 init_from_stable_diffusion: False
-init_from_mae: True
+init_from_mae: False
 resume_training: False
 
 
