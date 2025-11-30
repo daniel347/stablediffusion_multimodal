@@ -30,7 +30,7 @@ params:
       z_len: 16
       scale_per_channel: false
       is_variational: true
-      predict_logvar: false  # ~1e-3 std
+      predict_logvar: true  # ~1e-3 std
       ckpt_path:
 
       vae_params:
