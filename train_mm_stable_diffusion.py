@@ -435,7 +435,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if getattr(model_first_stage, "masked_autoencoder", False):
             mae_latent_disp = DisplayMAELatent()
 
-        n_cls_tokens = model_scorenet.n_cls_tokens
+        n_cls_tokens = getattr(model_scorenet, "n_cls_tokens", 0)
 
         def fit_mae_latent_disp(dataloaders, split="train", n_batches=20):
             data_loader = dataloaders["train_loader" if split == "train" else "test_loader"]

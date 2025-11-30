@@ -49,7 +49,7 @@ def uniform_on_device(r1, r2, shape, device):
 class DDPM(pl.LightningModule):
     # classic DDPM with Gaussian diffusion, in image space
     def __init__(self,
-                 unet_config,
+                 scorenet_config,
                  timesteps=1000,
                  beta_schedule="linear",
                  loss_type="l2",
@@ -94,7 +94,7 @@ class DDPM(pl.LightningModule):
 
         self.use_positional_encodings = use_positional_encodings
 
-        self.model = instantiate_from_config(unet_config)
+        self.model = instantiate_from_config(scorenet_config)
         count_params(self.model, verbose=True)
         self.use_ema = use_ema
         if self.use_ema:
