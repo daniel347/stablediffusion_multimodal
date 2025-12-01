@@ -23,7 +23,7 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/MM_CelebA_Autoencoder/2025_11_14__17_22_12_celeba_mae_train_resample_vq_warm_start/model_39000.pt"  # /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_14__17_22_12_celeba_mae_train_resample_vq_warm_start/model_39000.pt"  # /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/
 
 defaults:
   - override /model: mae-sit-mm-rgb-balanced

@@ -3,7 +3,7 @@ params:
   path_type: "Linear"
   prediction: "velocity"
   loss_weight: null
-  input_shape: [32, 8, 8]
+  input_shape: [192, 16, 16]
 
   scorenet_config:
     target: SiT.models.SiT
@@ -14,7 +14,7 @@ params:
       num_heads: 12
       input_size: 8
       num_classes: null
-      in_channels: 32
+      in_channels: 192
       learn_sigma: False
       n_cls_tokens: 1
       use_fp16: False
@@ -26,8 +26,8 @@ params:
       lik_dists: [ "torch.distributions.Laplace"]
       lik_dist_params:
         - scale: 1
-      w_len: 16
-      z_len: 16
+      w_len: 96  # 16
+      z_len: 96  # 16
       scale_per_channel: false
       is_variational: true
       predict_logvar: true  # ~1e-3 std
@@ -46,5 +46,4 @@ params:
             decoder_depth: 12
             decoder_num_heads: 12
             mlp_ratio: 4
-            latent_dim: 32
             smooth_output: True

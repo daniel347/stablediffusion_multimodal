@@ -19,7 +19,7 @@ training:
   test_every_iter: 3000
 
   precompute_latents: True
-  force_recompute: True
+  force_recompute: False
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute # ". ../../datasets/lsun"
   compute_latent_scale: True
   latent_scale_per_channel: True
