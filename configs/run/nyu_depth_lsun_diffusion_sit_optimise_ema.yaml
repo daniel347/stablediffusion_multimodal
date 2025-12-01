@@ -1,0 +1,33 @@
+# @package _global_
+
+name: "sit_diff_optimise_ema"
+notes: "We retrain our best nyu lsun autoencoder using the SiT diffusion model. we optimise EMA."
+
+function:
+  name: test_optimum_EMA
+  kwargs: {out_nimgs: [4752000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256}
+
+
+training:
+  num_epochs: 48
+  resume_training: False
+
+  precompute_latents: True
+  force_recompute: False
+  latent_scale_per_channel: True
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute
+  compute_latent_scale: True
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path:
+
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_11_28__11_02_56_sit_diff/model_81000.pt"
+
+defaults:
+  - override /ema: dummy_ema
+  - override /model: sit-mm-rgb-depth
+  - override /sampler: ddpm  # We dont actually use DDPM here we use the velocity parametrisation in SiT
+  - _self_
