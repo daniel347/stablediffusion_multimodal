@@ -117,9 +117,12 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
             full_masked = torch.prod(torch.stack(masks_img, dim=0), dim=0)
             w_unmasked = 1.0/(1.0 - torch.mean(masks_img[d], dim=(-1, -2)))
             w_fullmask = 1.0/(torch.mean(full_masked, dim=(-1, -2)))
-            w_shared = 1.0/ torch.mean((masks_img[d] - full_masked), dim=(-1, -2))
-            weight_mask = (1 - masks_img[d]) * w_unmasked + full_masked * w_fullmask + (masks_img[d] - full_masked) * w_shared
-            weight_mask.unsqueeze(1).expand(-1, X[d].shape[1], -1, -1).to(X[d].device)
+            w_shared = torch.nan_to_num(1.0/ torch.mean((masks_img[d] - full_masked), dim=(-1, -2)), 1.0, 1.0, 1.0)
+            weight_mask = (1 - masks_img[d]) * w_unmasked[:, None, None] + \
+                          full_masked * w_fullmask[:, None, None] + \
+                          (masks_img[d] - full_masked) * w_shared[:, None, None]
+            weight_mask = weight_mask / torch.mean(weight_mask, dim=(-1, -2), keepdim=True)
+            weight_mask = weight_mask.unsqueeze(1).expand(-1, X[d].shape[1], -1, -1).to(X[d].device)
 
             lpx_u = lpx_u + reconstruction_loss(px_u, X[d], self.mod.vaes[d].llik_scaling, loss_dict,
                                                 wlpips_d, wll_d, self.lpips,

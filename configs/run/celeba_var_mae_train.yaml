@@ -12,7 +12,7 @@ training:
   patience: 60  # dont early stop
         
   model_opts:
-    total_mask_ratio: 0.5
+    total_mask_ratio: 0.75
     shared_mask_ratio: 1.0
 
   test_every_iter: 30
