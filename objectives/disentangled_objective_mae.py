@@ -8,6 +8,7 @@ from .objective_util import compute_microbatch_split, reconstruction_loss, regis
     MMDIndependenceLoss, CosSimIndependenceLoss
 import pyiqa
 from mae.distribution import DiagonalGaussian
+import math
 
 eta = 1e-20
 
@@ -99,16 +100,33 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
 
         lws = []
 
+        """ Convert masks to image size for weighting"""
+        masks_img = []
+        n_patches = int(math.sqrt(masks[0].shape[-1]))
+        patch_size = self.mod.vaes[0].patch_embed.patch_size[0]
+        for mask in masks:
+            mask_out = mask.unsqueeze(1).reshape((*Xhat[0].shape[:1], n_patches, n_patches))
+            masks_img.append(mask_out.repeat_interleave(patch_size, dim=-1).repeat_interleave(patch_size, dim=-2).detach().cpu())
+
         # reconstruction loss
         lpx_u = 0
         for d, px_u in enumerate(px_us):
             wlpips_d = self.wlpips[d] if hasattr(self.wlpips, "__getitem__") else self.wlpips
             wll_d = self.wll[d] if hasattr(self.wll, "__getitem__") else self.wll
 
+            full_masked = torch.prod(torch.stack(masks_img, dim=0), dim=0)
+            w_unmasked = 1.0/(1.0 - torch.mean(masks_img[d], dim=(-1, -2)))
+            w_fullmask = 1.0/(torch.mean(full_masked, dim=(-1, -2)))
+            w_shared = 1.0/ torch.mean((masks_img[d] - full_masked), dim=(-1, -2))
+            weight_mask = (1 - masks_img[d]) * w_unmasked + full_masked * w_fullmask + (masks_img[d] - full_masked) * w_shared
+            weight_mask.unsqueeze(1).expand(-1, X[d].shape[1], -1, -1).to(X[d].device)
+
             lpx_u = lpx_u + reconstruction_loss(px_u, X[d], self.mod.vaes[d].llik_scaling, loss_dict,
                                                 wlpips_d, wll_d, self.lpips,
                                                 self.channel_weighting[d],
-                                                fail_on_nan=False, return_breakdown=True)
+                                                fail_on_nan=False,
+                                                return_breakdown=True,
+                                                maskweights=weight_mask)
         for a in range(lpx_u.shape[-1]):
             lws.append(lpx_u[:, :, a])
 
