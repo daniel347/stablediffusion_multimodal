@@ -1,15 +1,11 @@
 # @package _global_
 
 name: "sit_diff"
-notes: "We test SiT diffusion model with the code modifications for the mae (but test without mae)"
-
-function:
-  name: test_epoch
-  kwargs: {subepoch: 0, itercount: 0, epochcount: 0}
+notes: "We rerun the SiT diffusion model on CelebA since we forgot to save it from ephemeral"
 
 training:
   precompute_latents: True
-  force_recompute: False
+  force_recompute: True
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_low_l1_finetune
   latent_scale_per_channel: True
   compute_latent_scale: True
@@ -22,9 +18,9 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_30__20_39_50_low_l1_finetune_zcomb/model_2000.pt"
+        ckpt_path: "/rds/general/user/ds3119/home/multimodal_generation/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_30__20_39_50_low_l1_finetune_zcomb/model_2000.pt"
 
-model_initialisation: "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_11__16_00_55_sit_diff/model_it138000_ema_0.175.pt"  # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_02__21_45_25_sit_diff/model_48000.pt"
+model_initialisation:
 
 defaults:
   - override /model: sit-mm-rgb-semseg

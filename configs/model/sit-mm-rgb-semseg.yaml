@@ -16,10 +16,6 @@ params:
       num_classes: null
       in_channels: 6
       n_cls_tokens: 0
-
-  unet_config:
-    params:
-      num_classes: null
       use_fp16: false
 
   first_stage_config:
