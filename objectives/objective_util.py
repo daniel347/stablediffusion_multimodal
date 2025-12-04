@@ -90,17 +90,17 @@ def get_masked_weights(masks_img, X, d, w_unmasked=None, w_fullmask=None, w_shar
     if w_unmasked is None:
         w_unmasked = 1.0 / (1.0 - torch.mean(masks_img[d], dim=(-1, -2)))
     else:
-        w_unmasked = torch.ones(X[d].shape[0]).to(X[d].device) * w_unmasked
+        w_unmasked = torch.ones(X[d].shape[0]).to(masks_img[d].device) * w_unmasked
 
     if w_fullmask is None:
         w_fullmask = 1.0 / (torch.mean(full_masked, dim=(-1, -2)))
     else:
-        w_fullmask = torch.ones(X[d].shape[0]).to(X[d].device) * w_fullmask
+        w_fullmask = torch.ones(X[d].shape[0]).to(masks_img[d].device) * w_fullmask
 
     if w_shared is None:
         w_shared = torch.nan_to_num(1.0 / torch.mean((masks_img[d] - full_masked), dim=(-1, -2)), 1.0, 1.0, 1.0)
     else:
-        w_shared = torch.ones(X[d].shape[0]).to(X[d].device) * w_shared
+        w_shared = torch.ones(X[d].shape[0]).to(masks_img[d].device) * w_shared
 
     weight_mask = (1 - masks_img[d]) * w_unmasked[:, None, None] + \
                   full_masked * w_fullmask[:, None, None] + \
