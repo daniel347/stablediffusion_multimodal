@@ -6,13 +6,13 @@ name: "celeba_var_mae_train"
 notes: "We try training a variational MAE on CelebA."
 
 training:
-  weight_decay: 0.0
+  weight_decay: 0.05
   lr: 1e-4
   num_epochs: 60
   patience: 60  # dont early stop
         
   model_opts:
-    total_mask_ratio: 0.75
+    total_mask_ratio: 0.5
     shared_mask_ratio: 1.0
 
   test_every_iter: 30
