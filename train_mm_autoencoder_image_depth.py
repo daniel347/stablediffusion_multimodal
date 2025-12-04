@@ -424,7 +424,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         if i == 0:
                             for m, (name, dbatch) in enumerate(zip(modality, data)):
                                 dbatch = dbatch.detach().cpu()
-                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch[:64]], dim=0)
                                 grid = make_grid(dbatch, nrow=8)
                                 wandb.log({f"Data/{name}": wandb.Image(grid)}, step=itercount)
 
@@ -516,25 +516,25 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     if i == 0:  # select a different scene
                         for m, (name, dbatch) in enumerate(zip(modality, data)):
-                            save_and_log_img(dbatch, f"Data/{name}", runPath, display_data_fs[m], itercount, run)
+                            save_and_log_img(dbatch[:64], f"Data/{name}", runPath, display_data_fs[m], itercount, run)
 
                         if getattr(mod, "masked_autoencoder", False):
                             for m, (name, dbatch) in enumerate(zip(modality, model_outs["Xhat"])):
                                 save_and_log_img(dbatch, f"Reconstruction/{name}", runPath, display_data_fs[m], itercount, run)
 
                             # Perform a full reconstruction (no masking)
-                            W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model("encode", data, no_mask=True)
+                            W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model("encode", data[:64], no_mask=True)
                             z_comb = model("z_combine", Z, len_keep_shared, len_mask_unique, ids_restore)
                             z_comb, W, cls_tokens = model("sample_latent", z_comb, W, cls_tokens)
                             X, _, _ = model("decode", W, z_comb, ids_restore, cls_tokens, len_keep_shared, len_mask_unique)
 
                             for m, (name, x) in enumerate(zip(modality, X)):
-                                save_and_log_img(x, f"Reconstruction_Full/{name}", runPath, display_data_fs[m],
+                                save_and_log_img(x[:64], f"Reconstruction_Full/{name}", runPath, display_data_fs[m],
                                                  itercount, run)
 
                             for m, (name, dbatch, mask) in enumerate(zip(modality, data, model_outs["masks"])):
                                 dbatch = dbatch.detach().cpu()
-                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
+                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch[:64]], dim=0)
 
                                 patch_size = mod.vaes[0].patch_embed.patch_size[0]
                                 n_patches = int(math.sqrt(mod.vaes[0].patch_embed.num_patches))
@@ -542,7 +542,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 mask_out = mask.unsqueeze(1).expand((-1, 3, -1)).reshape((*dbatch.shape[:2], n_patches, n_patches))
                                 mask_out = mask_out.repeat_interleave(patch_size, dim=-1).repeat_interleave(patch_size, dim=-2).detach().cpu()
                                 dbatch = dbatch * (1 - mask_out)
-                                grid = make_grid(dbatch, nrow=8)
+                                grid = make_grid(dbatch[:64], nrow=8)
                                 wandb.log({f"DataMasked/{name}": wandb.Image(grid)}, step=itercount)
 
                         else:
