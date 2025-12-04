@@ -5,7 +5,7 @@ from numpy import prod
 
 from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
 from .objective_util import compute_microbatch_split, reconstruction_loss, register_objective, log_mean_exp, \
-    MMDIndependenceLoss, CosSimIndependenceLoss
+    MMDIndependenceLoss, CosSimIndependenceLoss, get_masked_weights
 import pyiqa
 from mae.distribution import DiagonalGaussian
 import math
@@ -34,6 +34,9 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                  stop_vq_resample=25000,  # stop resampling the codebook after this time
                  start_vq=6000,  # train for start_quantise iterations before enabling the qunatiser
                  vq_resample_noise=0.2,  # as a proportion of the MSE codebook error
+                 w_unmasked=None,
+                 w_fullmask=None,
+                 w_shared=None,
                  **kwargs):
         super(DisentanglingObjectiveMAE, self).__init__()
 
@@ -59,6 +62,10 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.stop_vq_resample = stop_vq_resample
         self.vq_resample_noise = vq_resample_noise
         self.start_vq = start_vq
+
+        self.w_unmasked = w_unmasked
+        self.w_fullmask = w_fullmask
+        self.w_shared = w_shared
 
         weights = [1.0, 1.0, self.wadversary, self.beta]
         for r in range(self.mod.n_modality):
@@ -114,15 +121,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
             wlpips_d = self.wlpips[d] if hasattr(self.wlpips, "__getitem__") else self.wlpips
             wll_d = self.wll[d] if hasattr(self.wll, "__getitem__") else self.wll
 
-            full_masked = torch.prod(torch.stack(masks_img, dim=0), dim=0)
-            w_unmasked = 1.0/(1.0 - torch.mean(masks_img[d], dim=(-1, -2)))
-            w_fullmask = 1.0/(torch.mean(full_masked, dim=(-1, -2)))
-            w_shared = torch.nan_to_num(1.0/ torch.mean((masks_img[d] - full_masked), dim=(-1, -2)), 1.0, 1.0, 1.0)
-            weight_mask = (1 - masks_img[d]) * w_unmasked[:, None, None] + \
-                          full_masked * w_fullmask[:, None, None] + \
-                          (masks_img[d] - full_masked) * w_shared[:, None, None]
-            weight_mask = weight_mask / torch.mean(weight_mask, dim=(-1, -2), keepdim=True)
-            weight_mask = weight_mask.unsqueeze(1).expand(-1, X[d].shape[1], -1, -1).to(X[d].device)
+            weight_mask = get_masked_weights(masks_img, X, d, self.w_unmasked, self.w_fullmask, self.w_shared)
 
             lpx_u = lpx_u + reconstruction_loss(px_u, X[d], self.mod.vaes[d].llik_scaling, loss_dict,
                                                 wlpips_d, wll_d, self.lpips,

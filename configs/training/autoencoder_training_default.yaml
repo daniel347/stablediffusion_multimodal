@@ -6,6 +6,10 @@ batch_size: 64
 num_epochs: 20
 patience: 4
 
+# Scheduler paraemters
+warmup_iters: 200
+restart_iters: 3000
+
 start_iter: 0
 K: 1
 

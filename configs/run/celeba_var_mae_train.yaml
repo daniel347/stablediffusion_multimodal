@@ -10,12 +10,13 @@ training:
   lr: 1e-4
   num_epochs: 60
   patience: 60  # dont early stop
+  batch_size: 256
         
   model_opts:
     total_mask_ratio: 0.5
     shared_mask_ratio: 1.0
 
-  test_every_iter: 30
+  test_every_iter: 300
   objective:
     params:        
       start_adv_iter: 2000
@@ -24,6 +25,9 @@ training:
       mmd_zw_weight: 0.0
       wll: 1.0
       kl_weight: 1e-6
+      # w_unmasked: 0.75
+      # w_masked: 0.25
+      # w_shared: 0.5
 
   discriminator:
     discriminator_lr: 4e-4

@@ -25,7 +25,7 @@ import torch
 from torch import optim
 from torchvision.transforms import v2, InterpolationMode
 from torchvision.utils import make_grid
-from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR
+from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR, CosineAnnealingWarmRestarts, SequentialLR
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import torch.multiprocessing as mp
@@ -248,8 +248,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             param_groups = [{"params": filter(lambda p: p.requires_grad, pg["params"]), "weight_decay": pg["weight_decay"]} for pg in param_groups]
             optimizer = optim.AdamW(param_groups, lr=conf.training.lr, amsgrad=True)
 
+        """
         scheduler = ChainedScheduler([LinearLR(optimizer, 0.1, 1, total_iters=10),
                                       ExponentialLR(optimizer, 0.99)])
+        """
+
+        warmup_sched = LinearLR(optimizer, start_factor=0.1, end_factor=1.0, total_iters=conf.training.warmup_iters)
+        cosine_sched = CosineAnnealingWarmRestarts(optimizer, T_0=conf.training.restart_iters, T_mult=2,
+                                                   eta_min=0.1 * conf.training.lr)
+        scheduler = SequentialLR(optimizer, schedulers=[warmup_sched, cosine_sched], milestones=[conf.training.warmup_iters])
 
         use_adversary = ("discriminator" in conf.training and conf.training.discriminator is not None)
         if use_adversary:
@@ -264,7 +271,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             train_discriminator_f = None
             assert conf.training.objective.params.wadversary == 0.0
 
-        scheduler_step_freq = 50
+        scheduler_step_freq = 1
 
         start_iter = conf.training.start_iter
 
@@ -412,7 +419,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         scheduler.step()
 
                     if enable_wandb:
-                        wandb.log({"Loss/train": loss}, step=itercount)
+                        wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr()[0]}, step=itercount)
                         wandb.log({f"Loss/train/breakdown/{key}": -val for key, val in loss_dict.items()}, step=itercount)
                         if i == 0:
                             for m, (name, dbatch) in enumerate(zip(modality, data)):

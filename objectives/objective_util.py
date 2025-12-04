@@ -84,6 +84,32 @@ def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, wll_d, lpips
     return lpx_u_elem
 
 
+def get_masked_weights(masks_img, X, d, w_unmasked=None, w_fullmask=None, w_shared=None):
+    full_masked = torch.prod(torch.stack(masks_img, dim=0), dim=0)
+
+    if w_unmasked is None:
+        w_unmasked = 1.0 / (1.0 - torch.mean(masks_img[d], dim=(-1, -2)))
+    else:
+        w_unmasked = torch.ones(X[d].shape[0]).to(X[d].device) * w_unmasked
+
+    if w_fullmask is None:
+        w_fullmask = 1.0 / (torch.mean(full_masked, dim=(-1, -2)))
+    else:
+        w_fullmask = torch.ones(X[d].shape[0]).to(X[d].device) * w_fullmask
+
+    if w_shared is None:
+        w_shared = torch.nan_to_num(1.0 / torch.mean((masks_img[d] - full_masked), dim=(-1, -2)), 1.0, 1.0, 1.0)
+    else:
+        w_shared = torch.ones(X[d].shape[0]).to(X[d].device) * w_shared
+
+    weight_mask = (1 - masks_img[d]) * w_unmasked[:, None, None] + \
+                  full_masked * w_fullmask[:, None, None] + \
+                  (masks_img[d] - full_masked) * w_shared[:, None, None]
+    weight_mask = weight_mask / torch.mean(weight_mask, dim=(-1, -2), keepdim=True)
+    weight_mask = weight_mask.unsqueeze(1).expand(-1, X[d].shape[1], -1, -1).to(X[d].device)
+    return weight_mask
+
+
 def get_adversarial_loss(px_u, discriminator, device):
     # print(f"nans in px_u: {[torch.any(torch.isnan(px.mode)) for px in px_u]}")
     if not hasattr(px_u, "__iter__"):
