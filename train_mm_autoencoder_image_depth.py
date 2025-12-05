@@ -867,7 +867,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             fig.savefig(str(runPath / "latents_pca_explained_var.png"))
 
         def test_noised_robustness():
-
+            pass
 
         def check_decoder_scaling():
             """We do a test to see if the decoder is more sensitive to low-std channels or if the low-std channels are ignored"""
