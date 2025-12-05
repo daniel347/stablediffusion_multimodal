@@ -15,6 +15,7 @@ function:
 dataset_name: nyu_depth
 
 training:
+  model_opts: {}
   test_every_iter: 3000 # test and save the model every so many iterations
   objective:
     params:

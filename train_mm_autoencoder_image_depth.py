@@ -866,8 +866,135 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             ax.set_title("PCA explained variance ratios")
             fig.savefig(str(runPath / "latents_pca_explained_var.png"))
 
-        def test_noised_robustness():
-            pass
+
+        def get_latent_scale_factor(n_batches=1, per_channel=True):
+
+            channel_means = 0
+            channel_vars = 0
+
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
+                                          position=rank if data_parallel else 0):
+                    data = move_data_to_device(dataT, device=device)
+
+                    latents = model.module("encode", data, avg_z=False, return_dist=False,
+                                           **model_opts) if data_parallel else model("encode", data, avg_z=False,
+                                                                                     return_dist=False, **model_opts)
+                    latents = torch.cat(latents, dim=1)
+
+                    avg_dims = [0, 2, 3]
+                    if not per_channel:
+                        avg_dims += [1]
+
+                    channel_means += latents.mean(dim=avg_dims)
+                    channel_vars += latents.var(dim=avg_dims)
+
+                    if i >= n_batches:
+                        break
+
+            channel_means = channel_means / i
+            channel_stds = torch.sqrt(channel_vars / i)
+
+            return channel_means, channel_stds
+
+
+        def test_noised_robustness(metrics=["fid", "kid"], latent_noise_stds=[0.0, 0.01, 0.02, 0.05, 0.1]):
+            mod = model.module.module if data_parallel else model.module
+            mod.use_z_comb_network = True  # assume we are using a model with trained z combiner
+
+            tempdirs = {}
+            for mode in modality:
+                tempdir = runPath / f'temp_fid_{mode}'
+                tempdir.mkdir(parents=True, exist_ok=True)
+                tempdirs[mode] = tempdir
+
+            lpips = pyiqa.create_metric("lpips", device=device)
+
+            channel_means, channel_stds = get_latent_scale_factor(n_batches=100, per_channel=True)
+            mod.latent_mean = torch.nn.Parameter(channel_means)
+            mod.latent_scale = torch.nn.Parameter(channel_stds)
+            print(f"set a latent mean of: {channel_means} and scale of: {channel_stds}")
+
+            for itercount, std in enumerate(latent_noise_stds):
+                losses = {"mse": [[] for _ in modality], "lpips": [[] for _ in modality]}
+
+                with (torch.no_grad(), ema.ema_scope("Epoch test")):
+                    for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
+                        data = move_data_to_device(dataT, device=device)
+
+                        latents = model.module("encode", data, avg_z=False, return_dist=False,
+                                               **model_opts) if data_parallel else model("encode", data, avg_z=False,
+                                                                                         return_dist=False, **model_opts)
+
+
+                        u = torch.cat(latents, dim=1)
+                        u = mod.scale_latents(u)
+                        u_noised = u + std * torch.randn_like(u)
+                        u_noised = mod.scale_latents(u_noised, reverse=True)
+
+                        reconstructions = model.module("decode", u_noised, **model_opts) if data_parallel else model("decode", u_noised,
+                                                                                                              **model_opts)
+
+                        if i == 0 and enable_wandb:
+                            for m, (name, dbatch) in enumerate(zip(modality, data)):
+                                save_and_log_img(dbatch[:64], f"Data/{name}", runPath, display_data_fs[m], itercount,
+                                                 run)
+
+                            for k in range(NUM_VAES):
+                                save_and_log_img(reconstructions[k], f'Reconstructions/m{k}',
+                                                 runPath, display_data_fs[k], itercount, run)
+
+                        mses = [torch.nn.functional.mse_loss(d, r.mean) for d, r in zip(data, reconstructions)]
+                        lpips_loss = [lpips(d, r.mean) for d, r in zip(data, reconstructions)]
+
+                        for m, mode in enumerate(modality):
+                            losses["mse"].append(mses[m].detach().cpu())
+                            losses["lpips"].append(lpips_loss[m].detach().cpu())
+
+                        for m, name in enumerate(modality):
+                            out = reconstructions[m]
+                            if isinstance(out, torch.distributions.Distribution):
+                                out = out.mean
+                            for j, img in enumerate(out[0]):
+                                s_disp = display_data_fs[m](img.detach().cpu())
+                                tvu.save_image(s_disp, str(
+                                    tempdirs[name] / f"sample_{name}_{i * conf.training.batch_size + j}.png"))
+
+                wandb_data = {"latent_noise_std": std}
+
+                metric_scores = {}
+                for met in metrics:
+                    if met == "cmmd":
+                        metric = partial(cmmd.compute_cmmd, device=device)
+                    else:
+                        metric = pyiqa.create_metric(met, device=device)
+
+                    scores = []
+                    for mod in modality:
+                        if mod in ["colour", "depth"]:
+                            split = "test" if dataset_name == "nyu_depth" else "all" if dataset_name == "mm_celeba" else "val"
+                            score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=128, dataset_split=split, center_crop=True)
+                            wandb_data[f"{met}_{mod}"] = score
+                            scores.append(score)
+                            print(f'====> {met} {mod}: {score:.2f}')
+                        else:
+                            scores.append(None)
+
+                    metric_scores[met] = scores
+
+                for l, val in losses:
+                    scores = []
+                    for m in range(len(modality)):
+                        score = torch.mean(torch.stack(val[m])).item()
+                        scores.append(score)
+                        wandb_data[f"{l}_{mod}"] = score
+                        print(f'====> {l} {mod}: {score:.2f}')
+
+                    metric_scores[l] = scores
+
+                if enable_wandb:
+                    wandb.log(wandb_data, step=itercount)
+
 
         def check_decoder_scaling():
             """We do a test to see if the decoder is more sensitive to low-std channels or if the low-std channels are ignored"""
