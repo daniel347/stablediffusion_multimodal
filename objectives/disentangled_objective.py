@@ -54,7 +54,7 @@ class DisentanglingObjective(torch.nn.Module):
         self.cos_zw_weight = cos_zw_weight
         self.cos_ww_weight = cos_ww_weight
 
-    def _m_dreg(self, model, x, K=1, test=False, iteration=0):
+    def _m_dreg(self, model, x, K=1, test=False, iteration=0, **kwargs):
 
         qu_xs, px_us, uss = model("self_and_cross_modal_generation_forward", x, K) if test else model("forward", x, K)
 

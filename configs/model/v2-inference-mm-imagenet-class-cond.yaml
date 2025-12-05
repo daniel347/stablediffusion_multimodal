@@ -16,7 +16,7 @@ params:
   use_ema: False
   reset_num_ema_updates: False
 
-  unet_config:
+  scorenet_config:
     target: ldm.modules.diffusionmodules.openaimodel.UNetModel
     params:
       use_checkpoint: False
@@ -24,7 +24,7 @@ params:
       image_size: 16 # unused
       in_channels: 6
       out_channels: 6
-      model_channels: 320
+      model_channels: 128  # used to be 320
       attention_resolutions: [ 4, 2, 1 ]
       num_res_blocks: 2
       channel_mult: [ 1, 2, 4, 4 ]
@@ -42,6 +42,7 @@ params:
       prior_dist: normal
       latent_channel_z: 2
       latent_channel_w: 2
+      cross_w_mode: "sample"
       ckpt_path:
       avg_z: False
       all_combinations: False
@@ -88,7 +89,7 @@ params:
           params:
             embed_dim: 4
             monitor: val/rec_loss
-            embed_spatial_dim: 32
+            embed_spatial_dim: 16
             conform_to_3_channel: true  # perform deterministic repetition and averaging to
             # convert 1 channel to 3 channels and back, so we may start from pretrained encoder
             llik_scaling: 5

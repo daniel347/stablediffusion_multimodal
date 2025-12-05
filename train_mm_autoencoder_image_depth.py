@@ -457,7 +457,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print(loss_series)
             return epochcount, train_pbar
 
-        def test(subepoch, itercount, epochcount, compute_metrics=False, metrics=["fid", "kid"]):
+        def test(subepoch, itercount, epochcount, compute_metrics=False, metrics=["fid", "kid"], latent_noise_std=0.0):
             b_loss = 0
             loss_series = None
 
@@ -865,6 +865,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             ax.semilogy(explained_var)
             ax.set_title("PCA explained variance ratios")
             fig.savefig(str(runPath / "latents_pca_explained_var.png"))
+
+        def test_noised_robustness():
+
 
         def check_decoder_scaling():
             """We do a test to see if the decoder is more sensitive to low-std channels or if the low-std channels are ignored"""
