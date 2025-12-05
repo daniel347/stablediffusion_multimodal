@@ -520,10 +520,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                         if getattr(mod, "masked_autoencoder", False):
                             for m, (name, dbatch) in enumerate(zip(modality, model_outs["Xhat"])):
-                                save_and_log_img(dbatch, f"Reconstruction/{name}", runPath, display_data_fs[m], itercount, run)
+                                save_and_log_img(dbatch[:64], f"Reconstruction/{name}", runPath, display_data_fs[m], itercount, run)
 
                             # Perform a full reconstruction (no masking)
-                            W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model("encode", data[:64], no_mask=True)
+                            W, Z, ids_restore, cls_tokens, len_keep_shared, len_mask_unique, masks = model("encode", data, no_mask=True)
                             z_comb = model("z_combine", Z, len_keep_shared, len_mask_unique, ids_restore)
                             z_comb, W, cls_tokens = model("sample_latent", z_comb, W, cls_tokens)
                             X, _, _ = model("decode", W, z_comb, ids_restore, cls_tokens, len_keep_shared, len_mask_unique)
@@ -534,7 +534,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                             for m, (name, dbatch, mask) in enumerate(zip(modality, data, model_outs["masks"])):
                                 dbatch = dbatch.detach().cpu()
-                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch[:64]], dim=0)
+                                dbatch = torch.stack([display_data_fs[m](d) for d in dbatch], dim=0)
 
                                 patch_size = mod.vaes[0].patch_embed.patch_size[0]
                                 n_patches = int(math.sqrt(mod.vaes[0].patch_embed.num_patches))
