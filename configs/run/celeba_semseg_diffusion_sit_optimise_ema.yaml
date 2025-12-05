@@ -1,11 +1,11 @@
 # @package _global_
 
-name: "sit_diff_long_ema_opt"
-notes: "We optimise EMA for the SiT diffusion with our disentangling autoencoder after finetuning the z combiner to be more realistic. We have trained the diffusion model for a long time"
+name: "sit_diff_ema_opt"
+notes: "We optimise EMA for the SiT diffusion with our disentangling autoencoder after finetuning the z combiner to be more realistic. We saved models every 5000 iter, which is an annoying difference but we'll if it it matters"
 
 function:
   name: test_optimum_EMA
-  kwargs: {out_nimgs: [20376000, 9936000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256}
+  kwargs: {out_nimgs: [2880000], out_stds: [0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256}
 
 training:
   precompute_latents: True
@@ -22,7 +22,7 @@ model:
       params:
         ckpt_path:
 
-model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_11__16_00_55_sit_diff/model_283000.pt" 
+model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_12_04__21_15_57_sit_diff/model_40000.pt" 
 
 defaults:
   - override /model: sit-mm-rgb-semseg
