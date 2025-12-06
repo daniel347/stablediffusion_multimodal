@@ -19,7 +19,7 @@ print("Found {} colour images and {} depth images".format(len(colour_imgs), len(
 fid = pyiqa.create_metric("fid", device=device)
 
 generate_reference_statistics(dir=None,
-                              files=depth_imgs,
+                              files=colour_imgs,
                               name="nyu_depth_lsun_colour",
                               model=fid.net.model,
                               device=device,
@@ -56,7 +56,7 @@ generate_reference_statistics(dir=None,
                               )
 
 generate_reference_statistics(dir=None,
-                              files=colour_imgs,
+                              files=depth_imgs,
                               name="nyu_depth_lsun_depth",
                               model=kid.net.model,
                               device=device,

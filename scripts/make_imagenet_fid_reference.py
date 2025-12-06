@@ -2,6 +2,7 @@ import pyiqa
 import torch
 from pyiqa.archs.fid_arch import generate_reference_statistics
 import glob
+from torchvision.transforms import v2
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -19,14 +20,48 @@ generate_reference_statistics(dir=None,
                               name="imagenet_colour",
                               model=fid.net.model,
                               device=device,
-                              center_crop=True)
+                              split="val",
+                              center_crop=True,
+                              res=128,
+                              intermediate_resize=v2.Resize((128, 128))
+                              )
 
 generate_reference_statistics(dir=None,
-                              files=colour_imgs,
+                              files=depth_imgs,
                               name="imagenet_depth",
                               model=fid.net.model,
                               device=device,
-                              center_crop=True)
+                              split="val",
+                              center_crop=True,
+                              res=128,
+                              intermediate_resize=v2.Resize((128, 128))
+                              )
+
+kid = pyiqa.create_metric("kid", device=device)
+
+generate_reference_statistics(dir=None,
+                              files=colour_imgs,
+                              name="imagenet_colour",
+                              model=kid.net.model,
+                              device=device,
+                              split="val",
+                              metric="KID",
+                              center_crop=True,
+                              res=128,
+                              intermediate_resize=v2.Resize((128, 128))
+                              )
+
+generate_reference_statistics(dir=None,
+                              files=depth_imgs,
+                              name="imagenet_depth",
+                              model=kid.net.model,
+                              device=device,
+                              split="val",
+                              metric="KID",
+                              center_crop=True,
+                              res=128,
+                              intermediate_resize=v2.Resize((128, 128))
+                              )
 
 
 
