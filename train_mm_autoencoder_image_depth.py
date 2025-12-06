@@ -955,7 +955,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             out = reconstructions[m]
                             if isinstance(out, torch.distributions.Distribution):
                                 out = out.mean
-                            for j, img in enumerate(out[0]):
+                            for j, img in enumerate(out):
                                 s_disp = display_data_fs[m](img.detach().cpu())
                                 tvu.save_image(s_disp, str(
                                     tempdirs[name] / f"sample_{name}_{i * conf.training.batch_size + j}.png"))
@@ -973,7 +973,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     for mod in modality:
                         if mod in ["colour", "depth"]:
                             split = "test" if dataset_name == "nyu_depth" else "all" if dataset_name == "mm_celeba" else "val"
-                            score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=128, dataset_split=split, center_crop=True)
+                            score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
                             wandb_data[f"{met}_{mod}"] = score
                             scores.append(score)
                             print(f'====> {met} {mod}: {score:.2f}')

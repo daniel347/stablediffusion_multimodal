@@ -24,6 +24,7 @@ training:
       mmd_zw_weight: 3500.0
       mmd_ww_weight: 3000.0
 
+
 model_initialisation: # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
 resume_training: false
 init_from_stable_diffusion: True
