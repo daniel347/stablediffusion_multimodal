@@ -982,7 +982,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                     metric_scores[met] = scores
 
-                for l, val in losses:
+                for l, val in enumerate(losses):
                     scores = []
                     for m in range(len(modality)):
                         score = torch.mean(torch.stack(val[m])).item()
