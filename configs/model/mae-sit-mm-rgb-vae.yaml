@@ -26,8 +26,8 @@ params:
       lik_dists: [ "torch.distributions.Laplace"]
       lik_dist_params:
         - scale: 1
-      w_len: 96  # 16
-      z_len: 96  # 16
+      w_len: 16  # 96
+      z_len: 16  # 96 
       scale_per_channel: false
       is_variational: true
       predict_logvar: true  # ~1e-3 std
@@ -47,3 +47,4 @@ params:
             decoder_num_heads: 12
             mlp_ratio: 4
             smooth_output: True
+            latent_dim: 32

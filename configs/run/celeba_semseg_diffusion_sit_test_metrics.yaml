@@ -1,6 +1,6 @@
 # @package _global_
 
-name: "sit_diff_long_test_metrics"
+name: "sit_diff_test_metrics"
 notes: "We compute generation metrics for the SiT diffusion using the ode sampler"
 
 function:
@@ -27,7 +27,7 @@ model:
         atol: 2.5e-7
         rtol: 2.5e-4
 
-model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_10_11__16_00_55_sit_diff/model_it138000_ema_0.200.pt" 
+model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_12_04__21_15_57_sit_diff/model_it40000_ema_0.125.pt" 
 
 defaults:
   - override /model: sit-mm-rgb-semseg

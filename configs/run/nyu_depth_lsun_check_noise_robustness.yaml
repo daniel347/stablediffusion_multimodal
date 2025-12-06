@@ -4,6 +4,8 @@ name: "nyu_lsun_noise_robustness"
 notes: "We check the latent quality of NYU depth autoencoder with varying noise levels"
 outputdir: ../outputs
 
+dataset_name: nyu_depth_lsun
+
 function:
   name: test_noised_robustness
   kwargs: {}

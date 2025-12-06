@@ -30,7 +30,7 @@ resume_training: false
 init_from_stable_diffusion: True
 
 defaults:
-  - data: imagenet_local
+  - data: imagenet
   - model: v2-inference-mm-imagenet-class-cond
   - training: autoencoder_training_default
   - override training/discriminator: mm_joint_discriminator_rgb_depth
