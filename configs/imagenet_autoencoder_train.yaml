@@ -4,9 +4,9 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "ImageNet_Autoencoder"
 print_freq: 50
-outputdir: ../outputs # /rds/general/user/ds3119/ephemeral/outputs
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
 name: "imagenet_ae"
-notes: "We try training our best model on NYU depth and LSUN"
+notes: "We try training our best model on Imagenet"
 
 function:
   name: training_loop
@@ -27,9 +27,10 @@ training:
       beta: 1e-6
       z_close_weight: 0.2
 
-model_initialisation: # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
-resume_training: false
-init_from_stable_diffusion: True
+model_initialisation: "/rds/general/user/ds3119/home/multimodal_generation/outputs/ImageNet_Autoencoder/checkpoints/2025_12_06__11_04_50_imagenet_ae/model_1000.pt" 
+# "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
+resume_training: True
+init_from_stable_diffusion: False
 
 defaults:
   - data: imagenet
