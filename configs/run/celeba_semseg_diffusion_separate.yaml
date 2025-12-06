@@ -1,0 +1,32 @@
+# @package _global_
+
+name: "sample_latents_finetuned_z_comb"
+notes: "We train diffusion on a stable diffusion based autoencoder with separate latents for rgb and semseg. We finetune from the model trained with latent sampling"
+
+function:
+  name: training_loop
+  kwargs: {}
+
+training:
+  precompute_latents: True
+  force_recompute: False
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_separate
+  latent_scale_per_channel: True
+  compute_latent_scale: True
+
+  num_epochs: 48
+
+  resume_training: True
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path:
+
+model_initialisation:
+init_vae_from_stable_diffusion: True
+
+defaults:
+  - override /model: v2-inference-mm-rgb-semseg-non-disentangled
+  - _self_

@@ -1,0 +1,21 @@
+# @package _global_
+
+name: "test_sd_vae_separable"
+notes: "We test the performance of stable diffusion autoencoders applied directly in separable fashion"
+
+function:
+  name: test
+  params: {subepoch: 0, itercount: 0, epochcount: 0, metrics: ["fid", "kid", "tce", "tie", "cmmd"]}
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: null
+
+model_initialisation:
+init_from_stable_diffusion: True
+
+defaults:
+  - override /model: v2-inference-mm-non-disentangled-seperable
+  - _self_

@@ -46,7 +46,7 @@ class NonDisentanglingObjective(torch.nn.Module):
                 px_u = px_u[r]   # if we return a 2D list just take the diagonal
             wlpips_r = self.wlpips[r] if hasattr(self.wlpips, "__getitem__") else self.wlpips
             wll_r = self.wll[r] if hasattr(self.wll, "__getitem__") else self.wll
-            lpx_u = reconstruction_loss(px_u, x[r], self.mod.llik_scales[r], loss_dict, wlpips_r, wll_r, self.lpips, self.channel_weighting[r])
+            lpx_u = reconstruction_loss(px_u, x[r], self.mod.llik_scales[r], loss_dict, wlpips_r, wll_r, self.lpips, self.channel_weighting[r], legacy=True)
             lw = lw + lpx_u
 
         # KL divergence loss

@@ -48,7 +48,11 @@ class NonDisentanglingAE(nn.Module):
         assert (lik_dist_splits is not None and lik_dists is not None) or seperable, "When seperable=False this class expects likelihood distribution outputs"
         if not seperable:
             vae_params[0]["params"]["return_lik_dist"] = False  # we handle potentially multiple distributions in this class
-        self.vaes = nn.ModuleList([instantiate_from_config(params) for params in vae_params])  # List of unimodal VAEs (one for each modality)
+
+        vae_params_dicts = OmegaConf.to_container(vae_params)
+        for params, ld in zip(vae_params_dicts, lik_dists):
+            params["params"]["likelihood_dist"] = ld
+        self.vaes = nn.ModuleList([instantiate_from_config(params) for params in vae_params_dicts])  # List of unimodal VAEs (one for each modality)
         self.modelName = None  # Filled-in in subclass
 
         self.u_channels = latent_channel_u
@@ -85,6 +89,7 @@ class NonDisentanglingAE(nn.Module):
         self.can_cross_generate = False
         self.can_sample = False
         self.factorised_latent_space = False
+        self.all_combinations = False
 
         self.seperable = seperable
 

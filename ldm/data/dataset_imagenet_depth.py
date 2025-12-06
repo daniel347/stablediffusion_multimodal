@@ -111,7 +111,7 @@ class ImagenetMultiModal(Dataset):
             colour_ind = self.modality.index("colour")
             outs[colour_ind] = self.colour_jitter(outs[colour_ind])
 
-        if not self.return_class and not self.return_index:
+        if not self.return_class and not self.return_index and not self.return_row:
             return outs
         else:
             rets = [outs]
@@ -122,7 +122,10 @@ class ImagenetMultiModal(Dataset):
             if self.return_index:
                 rets.append(idx)
             elif self.return_row:
-                fp_dict = filepaths
+                fp_dict = {}
+                for k in filepaths.keys():
+                    fp_dict[f"{k}_path"] = filepaths[k]
+
                 for k in fp_dict.keys():
                     if isinstance(fp_dict[k], Path):
                         fp_dict[k] = str(fp_dict[k])

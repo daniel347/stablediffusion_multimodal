@@ -1,0 +1,30 @@
+# @package _global_
+
+name: "sd_vae_separable_diff"
+notes: "We train diffusion using two stable diffusion aes."
+
+function:
+  name: training_loop
+  kwargs: {}
+
+training:
+  num_epochs: 48
+  resume_training: False
+
+  precompute_latents: True
+  force_recompute: False
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_separate # ". ../../datasets/lsun"
+  compute_latent_scale: True
+  latent_scale_per_channel: True
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path: null
+model_initialisation:
+init_vae_from_stable_diffusion: True
+
+defaults:
+  - override /model: v2-inference-mm-non-disentangled-seperable
+  - _self_

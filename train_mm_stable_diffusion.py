@@ -52,7 +52,7 @@ import cmmd_pytorch as cmmd
 from utils import (save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config,
                    save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders,
                    cat_dists_or_tensor_latents,
-                   DiversityMetrics, DisplayMAELatent)
+                   DiversityMetrics, DisplayMAELatent, duplicate_stable_diff_weights)
 from reconstruct_model_phema import reconstruct_phema
 import ldm.models.diffusion as diffusion
 import cv2
@@ -132,6 +132,36 @@ def initialise_model(conf):
     if conf.init_from_stable_diffusion:
         # sd_state_dict = torch.load("checkpoints/sd-v1-4.ckpt")
         model.init_from_ckpt("checkpoints/v2-1_512-ema-pruned.ckpt")
+
+    elif conf.get("init_vae_from_stable_diffusion"):
+        print("Initialising autoencoders with stable diffusion weights")
+        sd_state_dict = torch.load("checkpoints/v2-1_512-ema-pruned.ckpt", weights_only=False)
+        first_stage_dict = {}
+        for name, param in sd_state_dict["state_dict"].items():
+            if "first_stage_model" in name:
+                new_name = name.split("first_stage_model.")[1]
+                first_stage_dict[new_name] = param
+
+        for vae in model.first_stage_model.vaes:
+            ignore_keys = ["encoder.conv_in", "decoder.conv_out"] if vae.is_semseg else []
+            ignore_keys += ["encoder.conv_out", "quant_conv", "decoder.conv_in", "post_quant_conv"] if \
+            vae.decoder.z_shape[1] != 4 else []
+            sd = copy.deepcopy(first_stage_dict)
+            keys = list(sd.keys())
+            for k in keys:
+                for ik in ignore_keys:
+                    if k.startswith(ik):
+                        print("Deleting key {} from state_dict.".format(k))
+                        del sd[k]
+
+            # If we have doubled the number of channels we must go though and double all the initialisation weight shapes
+            sd = duplicate_stable_diff_weights(sd, vae, alpha=0.25)
+
+            M, U = vae.load_state_dict(sd, strict=False)
+            for m in M:
+                print(f"Missing key: {m}")
+            for u in U:
+                print(f"Unused key: {u}")
 
     return model
 
@@ -533,6 +563,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         data, classes, row = move_data_to_device(dataT, device=device)
                     else:
                         data, row = move_data_to_device(dataT, device=device)
+                    print(row)
                     # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 

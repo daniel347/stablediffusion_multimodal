@@ -44,7 +44,8 @@ class AutoencoderKL(pl.LightningModule):
         if isinstance(prior_dist, str): prior_dist = getattr(dist, prior_dist)
         if isinstance(post_dist, str): post_dist = getattr(dist, post_dist)
 
-        ddconfig = OmegaConf.to_container(ddconfig)
+        if not isinstance(ddconfig, dict):
+            ddconfig = OmegaConf.to_container(ddconfig)
 
         self.is_semseg = is_semseg
 

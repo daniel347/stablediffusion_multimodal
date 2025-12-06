@@ -17,7 +17,7 @@ model:
     use_ema: True
     reset_num_ema_updates: False
 
-    unet_config:
+    scorenet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
         use_checkpoint: False
@@ -40,14 +40,14 @@ model:
       target: ldm.models.non_disentangled_autoencoder.NonDisentanglingAE
       params:
         prior_dist: normal
-        latent_channel_u: 6
+        latent_channel_u: 8
         ckpt_path: # "../outputs/MM CelebA Autoencoder (Stable Diffusion)/checkpoints/2025_03_10__22_58_54/model_10.rar"  # "../trained_models/celeba_autoencoder_2025_03_04/model_4.rar"
         seperable: True
 
         vae_params:
           - target: ldm.models.autoencoder.AutoencoderKL  # RGB images
             params:
-              embed_dim: 3  #  = latent_channel_z + latent_channel_w
+              embed_dim: 4  #  = latent_channel_z + latent_channel_w
               monitor: val/rec_loss
               embed_spatial_dim: 16
               ddconfig:
@@ -72,7 +72,7 @@ model:
                 target: torch.nn.Identity
           - target: ldm.models.autoencoder.AutoencoderKL  # Semantic Segmentation
             params:
-              embed_dim: 3
+              embed_dim: 4
               monitor: val/rec_loss
               embed_spatial_dim: 16
               conform_to_3_channel: false  # perform deterministic repetition and averaging to

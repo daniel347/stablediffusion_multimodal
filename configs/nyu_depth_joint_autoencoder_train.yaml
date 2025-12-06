@@ -15,6 +15,7 @@ function:
 dataset_name: nyu_depth_lsun
 
 training:
+  model_opts: {}
   test_every_iter: 3000
   patience: 10
   objective:
