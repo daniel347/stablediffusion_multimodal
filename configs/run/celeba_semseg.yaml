@@ -1,10 +1,7 @@
 # @package _global_
 
-name: "new_hyp_2"
-notes: "We train the autoencoder with lowered L1 loss weight and lowered regularisation"
-
-training:
-  batch_size: 6
+name: "ae_retrain"
+notes: "We retrain the ae with newer parameters and because we lost the last model!"
 
 defaults:
-  - override /training/objective: disentangling_objective_gradnorm
+  - _self_

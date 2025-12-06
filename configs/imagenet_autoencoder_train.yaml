@@ -15,7 +15,7 @@ function:
 dataset_name: imagenet
 
 training:
-
+  lr: 1e-3
   model_opts: {}
   test_every_iter: 200 # test and save the model every so many iterations
   objective:
@@ -24,6 +24,8 @@ training:
       wadversary: 0.01
       mmd_zw_weight: 0.002
       mmd_ww_weight: 0.002
+      beta: 1e-6
+      z_close_weight: 0.2
 
 model_initialisation: # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
 resume_training: false

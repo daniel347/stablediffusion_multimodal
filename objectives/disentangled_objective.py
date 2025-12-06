@@ -28,6 +28,7 @@ class DisentanglingObjective(torch.nn.Module):
                 mmd_ww_weight=1,
                 cos_zw_weight=1,
                 cos_ww_weight=1,
+                legacy=False,
                 **kwargs):
         super(DisentanglingObjective, self).__init__()
 
@@ -53,6 +54,8 @@ class DisentanglingObjective(torch.nn.Module):
 
         self.cos_zw_weight = cos_zw_weight
         self.cos_ww_weight = cos_ww_weight
+
+        self.legacy = legacy
 
     def _m_dreg(self, model, x, K=1, test=False, iteration=0, **kwargs):
 
@@ -89,13 +92,13 @@ class DisentanglingObjective(torch.nn.Module):
                 wll_d = self.wll[d] if hasattr(self.wll, "__getitem__") else self.wll
                 if self.all_combinations:
                     lpx_u = lpx_u + reconstruction_loss(px_u[0], x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d,
-                                                         wll_d, self.lpips, self.channel_weighting[d], fail_on_nan=True)
+                                                         wll_d, self.lpips, self.channel_weighting[d], fail_on_nan=True, legacy=self.legacy)
                     lpx_u = lpx_u + reconstruction_loss(px_u[1], x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, wll_d, self.lpips,
-                                                 self.channel_weighting[d], fail_on_nan=True) * self.off_combination_weight
+                                                 self.channel_weighting[d], fail_on_nan=True, legacy=self.legacy) * self.off_combination_weight
                 else:
                     lpx_u = lpx_u + reconstruction_loss(px_u, x[d], self.mod.vaes[d].llik_scaling, loss_dict, wlpips_d, wll_d, self.lpips,
                                                 self.channel_weighting[d],
-                                                fail_on_nan=True)
+                                                fail_on_nan=True, legacy=self.legacy)
 
             lws.append(lpx_u)
 
