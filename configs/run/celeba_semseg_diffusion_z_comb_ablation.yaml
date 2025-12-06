@@ -18,7 +18,9 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_06_18__20_23_48_obj_hyp_opt/model_2800.pt"
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_12_06__11_03_00_ae_retrain/model_2000.pt"
 
 defaults:
+  - override /model: sit-mm-rgb-semseg
+  - override /sampler: ddpm
   - _self_
