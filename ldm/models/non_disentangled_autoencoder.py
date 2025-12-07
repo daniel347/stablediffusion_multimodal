@@ -57,8 +57,8 @@ class NonDisentanglingAE(nn.Module):
 
         self.u_channels = latent_channel_u
         if scale_per_channel:
-            self.latent_mean = nn.Parameter(torch.zeros(self.u_channels))
-            self.latent_scale = nn.Parameter(torch.ones(self.u_channels) * 1.0 / 0.18215)
+            self.latent_mean = nn.Parameter(torch.zeros(self.u_channels * len(vae_params)))
+            self.latent_scale = nn.Parameter(torch.ones(self.u_channels * len(vae_params)) * 1.0 / 0.18215)
         else:
             self.latent_mean = nn.Parameter(torch.tensor(0.0))
             self.latent_scale = nn.Parameter(torch.tensor(1.0 / 0.18215))
