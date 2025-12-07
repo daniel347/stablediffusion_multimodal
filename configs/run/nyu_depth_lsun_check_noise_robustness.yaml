@@ -2,7 +2,7 @@
 
 name: "nyu_lsun_noise_robustness"
 notes: "We check the latent quality of NYU depth autoencoder with varying noise levels"
-outputdir: outputs
+outputdir: ../outputs
 
 dataset_name: nyu_depth_lsun
 
@@ -10,7 +10,7 @@ function:
   name: test_noised_robustness
   kwargs: {}
 
-model_initialisation: outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt
+model_initialisation: ../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt
 
 defaults:
   - _self_

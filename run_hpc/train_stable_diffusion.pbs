@@ -7,4 +7,4 @@ conda activate mmvae
 export PYTHONPATH="${PYTHONPATH}:${HOME}/python_modules/"
 
 cd $HOME/multimodal_generation/stablediffusion/
-python train_mm_stable_diffusion.py -cn celeba_semseg_diffusion_train +run=celeba_semseg_diffusion_sit
+python train_mm_stable_diffusion.py -cn celeba_semseg_diffusion_train +run=celeba_semseg_diffusion_z_comb_ablation
