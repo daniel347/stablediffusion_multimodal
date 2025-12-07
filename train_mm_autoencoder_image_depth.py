@@ -880,7 +880,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     latents = model.module("encode", data, avg_z=False, return_dist=False,
                                            **model_opts) if data_parallel else model("encode", data, avg_z=False,
                                                                                      return_dist=False, **model_opts)
-                    latents = torch.cat(latents, dim=1)
+                    if not isinstance(latents, torch.Tensor):
+                        latents = torch.cat(latents, dim=1)
 
                     avg_dims = [0, 2, 3]
                     if not per_channel:
@@ -926,8 +927,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                                **model_opts) if data_parallel else model("encode", data, avg_z=False,
                                                                                          return_dist=False, **model_opts)
 
-
-                        u = torch.cat(latents, dim=1)
+                        if not isinstance(latents, torch.Tensor):
+                            u = torch.cat(latents, dim=1)
                         u = mod.scale_latents(u)
                         u_noised = u + std * torch.randn_like(u)
                         u_noised = mod.scale_latents(u_noised, reverse=True)
