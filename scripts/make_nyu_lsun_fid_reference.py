@@ -20,24 +20,24 @@ fid = pyiqa.create_metric("fid", device=device)
 
 generate_reference_statistics(dir=None,
                               files=colour_imgs,
-                              name="nyu_depth_lsun_colour",
+                              name="nyu_depth_lsun_new_colour",
                               model=fid.net.model,
                               device=device,
                               split="val",
                               center_crop=True,
-                              res=128,
-                              intermediate_resize=v2.Resize((128, 128))
+                              res=299,
+                              # intermediate_resize=v2.Resize((128, 128))
                               )
 
 generate_reference_statistics(dir=None,
                               files=depth_imgs,
-                              name="nyu_depth_lsun_depth",
+                              name="nyu_depth_lsun_new_depth",
                               model=fid.net.model,
                               device=device,
                               split="val",
                               center_crop=True,
-                              res=128,
-                              intermediate_resize=v2.Resize((128, 128))
+                              res=299,
+                              # intermediate_resize=v2.Resize((128, 128))
                               )
 
 
@@ -45,24 +45,24 @@ kid = pyiqa.create_metric("kid", device=device)
 
 generate_reference_statistics(dir=None,
                               files=colour_imgs,
-                              name="nyu_depth_lsun_colour",
+                              name="nyu_depth_lsun_new_colour",
                               model=kid.net.model,
                               device=device,
                               split="val",
                               metric="KID",
                               center_crop=True,
-                              res=128,
-                              intermediate_resize=v2.Resize((128, 128))
+                              res=299,
+                              # intermediate_resize=v2.Resize((128, 128))
                               )
 
 generate_reference_statistics(dir=None,
                               files=depth_imgs,
-                              name="nyu_depth_lsun_depth",
+                              name="nyu_depth_lsun_new_depth",
                               model=kid.net.model,
                               device=device,
                               split="val",
                               metric="KID",
                               center_crop=True,
-                              res=128,
-                              intermediate_resize=v2.Resize((128, 128))
+                              res=299,
+                              # intermediate_resize=v2.Resize((128, 128))
                               )
