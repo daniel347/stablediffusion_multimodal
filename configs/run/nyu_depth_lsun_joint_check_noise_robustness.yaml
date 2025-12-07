@@ -1,0 +1,17 @@
+# @package _global_
+
+name: "nyu_lsun_joint_noise_robustness"
+notes: "We check the latent quality of NYU depth joint autoencoder with varying noise levels"
+outputdir: ../outputs
+
+dataset_name: nyu_depth_lsun
+
+function:
+  name: test_noised_robustness
+  kwargs: {}
+
+model_initialisation: ../outputs/NYU_Depth_Autoencoder/checkpoints/2025_07_10__15_19_45_nyu_lsun_joint_diff/model_it60000_ema_0.125.pt
+
+defaults:
+  - override /model: v2-inference-mm-non-disentangled-non-seperable
+  - _self_
