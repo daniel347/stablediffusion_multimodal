@@ -916,7 +916,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print(f"set a latent mean of: {channel_means} and scale of: {channel_stds}")
 
             for itercount, std in enumerate(latent_noise_stds):
-                losses = {"mse": [[] for _ in modality], "lpips": [[] for _ in modality]}
+                losses = {"mse": {mode: [] for mode in modality}, "lpips": {mode: [] for mode in modality}}
 
                 with (torch.no_grad(), ema.ema_scope("Epoch test")):
                     for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
@@ -948,8 +948,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         lpips_loss = [lpips(d, r.mean) for d, r in zip(data, reconstructions)]
 
                         for m, mode in enumerate(modality):
-                            losses["mse"].append(mses[m].detach().cpu())
-                            losses["lpips"].append(lpips_loss[m].detach().cpu())
+                            losses["mse"][mode].append(mses[m].detach().cpu())
+                            losses["lpips"][mode].append(lpips_loss[m].detach().cpu())
 
                         for m, name in enumerate(modality):
                             out = reconstructions[m]
@@ -963,6 +963,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 wandb_data = {"latent_noise_std": std}
 
                 metric_scores = {}
+
                 for met in metrics:
                     if met == "cmmd":
                         metric = partial(cmmd.compute_cmmd, device=device)
@@ -970,25 +971,25 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         metric = pyiqa.create_metric(met, device=device)
 
                     scores = []
-                    for mod in modality:
-                        if mod in ["colour", "depth"]:
+                    for mode in modality:
+                        if mode in ["colour", "depth"]:
                             split = "test" if dataset_name == "nyu_depth" else "all" if dataset_name == "mm_celeba" else "val"
-                            score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=299, dataset_split=split, center_crop=True)
-                            wandb_data[f"{met}_{mod}"] = score
+                            score = metric(tempdirs[mode], dataset_name=f"{dataset_name}_{mode}", dataset_res=299, dataset_split=split, center_crop=True)
+                            wandb_data[f"{met}_{mode}"] = score
                             scores.append(score)
-                            print(f'====> {met} {mod}: {score:.2f}')
+                            print(f'====> {met} {mode}: {score:.2f}')
                         else:
                             scores.append(None)
 
                     metric_scores[met] = scores
 
-                for l, val in enumerate(losses):
+                for l, val in losses.items():
                     scores = []
-                    for m in range(len(modality)):
-                        score = torch.mean(torch.stack(val[m])).item()
+                    for mode in modality:
+                        score = torch.mean(torch.stack(val[mode])).item()
                         scores.append(score)
-                        wandb_data[f"{l}_{mod}"] = score
-                        print(f'====> {l} {mod}: {score:.2f}')
+                        wandb_data[f"{l}_{mode}"] = score
+                        print(f'====> {l} {mode}: {score:.2f}')
 
                     metric_scores[l] = scores
 
