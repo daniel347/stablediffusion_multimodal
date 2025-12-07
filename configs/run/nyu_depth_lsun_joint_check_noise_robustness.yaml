@@ -10,7 +10,7 @@ function:
   name: test_noised_robustness
   kwargs: {}
 
-model_initialisation: ../outputs/NYU_Depth_Autoencoder/checkpoints/2025_07_10__15_19_45_nyu_lsun_joint_diff/model_it60000_ema_0.125.pt
+model_initialisation: ../outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_21_31_nyu_lsun_joint/model_12000.pt
 
 defaults:
   - override /model: v2-inference-mm-non-disentangled-non-seperable
