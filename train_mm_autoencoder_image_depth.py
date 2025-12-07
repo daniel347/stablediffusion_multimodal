@@ -898,7 +898,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             return channel_means, channel_stds
 
 
-        def test_noised_robustness(metrics=["fid", "kid"], latent_noise_stds=[0.0, 0.01, 0.02, 0.05, 0.1]):
+        def test_noised_robustness(metrics=["fid", "kid"], latent_noise_stds=[0.0, 0.01, 0.02, 0.05, 0.1, 0.2, 0.3, 0.5]):
             mod = model.module.module if data_parallel else model.module
             mod.use_z_comb_network = True  # assume we are using a model with trained z combiner
 
@@ -944,7 +944,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                 save_and_log_img(reconstructions[k], f'Reconstructions/m{k}',
                                                  runPath, display_data_fs[k], itercount, run)
 
-                        mses = [torch.nn.functional.mse_loss(d, r.mean) for d, r in zip(data, reconstructions)]
+                        mses = [torch.mean((d - r.mean)**2, dim=(1, 2, 3)) for d, r in zip(data, reconstructions)]
                         lpips_loss = [lpips(d, r.mean) for d, r in zip(data, reconstructions)]
 
                         for m, mode in enumerate(modality):
@@ -986,7 +986,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for l, val in losses.items():
                     scores = []
                     for mode in modality:
-                        score = torch.mean(torch.stack(val[mode])).item()
+                        score = torch.mean(torch.cat(val[mode])).item()
                         scores.append(score)
                         wandb_data[f"{l}_{mode}"] = score
                         print(f'====> {l} {mode}: {score:.2f}')
