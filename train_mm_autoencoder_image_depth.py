@@ -923,12 +923,12 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                         data = move_data_to_device(dataT, device=device)
 
-                        latents = model.module("encode", data, avg_z=False, return_dist=False,
+                        u = model.module("encode", data, avg_z=False, return_dist=False,
                                                **model_opts) if data_parallel else model("encode", data, avg_z=False,
                                                                                          return_dist=False, **model_opts)
 
-                        if not isinstance(latents, torch.Tensor):
-                            u = torch.cat(latents, dim=1)
+                        if not isinstance(u, torch.Tensor):
+                            u = torch.cat(u, dim=1)
                         u = mod.scale_latents(u)
                         u_noised = u + std * torch.randn_like(u)
                         u_noised = mod.scale_latents(u_noised, reverse=True)
