@@ -169,7 +169,7 @@ def initialise_model(conf):
 def generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode, sample=True, return_dist=False, cls_tokens=False):
     avg_z = z_mode == "avg"
     random_z = z_mode == "random"
-    channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_channels
+    channel_u = (model_first_stage.w_channels * NUM_VAES + model_first_stage.z_channels) if model_first_stage.factorised_latent_space else model_first_stage.u_channels * NUM_VAES
     model_opts = {"avg_z": avg_z, "random_z": random_z, "return_dist": sample, "total_mask_ratio": 0.0, "shared_mask_ratio": 0.0, "no_mask": True}
     split_dim = -1 if getattr(model_first_stage, "masked_autoencoder", False) else 1
 
