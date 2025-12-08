@@ -1,0 +1,16 @@
+# @package _global_
+
+name: "nyu_lsun_clustering"
+notes: "We check the clustering ability of the latent space on LSUN"
+outputdir: outputs
+
+dataset_name: nyu_depth_lsun
+
+function:
+  name: cluster_latent_space
+  params: {n_batches: 4}
+
+model_initialisation: outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt
+
+defaults:
+  - _self_

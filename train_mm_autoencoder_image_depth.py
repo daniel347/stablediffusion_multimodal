@@ -997,6 +997,85 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 if enable_wandb:
                     wandb.log(wandb_data, step=itercount)
 
+        def cluster_latent_space(n_clusters=4, n_batches=1):
+            from sklearn.cluster import KMeans
+            import plotly.express as px
+
+            mod = model.module.module if data_parallel else model.module
+            mod.use_z_comb_network = True  # assume we are using a model with trained z combiner
+
+            def hex_to_rgb(hex):
+                hex_str = hex.lstrip("#")
+                return torch.Tensor([int(hex_str[i:i + 2], 16) for i in [0, 2, 4]]) / 255.0
+
+            def index_semseg_to_one_hot(index, num_classes=18):
+                new_shape = list(index.shape)
+                new_shape.insert(-2, num_classes)
+                one_hot = torch.zeros(*new_shape, dtype=torch.float32)
+                for i in range(num_classes):
+                    one_hot[..., i, :, :] = (index == i).float()
+                return one_hot
+
+            px_colours = px.colors.qualitative.Dark24
+            cluster_display_colours = {num: hex_to_rgb(px_colours[num]) for num in range(n_clusters)}
+
+            def display_cluster_images(clusters, n_clusters, img_size):
+                mask = index_semseg_to_one_hot(clusters, num_classes=n_clusters)
+                mask_rgb = torch.zeros(3, mask.shape[1], mask.shape[2])
+
+                # Norm so that multiple classes mix colours - We clamp to allow background to be 0 everywhere.
+                mask_norm = mask / torch.clamp(mask.sum(dim=0, keepdim=True), 1.0)
+                mask_norm = torch.nan_to_num(mask_norm)
+
+                for i in range(mask.shape[0]):
+                    mask_rgb += cluster_display_colours[i][:, None, None] * mask_norm[i, :, :].unsqueeze(0).expand(
+                        3, -1, -1).float()
+
+                # expand to full shape
+                patch_size = 8  # 8x downsampling for SD VAE
+
+                mask_rgb = mask_rgb.repeat_interleave(patch_size, dim=-1).repeat_interleave(patch_size, dim=-2).detach()
+                return mask_rgb
+
+            imgs = {m: [] for m in modality}
+            latents = []
+            clusters = []
+
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
+                                          position=rank if data_parallel else 0):
+                    data = move_data_to_device(dataT, device=device)
+
+                    for m, (d, mode) in enumerate(zip(data, modality)):
+                        imgs[mode].append(d.detach().cpu())
+
+                    batch_latents = model.module("encode", data, avg_z=False, return_dist=False,
+                                           **model_opts) if data_parallel else model("encode", data, avg_z=False,
+                                                                                     return_dist=False, **model_opts)
+                    if not isinstance(batch_latents, torch.Tensor):
+                        batch_latents = torch.cat(batch_latents, dim=1)
+
+                    for l in batch_latents:
+                        latents.append(l.detach().cpu())
+                        X = l.permute(1, 2, 0).reshape(-1, l.shape[0]).detach().cpu().numpy()
+                        kmeans = KMeans(n_clusters=n_clusters, random_state=0, n_init="auto").fit(X)
+                        cluster_inds = torch.from_numpy(kmeans.labels_.reshape(l.shape[1], l.shape[2]))
+                        cluster_rgb = display_cluster_images(cluster_inds, n_clusters, img_size=data[0].shape[-1])
+                        clusters.append(cluster_rgb)
+
+                    if i >= n_batches:
+                        break
+
+            latents = torch.stack(latents, dim=0)
+            save_and_log_latents(latents, f'Latents', runPath, 0, run)
+
+            clusters = torch.stack(clusters, dim=0)
+            save_and_log_img(clusters, f'Latent_Clusters', runPath, display_data_fs[0], 0, run)
+
+            for m in modality:
+                imgs[m] = torch.cat(imgs[m], dim=0)
+                save_and_log_img(imgs[m], f'Data_{m}', runPath, display_data_fs[modality.index(m)], 0, run)
+
 
         def check_decoder_scaling():
             """We do a test to see if the decoder is more sensitive to low-std channels or if the low-std channels are ignored"""

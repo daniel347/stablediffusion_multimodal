@@ -1,0 +1,5 @@
+dataset_name: nyu_depth
+root_data_dir:  ../datasets/lsun/
+input_size: 128
+modality: ["colour", "depth"]
+modality_exts: {"colour": "jpg", "depth": "png"}  # specify extensions for each modality
