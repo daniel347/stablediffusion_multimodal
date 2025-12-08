@@ -23,7 +23,7 @@ model:
       params:
         ckpt_path:
 
-model_initialisation:
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_12_07__16_59_45_sd_vae_separable_diff/model_60000.pt
 
 defaults:
   - override /model: v2-inference-mm-non-disentangled-seperable
