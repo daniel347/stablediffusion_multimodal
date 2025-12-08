@@ -8,9 +8,11 @@ dataset_name: nyu_depth_lsun
 
 function:
   name: cluster_latent_space
-  params: {n_batches: 4}
+  params: {n_batches: 7}
 
 model_initialisation: outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt
+# model_initialisation: outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_21_31_nyu_lsun_joint/model_12000.pt
 
 defaults:
+#  - override /model: v2-inference-mm-non-disentangled-non-seperable
   - _self_

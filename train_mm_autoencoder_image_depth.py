@@ -1037,6 +1037,11 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 mask_rgb = mask_rgb.repeat_interleave(patch_size, dim=-1).repeat_interleave(patch_size, dim=-2).detach()
                 return mask_rgb
 
+            channel_means, channel_stds = get_latent_scale_factor(n_batches=100, per_channel=True)
+            mod.latent_mean = torch.nn.Parameter(channel_means)
+            mod.latent_scale = torch.nn.Parameter(channel_stds)
+            print(f"set a latent mean of: {channel_means} and scale of: {channel_stds}")
+
             imgs = {m: [] for m in modality}
             latents = []
             clusters = []
@@ -1054,6 +1059,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                                                                                      return_dist=False, **model_opts)
                     if not isinstance(batch_latents, torch.Tensor):
                         batch_latents = torch.cat(batch_latents, dim=1)
+
+                    batch_latents = mod.scale_latents(batch_latents)
 
                     for l in batch_latents:
                         latents.append(l.detach().cpu())
