@@ -5,7 +5,7 @@ notes: "We train diffusion with our best autoencoder but without z combiner We i
 
 training:
   precompute_latents: True
-  force_recompute: False
+  force_recompute: True
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_z_comb_ablation
   latent_scale_per_channel: True
   compute_latent_scale: True
@@ -18,7 +18,7 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_12_06__11_03_00_ae_retrain/model_2000.pt"
+        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_12_07__10_24_13_ae_retrain/model_3200.pt"
 
 defaults:
   - override /model: sit-mm-rgb-semseg

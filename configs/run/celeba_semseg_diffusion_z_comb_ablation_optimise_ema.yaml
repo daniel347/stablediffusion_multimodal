@@ -5,7 +5,7 @@ notes: "We optimise ema for the z_comb_ablation model. It seems a little pointle
 
 function:
   name: test_optimum_EMA
-  kwargs: {out_nimgs: [2232000], out_stds: [0.06, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256}
+  kwargs: {out_nimgs: [2880000], out_stds: [0.06, 0.05, 0.075, 0.1, 0.125, 0.15, 0.175, 0.2], n_samples: 256, compute_ema_models: False}
 
 training:
   precompute_latents: True
@@ -24,8 +24,10 @@ model:
       params:
         ckpt_path: null
 
-model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_07_01__10_02_25_z_comb_ablation/model_31000.pt
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_12_07__23_01_10_z_comb_ablation/model_40000.pt
 
 defaults:
+  - override /model: sit-mm-rgb-semseg
+  - override /sampler: ddpm
   - override /ema: dummy_ema
   - _self_

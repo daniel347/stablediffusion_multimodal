@@ -24,8 +24,10 @@ model:
       params:
         ckpt_path: null
 
-model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_07_01__10_02_25_z_comb_ablation/model_it31000_ema_0.075.pt
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_12_07__23_01_10_z_comb_ablation/model_it40000_ema_0.125.pt
 
 defaults:
+  - override /model: sit-mm-rgb-semseg
+  - override /sampler: ddpm
   - override /ema: dummy_ema
   - _self_
