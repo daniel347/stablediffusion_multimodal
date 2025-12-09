@@ -302,6 +302,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             Path(conf.data.root_data_dir)]
         dataset_name = conf.dataset_name
         modality = data_conf_0.modality
+        returns_class = data_conf_0.get("returns_class", False)
 
         if isinstance(train_dataset, torch.utils.data.ConcatDataset):
             display_data_fs = [getattr(train_dataset.datasets[0], f"{mode}_display") for mode in data_conf_0.modality]
@@ -1083,6 +1084,52 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 imgs[m] = torch.cat(imgs[m], dim=0)
                 save_and_log_img(imgs[m], f'Data_{m}', runPath, display_data_fs[modality.index(m)], 0, run)
 
+        def cluster_latents_with_class(n_batches=20):
+            from sklearn.manifold import TSNE
+
+            mod = model.module.module if data_parallel else model.module
+            mod.use_z_comb_network = True  # assume we are using a model with trained z combiner
+
+            # I think this might be unnecessary but not harmful
+            channel_means, channel_stds = get_latent_scale_factor(n_batches=100, per_channel=True)
+            mod.latent_mean = torch.nn.Parameter(channel_means)
+            mod.latent_scale = torch.nn.Parameter(channel_stds)
+            print(f"set a latent mean of: {channel_means} and scale of: {channel_stds}")
+
+            latents = []
+            classes = []
+
+            with (torch.no_grad(), ema.ema_scope("Epoch test")):
+                for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
+                                          position=rank if data_parallel else 0):
+                    data = move_data_to_device(dataT, device=device)
+                    if returns_class:
+                        data, class_labels = data
+                        print(class_labels)
+                        classes.append(class_labels.detach().cpu())
+                    else:
+                        classes.append(torch.zeros(data[0].shape[0]).detach().cpu())
+
+                    batch_latents = model.module("encode", data, avg_z=False, return_dist=False,
+                                           **model_opts) if data_parallel else model("encode", data, avg_z=False,
+                                                                                     return_dist=False, **model_opts)
+                    if not isinstance(batch_latents, torch.Tensor):
+                        batch_latents = torch.cat(batch_latents, dim=1)
+
+                    batch_latents = mod.scale_latents(batch_latents)
+
+                    latents.append(batch_latents.detach().cpu())
+                    if i >= n_batches:
+                        break
+
+            latents = torch.cat(latents, dim=0).flatten(start_dim=1)
+
+            tsne = TSNE(n_components=2, perplexity=30).fit(latents)
+            latents_tsne = tsne.fit_transform(latents)
+            classes = torch.cat(classes, dim=0)
+
+            sns.plot(x=latents_tsne[:, 0], y=latents_tsne[:, 1], hue=classes)
+            plt.savefig(str(runPath / "latents_tsne_classes.png"), dpi=300)
 
         def check_decoder_scaling():
             """We do a test to see if the decoder is more sensitive to low-std channels or if the low-std channels are ignored"""

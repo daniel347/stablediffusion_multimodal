@@ -65,13 +65,14 @@ class ImagenetMultiModal(Dataset):
         self.return_class = return_class
         if self.return_class:
             classes = []
-            with open(os.path.join(root_data_dir, "imagenet_classes.txt")) as f:
-                json_classes = json.load(f)
-                for class_num, info in json_classes.items():
-                    classes.append({"num": class_num, "synset": info["id"].rstrip("-n"), "name": info["label"]})
+            with open(os.path.join(root_data_dir, "LOC_synset_mapping.txt")) as f:
+                for ind, line in enumerate(f):
+                    synset = line.split(" ")[0].strip("-n")
+                    name = " ".join(line.split(" ")[1:]).split(",")[0]  # Take first name only
+                    classes.append({"num": ind, "synset": synset, "name": name})
 
             self.classes = pd.DataFrame(classes)
-            self.classes.index = classes["synset"]
+            self.classes.index = self.classes["synset"]
 
         self.return_index = return_index
         self.return_row = return_row
@@ -116,7 +117,7 @@ class ImagenetMultiModal(Dataset):
         else:
             rets = [outs]
             if self.return_class:
-                synset = filepaths[self.modality[0]].split("/")[-2].lstrip("n")
+                synset = filepaths[self.modality[0]].split(os.path.sep)[-2].lstrip("n")
                 class_num = self.classes.loc[synset, "num"]
                 rets.append(class_num)
             if self.return_index:

@@ -1,0 +1,32 @@
+# @package _global_
+
+name: "sit_diff_manifold_dim"
+notes: "We try computing the manifold dimension again for the celeba semseg sit diffusion model."
+
+function:
+  name: compute_manifold_dimensionality
+  kwargs: {}
+
+training:
+  precompute_latents: False
+
+  patience: 20
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path:
+
+    use_ode: True
+    sampler_kwargs: 
+        atol: 2.5e-7
+        rtol: 2.5e-4
+
+model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_12_04__21_15_57_sit_diff/model_it40000_ema_0.125.pt" 
+
+defaults:
+  - override /model: sit-mm-rgb-semseg
+  - override /sampler: ddpm
+  - override /ema: dummy_ema
+  - _self_

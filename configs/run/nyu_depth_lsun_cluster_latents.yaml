@@ -1,0 +1,20 @@
+# @package _global_
+
+outputdir: outputs
+device: "cuda:0"
+name: "cluster_latents_classes"
+notes: "We test on imagenet and cluster the latents into discrete classes. This is a rather unfair test as the model has not seen imagenet during training."
+
+function:
+  name: cluster_latents_with_class
+  params: {}
+
+dataset_name: imagenet
+
+data:
+  returns_class: True
+
+model_initialisation: "outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt"
+
+defaults:
+  - override /data: imagenet_local

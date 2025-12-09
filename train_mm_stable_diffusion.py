@@ -1469,8 +1469,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 wandb.log({"all_singular_values": fig}, step=i+1)
 
 
-
-
         def training_loop(dataloaders):
             best_test_loss = 10000
             test_worsening_count = 0

@@ -7,7 +7,8 @@ import torchvision.utils as tvu
 
 dataset_opts = {"imagenet": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
                              "modality": ["colour", "depth"],
-                             "root_data_dir": "tests/imagenet_mock"},
+                             "root_data_dir": "../../datasets/imagenet/ILSVRC/Data/CLS-LOC/",
+                             "modality_exts": {"colour": "JPEG", "depth": "png"}},
                 "nyu_depth": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
                               "modality": ["colour", "depth"],
                               "root_data_dir": "../../datasets/nyuv2_processed",
@@ -156,3 +157,16 @@ def test_celeba_single_label_vis_images():
 
 def test_celeba_multiple_splits():
     dataset = get_dataset("mm_celeba", **dataset_opts["mm_celeba"], split=["train", "test"])
+
+
+def test_imagenet_return_class():
+    opts = dataset_opts["imagenet"]
+    opts["return_class"] = True
+    dataset = get_dataset("imagenet", **opts, split="train")
+
+    for i, (data, classes) in enumerate(dataset):
+        print(classes)
+        print(data[0].shape)
+
+        if i >= 3:
+            break
