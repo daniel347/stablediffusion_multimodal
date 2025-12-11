@@ -1103,12 +1103,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
-                    if returns_class:
-                        data, class_labels = data
-                        print(class_labels)
-                        classes.append(class_labels.detach().cpu())
-                    else:
-                        classes.append(torch.zeros(data[0].shape[0]).detach().cpu())
+                    semseg = data[-1]
+                    semseg_down =
 
                     batch_latents = model.module("encode", data, avg_z=False, return_dist=False,
                                            **model_opts) if data_parallel else model("encode", data, avg_z=False,

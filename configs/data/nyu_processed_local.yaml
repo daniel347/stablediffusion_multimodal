@@ -1,0 +1,4 @@
+dataset_name: nyu_labelled
+root_data_dir: ../datasets/nyuv2_labelled
+input_size: 128
+modality: ["colour", "depth", "semseg"]
