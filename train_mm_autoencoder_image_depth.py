@@ -295,7 +295,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
         # Load dataset
         train_dataset, test_dataset = load_image_datasets(conf.data)
-        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank, data_parallel)
+        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank, data_parallel, num_workers=0)
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
         data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [
@@ -1084,14 +1084,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 imgs[m] = torch.cat(imgs[m], dim=0)
                 save_and_log_img(imgs[m], f'Data_{m}', runPath, display_data_fs[modality.index(m)], 0, run)
 
+
         def cluster_latents_with_class(n_batches=20):
             from sklearn.manifold import TSNE
+            import cv2
 
             mod = model.module.module if data_parallel else model.module
             mod.use_z_comb_network = True  # assume we are using a model with trained z combiner
 
             # I think this might be unnecessary but not harmful
-            channel_means, channel_stds = get_latent_scale_factor(n_batches=100, per_channel=True)
+            channel_means, channel_stds = get_latent_scale_factor(n_batches=25, per_channel=True)
             mod.latent_mean = torch.nn.Parameter(channel_means)
             mod.latent_scale = torch.nn.Parameter(channel_stds)
             print(f"set a latent mean of: {channel_means} and scale of: {channel_stds}")
@@ -1099,16 +1101,22 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             latents = []
             classes = []
 
+            semseg_latent_resize = v2.Resize(16, interpolation=InterpolationMode.NEAREST_EXACT)
+            coarse_classes = [3, 4, 10, 12, 27, 43, 58, 88, 118, 143, 156, 351, 575]
+
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
-                    if returns_class:
-                        data, class_labels = data
-                        print(class_labels)
-                        classes.append(class_labels.detach().cpu())
-                    else:
-                        classes.append(torch.zeros(data[0].shape[0]).detach().cpu())
+
+                    for j, d in enumerate(data[0]):
+                        cv2.imwrite(str(runPath / f"sample_{i*conf.training.batch_size + j}.png"), (d.detach().cpu().numpy() * 255).astype(np.int8))
+
+                    semseg = data[-1]
+                    semseg_down = semseg_latent_resize(semseg).flatten()
+                    print(semseg_down.shape)
+
+                    data = data[:-1]
 
                     batch_latents = model.module("encode", data, avg_z=False, return_dist=False,
                                            **model_opts) if data_parallel else model("encode", data, avg_z=False,
@@ -1117,19 +1125,33 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                         batch_latents = torch.cat(batch_latents, dim=1)
 
                     batch_latents = mod.scale_latents(batch_latents)
+                    batch_latents = batch_latents.permute(0, 2, 3, 1).flatten(start_dim=0, end_dim=2)
+
+                    is_class_of_interest = torch.zeros_like(semseg_down).bool()
+                    for c in coarse_classes:
+                        is_class_of_interest = torch.bitwise_or(is_class_of_interest, (semseg_down == c))
+
+                    batch_latents = batch_latents[is_class_of_interest, :]
+                    semseg_down = semseg_down.int()[is_class_of_interest]
 
                     latents.append(batch_latents.detach().cpu())
+                    classes.append(semseg_down)
+
                     if i >= n_batches:
                         break
 
-            latents = torch.cat(latents, dim=0).flatten(start_dim=1)
+            latents = torch.cat(latents, dim=0)
+            print(latents.shape)
 
             tsne = TSNE(n_components=2, perplexity=30).fit(latents)
             latents_tsne = tsne.fit_transform(latents)
             classes = torch.cat(classes, dim=0)
+            print(classes.shape)
 
-            sns.plot(x=latents_tsne[:, 0], y=latents_tsne[:, 1], hue=classes)
+            class_names = [train_dataset.data["names"][c] for c in classes]
+            sns.scatterplot(x=latents_tsne[:, 0], y=latents_tsne[:, 1], hue=class_names, palette="deep")
             plt.savefig(str(runPath / "latents_tsne_classes.png"), dpi=300)
+
 
         def check_decoder_scaling():
             """We do a test to see if the decoder is more sensitive to low-std channels or if the low-std channels are ignored"""
