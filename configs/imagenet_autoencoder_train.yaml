@@ -27,7 +27,7 @@ training:
       beta: 1e-6
       z_close_weight: 0.2
 
-model_initialisation: "/rds/general/user/ds3119/home/multimodal_generation/outputs/ImageNet_Autoencoder/checkpoints/2025_12_06__11_04_50_imagenet_ae/model_1000.pt" 
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/ImageNet_Autoencoder/checkpoints/2025_12_06__18_21_22_imagenet_ae/model_4000.pt" 
 # "../outputs/NYU_Depth_Autoencoder/checkpoints/2025_05_20__19_09_36_new_ae_arch/model_2.pt" # "../trained_models/model_8.rar"
 resume_training: True
 init_from_stable_diffusion: False
