@@ -1,19 +1,13 @@
-import io
-import os
 from torch.utils.data import Dataset
 import pandas as pd
-from torchvision import io
-from PIL import Image
-import cv2
 import numpy as np
 import torch
 from torchvision.transforms.v2.functional import horizontal_flip
 from torchvision.transforms.v2 import ColorJitter
 import random
 from .register_datasets import register_dataset
-from pathlib import Path
-import pickle
 import mat73
+from pathlib import Path
 
 
 @register_dataset("nyu_labelled")
@@ -35,13 +29,13 @@ class NYULabelled(Dataset):
         self.split = split
         self.root_data_dir = root_data_dir
 
-        self.data = mat73.loadmat(self.root_data_dir / "nyu_depth_v2_labelled.mat")
+        self.data = mat73.loadmat(Path(self.root_data_dir) / "nyu_depth_v2_labeled.mat")
         self.data["colour"] = self.data.pop("images")
         self.data["depth"] = self.data.pop("depths")
         self.data["semseg"] = self.data.pop("labels")
 
         for k in ["accelData", "namesTolds", "rawDepths", "rawRgbFilenames", "rawDepthFilenames"]:
-            self.data.pop(k)
+            self.data.pop(k, None)
 
         for k in ["names", "sceneTypes", "scenes"]:
             self.data[k] = [n[0] for n in self.data[k]]
@@ -54,15 +48,9 @@ class NYULabelled(Dataset):
 
         self.mode_readers = {"colour": self.read_colour, "depth": self.read_depth, "semseg": self.read_semseg}
 
-
         if classes is not None:
             # Restrict to just the provided classes
             self.filter_data(classes)
-
-        index_dfs = []
-        for _, scene in self.scenes.iterrows():
-            index_dfs.append(self.make_scene_dataframe(scene))
-        self.index = pd.concat(index_dfs, axis=0, ignore_index=True)
 
         self.p_hor_flip = p_hor_flip
         self.p_colour_jitter = p_colour_jitter
@@ -88,7 +76,7 @@ class NYULabelled(Dataset):
 
         outs = []
         for mod in self.modality:
-            img = self.mode_readers[mod](self.data[mod][:, :, idx])
+            img = self.mode_readers[mod](self.data[mod][..., idx])
             if self.transform is not None:
                 if isinstance(self.transform, dict):
                     img = self.transform[mod](img)
@@ -150,4 +138,4 @@ class NYULabelled(Dataset):
 
     def read_semseg(self, np_img):
         img = np_img
-        return torch.from_numpy(img)
+        return torch.from_numpy(img).unsqueeze(0)

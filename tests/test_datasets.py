@@ -9,6 +9,10 @@ dataset_opts = {"imagenet": {"transform": v2.Compose([v2.Resize(256), v2.CenterC
                              "modality": ["colour", "depth"],
                              "root_data_dir": "../../datasets/imagenet/ILSVRC/Data/CLS-LOC/",
                              "modality_exts": {"colour": "JPEG", "depth": "png"}},
+                "nyu_labelled": {"transform": {"colour": v2.Resize([256, 256]), "semseg": lambda x: resize_semseg(x, (256, 256)), "depth": v2.Resize([256, 256])},
+                              "modality": ["colour", "depth"],
+                              "root_data_dir": "../../datasets/nyuv2_labelled",
+                              "classes": ["bedroom"]},
                 "nyu_depth": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
                               "modality": ["colour", "depth"],
                               "root_data_dir": "../../datasets/nyuv2_processed",
@@ -170,3 +174,14 @@ def test_imagenet_return_class():
 
         if i >= 3:
             break
+
+def test_nyu_labelled_3_mode():
+    opts = dataset_opts["nyu_labelled"]
+    opts["modality"] = ["colour", "depth", "semseg"]
+    dataset = get_dataset("nyu_labelled", **opts, split="test")
+
+    for i, data in enumerate(dataset):
+        assert len(data) == 3
+        assert data[0].shape == (3, 256, 256)
+        assert data[1].shape == (1, 256, 256)
+        assert data[2].shape == (256, 256)
