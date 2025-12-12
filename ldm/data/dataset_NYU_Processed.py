@@ -70,7 +70,7 @@ class NYULabelled(Dataset):
         self.data["scenes"] = [self.data["scenes"][i] for i in inds]
 
     def __len__(self):
-        return len(self.data["colour"])
+        return self.data["colour"].shape[-1]
 
     def __getitem__(self, idx):
 

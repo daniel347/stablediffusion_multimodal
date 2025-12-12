@@ -877,6 +877,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    if len(data) == 3:
+                        # remove semseg as this is for testing
+                        data = data[:2]
 
                     latents = model.module("encode", data, avg_z=False, return_dist=False,
                                            **model_opts) if data_parallel else model("encode", data, avg_z=False,
@@ -1102,7 +1105,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             classes = []
 
             semseg_latent_resize = v2.Resize(16, interpolation=InterpolationMode.NEAREST_EXACT)
-            coarse_classes = [3, 4, 10, 12, 27, 43, 58, 88, 118, 143, 156, 351, 575]
+            coarse_classes = [3, 4, 10, 20, 27, 143, 58, 88, 118, 143, 156, 351, 575]
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
@@ -1110,7 +1113,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     data = move_data_to_device(dataT, device=device)
 
                     for j, d in enumerate(data[0]):
-                        cv2.imwrite(str(runPath / f"sample_{i*conf.training.batch_size + j}.png"), (d.detach().cpu().numpy() * 255).astype(np.int8))
+                        cv2.imwrite(str(runPath / f"sample_{i*conf.training.batch_size + j}.png"), (d.permute(1, 2, 0).detach().cpu().numpy() * 255).astype(np.uint8))
 
                     semseg = data[-1]
                     semseg_down = semseg_latent_resize(semseg).flatten()
