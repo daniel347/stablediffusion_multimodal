@@ -7,14 +7,14 @@ notes: "We test on imagenet and cluster the latents into discrete classes. This 
 
 function:
   name: cluster_latents_with_class
-  params: {n_batches: 20}
+  params: {n_batches: 600}
 
 dataset_name: nyu_depth_lsun
 
 data:
   returns_class: True
 
-model_initialisation: "outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt"
+model_initialisation: "output_checkpoints/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt"
 
 defaults:
   - override /data: nyu_labelled_local

@@ -1,12 +1,14 @@
 # @package _global_
 
-name: "nyu_lsun_joint_diff_ema_opt_test_metrics"
+name: "nyu_lsun_joint_diff_ema_opt_test_metrics_new_ref"
 notes: "We compute metrics for the nyu_lsun_joint_diff model, with ema std 0.125. Recompute with the sampled network, though I believe both are similar."
 
 function:
   name: test_metrics
   kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True, metrics: ["fid", "kid", "tce", "tie", "cmmd"]}
 
+dataset_name: "nyu_depth_lsun_new" 
+  
 training:
   precompute_latents: True
   force_recompute: False
