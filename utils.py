@@ -26,6 +26,7 @@ from image_diversity import ClipMetrics, InceptionMetrics
 from pathlib import Path
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+import datasets
 
 # Constants
 class Constants(object):
@@ -371,6 +372,12 @@ def move_data_to_device(data, device="cuda"):
     else:
         return data
 
+def select_modalities(data, mods):
+    if isinstance(data, list):
+        return data
+    elif isinstance(data, dict):
+        return [data[m] for m in mods]
+
 
 def override_config(conf, overrides):
     for key, val in overrides.items():
@@ -497,6 +504,31 @@ def load_image_datasets(data_conf, precompute_latents=False):
                                return_row=precompute_latents,
                                return_class=return_class,
                                **test_opts)
+
+    return train_dataset, test_dataset
+
+def load_huggingface_datasets(data_conf, precompute_latents=False):
+
+    if isinstance(data_conf, ListConfig):
+        raise NotImplementedError("Huggingface dataset list config not implemented yet")
+
+    hf_tx = {"colour":  v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)]),
+          "semseg": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
+                                v2.CenterCrop(data_conf.input_size)]),
+          "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)])}
+
+    def hf_transform(data):
+        for mod in data_conf.modality:
+            data[mod] = hf_tx[mod](data[mod])
+        return data
+
+
+    hf_dataset = datasets.load_dataset(data_conf.root_data_dir)
+    hf_dataset.set_transform(hf_transform)
+    # hf_dataset = hf_dataset.with_format("torch")
+
+    train_dataset = hf_dataset["train"]
+    test_dataset = hf_dataset["val"]
 
     return train_dataset, test_dataset
 

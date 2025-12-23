@@ -52,7 +52,7 @@ import cmmd_pytorch as cmmd
 from utils import (save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config,
                    save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders,
                    cat_dists_or_tensor_latents,
-                   DiversityMetrics, DisplayMAELatent, duplicate_stable_diff_weights)
+                   DiversityMetrics, DisplayMAELatent, duplicate_stable_diff_weights, select_modalities)
 from reconstruct_model_phema import reconstruct_phema
 import ldm.models.diffusion as diffusion
 import cv2
@@ -101,6 +101,30 @@ def learning_rate_schedule(cur_nimg, batch_size, ref_lr=100e-4, ref_batches=70e3
     if rampup_Mimg > 0:
         lr *= min(cur_nimg / (rampup_Mimg * 1e6), 1)
     return lr
+
+
+def preprocess_data(data, modalities, device, return_class=False, return_row=False):
+    data = move_data_to_device(data, device=device)
+    classes = None
+    row = None
+
+    if isinstance(data, list):
+        if return_row:
+            row = data[-1]
+            data = data[:-1]
+        if return_class:
+            classes = data[-1]
+            data = data[:-1]
+
+    elif isinstance(data, dict):
+        if return_row:
+            row = data["ind"]
+        if return_class:
+            classes = data["label"]
+            data = select_modalities(data, modalities)
+
+    return data, classes, row
+
 
 
 class DiffusionIntermediateLogger():
@@ -412,7 +436,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         test_param_name = "model.input_blocks.4.0.in_layers.0.weight"
 
-        train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents)
+        if conf.data.get("is_huggingface", False):
+            train_dataset, test_dataset = load_huggingface_datasets(conf.data, conf.training.precompute_latents)
+        else:
+            train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents)
 
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank, data_parallel)
 
@@ -479,10 +506,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             with (torch.no_grad()):
                 for i, dataT in pbar:
-                    if return_class:
-                        data, classes = move_data_to_device(dataT, device=device)
-                    else:
-                        data = move_data_to_device(dataT, device=device)
+                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device, return_class=return_class)
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES,
                                                z_mode=conf.training.z_mode,
@@ -513,10 +537,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             with (torch.no_grad()):
                 for i, dataT in pbar:
-                    if return_class:
-                        data, classes = move_data_to_device(dataT, device=device)
-                    else:
-                        data = move_data_to_device(dataT, device=device)
+                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device, return_class=return_class)
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES,
                                                z_mode=conf.training.z_mode,
@@ -557,13 +578,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             with torch.no_grad():
                 for i, dataT in pbar:
-                    # print(len(dataT))
-                    # print(len(dataT[0]))
-                    if return_class:
-                        data, classes, row = move_data_to_device(dataT, device=device)
-                    else:
-                        data, row = move_data_to_device(dataT, device=device)
-                    print(row)
+                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device, return_class=return_class, return_row=True)
+
                     # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
@@ -604,11 +620,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                 # print(f"latent meat shape: {latent_means.shape} std shape: {latent_stds.shape}")
                                 print(latents.shape)
 
-                    for k, (latent, r) in enumerate(zip(latents, row[f"{modality[0]}_path"])):
-                        save_path = Path(r.replace(modality[0], "latent"))
-                        for root in data_root_dirs:
-                            if save_path.is_relative_to(root):
-                                save_path = out_base_folder / save_path.relative_to(root.parent)  # keep the dataset folder name
+
+                    for k, (latent, r) in enumerate(zip(latents, (row[f"{modality[0]}_path"]) if isinstance(row, dict) else row)):
+                        if isinstance(r, str):
+                            save_path = Path(r.replace(modality[0], "latent"))
+                            for root in data_root_dirs:
+                                if save_path.is_relative_to(root):
+                                    save_path = out_base_folder / save_path.relative_to(root.parent)  # keep the dataset folder name
+                        else:
+                            save_path = out_base_folder / f"latent/{r:07d}.pt"
                         save_path.parent.mkdir(parents=True, exist_ok=True)
                         # print(save_path)
                         data_to_save = {}
@@ -645,10 +665,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     wandb.log({"epoch": epochcount}, step=itercount)
 
                 for i, dataT in train_pbar:
-                    if return_class:
-                        data, classes = move_data_to_device(dataT, device=device)
-                    else:
-                        data = move_data_to_device(dataT, device=device)
+                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device,
+                                                         return_class=return_class, return_row=False)
                     # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
@@ -778,10 +796,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             b_loss = 0
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in pbar:
-                    if return_class:
-                        data, classes = move_data_to_device(dataT, device=device)
-                    else:
-                        data = move_data_to_device(dataT, device=device)
+                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device,
+                                                         return_class=return_class)
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
                                                sample=sample,
@@ -1161,10 +1177,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             model.eval()
             with ema.ema_scope("Epoch test"):
                 for i, dataT in pbar:
-                    if return_class:
-                        data, classes = move_data_to_device(dataT, device=device)
-                    else:
-                        data = move_data_to_device(dataT, device=device)
+                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device,
+                                                         return_class=return_class)
 
                     y = []
                     for d, meas_model in zip(data, meas_models):
@@ -1237,10 +1251,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in pbar:
-                    if return_class:
-                        data, classes = move_data_to_device(dataT, device=device)
-                    else:
-                        data = move_data_to_device(dataT, device=device)
+                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device,
+                                                         return_class=return_class)
 
                     latent_dist = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, return_dist=True, sample=False, cls_tokens=False)
                     latents = latent_dist.sample()
@@ -1322,10 +1334,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                 with (torch.no_grad(), ema.ema_scope("Epoch test")):
                     for i, dataT in pbar:
-                        if return_class:
-                            data, classes = move_data_to_device(dataT, device=device)
-                        else:
-                            data = move_data_to_device(dataT, device=device)
+                        data, classes, row = preprocess_data(dataT, conf.data.modality, device=device,
+                                                             return_class=return_class)
 
                         latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
                                                    sample=sample,
@@ -1415,10 +1425,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in enumerate(test_loader):
-                    if return_class:
-                        data, classes = move_data_to_device(dataT, device=device)
-                    else:
-                        data = move_data_to_device(dataT, device=device)
+                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device,
+                                                         return_class=return_class)
 
                     latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, sample=False, cls_tokens=False)
                     latents = model_first_stage.scale_latents(latents)

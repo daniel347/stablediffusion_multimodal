@@ -4,6 +4,7 @@ import copy
 from ldm.data import get_dataset
 from pathlib import Path
 import jsonlines
+import tqdm
 
 @hydra.main(version_base=None, config_path="../configs/data", config_name="lsun_local")
 def main(data_conf: DictConfig) -> None:
@@ -25,9 +26,10 @@ def main(data_conf: DictConfig) -> None:
                                     split=split,
                                     return_row=True,
                                     return_class=return_class,
+                                    dont_load_image=True,
                                     **opts)
 
-        for i, data in enumerate(dataset):
+        for i, data in tqdm.tqdm(enumerate(dataset)):
             meta_row = {"colour_file_name": str(Path(data[-1]["colour_path"]).relative_to(root)),
                         "depth_file_name": str(Path(data[-1]["depth_path"]).relative_to(root)), "ind": i, "split": split}
             if return_class:

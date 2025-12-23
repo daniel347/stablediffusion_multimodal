@@ -1,0 +1,6 @@
+dataset_name: nyu_depth
+root_data_dir:  ../datasets/parquet_dataset/
+is_huggingface: True
+input_size: 128
+modality: ["colour", "depth"]
+modality_exts: {"colour": "jpg", "depth": "png"}  # specify extensions for each modality

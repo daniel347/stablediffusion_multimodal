@@ -45,8 +45,8 @@ from ldm.modules.lora_layers import mark_only_lora_as_trainable
 from reconstruct_model_phema import reconstruct_phema
 
 from utils import (save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs,
-                   move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders,
-                   cat_dists_or_tensor_latents, insert_stable_diff_weights)
+                   move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, load_huggingface_datasets, create_dataloaders,
+                   cat_dists_or_tensor_latents, insert_stable_diff_weights, select_modalities)
 
 import pyiqa
 
@@ -294,7 +294,10 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             scaler = GradScaler()
 
         # Load dataset
-        train_dataset, test_dataset = load_image_datasets(conf.data)
+        if conf.data.get("is_huggingface", False):
+            train_dataset, test_dataset = load_huggingface_datasets(conf.data)
+        else:
+            train_dataset, test_dataset = load_image_datasets(conf.data)
         train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank, data_parallel, num_workers=0)
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
@@ -369,6 +372,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
 
                 for i, dataT in train_pbar:
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
                     # print(f"data is shape: {[d.shape for d in data]} on device: {data[0].device}")
                     optimizer.zero_grad()
 
@@ -481,6 +485,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
                     loss, loss_dict, model_outs = t_objective(model, data, K=conf.training.K, test=True, iteration=itercount, model_params=model_opts)
                     loss = -loss
 
@@ -721,6 +726,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 z_mags = [[] for _ in range(NUM_VAES)]
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
 
                     latents = model.module("encode", data, avg_z=False, **model_opts) if data_parallel else model("encode", data, avg_z=False, **model_opts)
                     latents_z = latents[NUM_VAES:]
@@ -777,6 +783,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
 
                     mod = model.module if data_parallel else model
 
@@ -822,6 +829,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             with (torch.no_grad(), ema.ema_scope("Epoch test")):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
 
                     W, Z, _, cls_token, _, _, _  = model("encode", data, no_mask=True)
 
@@ -877,6 +885,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
+
                     if len(data) == 3:
                         # remove semseg as this is for testing
                         data = data[:2]
@@ -926,6 +936,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 with (torch.no_grad(), ema.ema_scope("Epoch test")):
                     for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader), position=rank if data_parallel else 0):
                         data = move_data_to_device(dataT, device=device)
+                        data = select_modalities(data, conf.data.modality)
 
                         u = model.module("encode", data, avg_z=False, return_dist=False,
                                                **model_opts) if data_parallel else model("encode", data, avg_z=False,
@@ -1054,6 +1065,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
 
                     for m, (d, mode) in enumerate(zip(data, modality)):
                         imgs[mode].append(d.detach().cpu())
@@ -1111,6 +1123,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
 
                     for j, d in enumerate(data[0]):
                         cv2.imwrite(str(runPath / f"sample_{i*conf.training.batch_size + j}.png"), (d.permute(1, 2, 0).detach().cpu().numpy() * 255).astype(np.uint8))
@@ -1183,6 +1196,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
                     # print(f"data shapes: {data[0].shape}, {data[1].shape}")
 
                     for m, (name, dbatch) in enumerate(zip(modality, data)):
@@ -1265,6 +1279,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                 for i, dataT in tqdm.tqdm(enumerate(test_loader), total=len(test_loader),
                                           position=rank if data_parallel else 0):
                     data = move_data_to_device(dataT, device=device)
+                    data = select_modalities(data, conf.data.modality)
                     # print(f"data shapes: {data[0].shape}, {data[1].shape}")
 
                     for m, (name, dbatch) in enumerate(zip(modality, data)):

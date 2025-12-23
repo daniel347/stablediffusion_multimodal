@@ -30,11 +30,13 @@ class NYUDepth(Dataset):
                  return_row=False,
                  modality_exts="png",
                  shuffle=False,
+                 dont_load_image=False,
                  **kwargs):
 
         super().__init__()
         self.split = split
         self.root_data_dir = root_data_dir
+        self.dont_load_image = dont_load_image
 
         if isinstance(modality, str):
             modality = [modality]
@@ -147,28 +149,31 @@ class NYUDepth(Dataset):
         filepaths = self.index.iloc[idx]
 
         outs = []
-        for mod in self.modality:
-            img = self.mode_readers[mod](str(filepaths[f"{mod}_path"]))
-            if img is None:
-                # Return the filepath so we can add it to bad_paths
-                return str(filepaths[f"{mod}_path"].relative_to(self.root_data_dir))
-            if self.transform is not None:
-                if isinstance(self.transform, dict):
-                    img = self.transform[mod](img)
-                else:
-                    img = self.transform(img)
+        if self.dont_load_image:
+            outs = [None for _ in self.modality]
+        else:
+            for mod in self.modality:
+                img = self.mode_readers[mod](str(filepaths[f"{mod}_path"]))
+                if img is None:
+                    # Return the filepath so we can add it to bad_paths
+                    return str(filepaths[f"{mod}_path"].relative_to(self.root_data_dir))
+                if self.transform is not None:
+                    if isinstance(self.transform, dict):
+                        img = self.transform[mod](img)
+                    else:
+                        img = self.transform(img)
 
-            outs.append(img)
+                outs.append(img)
 
-        flip = random.random() < self.p_hor_flip
-        if flip:
-            for i in range(len(outs)):
-                outs[i] = horizontal_flip(outs[i])
+            flip = random.random() < self.p_hor_flip
+            if flip:
+                for i in range(len(outs)):
+                    outs[i] = horizontal_flip(outs[i])
 
-        colour_jitter = random.random() < self.p_colour_jitter
-        if colour_jitter and "colour" in self.modality:
-            colour_ind = self.modality.index("colour")
-            outs[colour_ind] = self.colour_jitter(outs[colour_ind])
+            colour_jitter = random.random() < self.p_colour_jitter
+            if colour_jitter and "colour" in self.modality:
+                colour_ind = self.modality.index("colour")
+                outs[colour_ind] = self.colour_jitter(outs[colour_ind])
 
         if self.return_index:
             return outs, idx
