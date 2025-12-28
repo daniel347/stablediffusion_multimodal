@@ -11,7 +11,7 @@ def main(data_conf: DictConfig) -> None:
     chunksize = 16384
 
     chunk_ind = 0
-    chunk_folder = root / f"../train_{chunk_ind}"
+    chunk_folder = root.parent / f"train_{chunk_ind}"
 
     with jsonlines.open(root / "metadata.jsonl") as full_meta:
         for i, row in enumerate(full_meta):
@@ -24,8 +24,8 @@ def main(data_conf: DictConfig) -> None:
                 chunk_ind += 1
                 chunk_folder = root / f"../train_{chunk_ind}"
 
-            row["colour_file_name"] = str((root / row["colour_file_name"]).relative_to(chunk_folder))
-            row["depth_file_name"] = str((root / row["depth_file_name"]).relative_to(chunk_folder))
+            row["colour_file_name"] = str(chunk_folder / f"../train" / row["colour_file_name"])
+            row["depth_file_name"] = str(chunk_folder / f"../train" / row["depth_file_name"])
             meta_chunk.append(row)
 
         if len(meta_chunk) > 0:
