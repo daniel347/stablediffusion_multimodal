@@ -17,15 +17,16 @@ def main(data_conf: DictConfig) -> None:
 
     splitnames = {"train": "train", "val": "validation"}
 
-    for split in ["train", "val"]:
-        ds = datasets.load_dataset("imagefolder", data_dir=data_conf.root_data_dir, split=splitnames[split])
+    for split in ["val", "train"]:
+        print(f"loading dataset for {split} split")
+        ds = datasets.load_dataset("imagefolder", data_dir=Path(data_conf.root_data_dir) / splitnames[split], split="train", verification_mode=datasets.VerificationMode.NO_CHECKS, streaming=True)
         # ds = ds.filter(lambda x: x["split"] == split)
         n_shards = math.ceil(len(ds) / 16384)
         print(f"split {split} into {n_shards} shards")
 
         for index in tqdm.tqdm(range(n_shards)):
             shard = ds.shard(index=index, num_shards=n_shards, contiguous=True)
-            output_path_template = outpath / f"{split}-{index:05d}-of-{n_shards:05d}.parquet"
+            output_path_template = outpath / f"{splitnames[split]}-{index:05d}-of-{n_shards:05d}.parquet"
             shard.to_parquet(output_path_template)
 
 if __name__ == "__main__":
