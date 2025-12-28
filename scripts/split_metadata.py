@@ -10,20 +10,26 @@ def main(data_conf: DictConfig) -> None:
     meta_chunk = []
     chunksize = 16384
 
+    chunk_ind = 0
+    chunk_folder = root / f"../train_{chunk_ind}"
+
     with jsonlines.open(root / "metadata.jsonl") as full_meta:
         for i, row in enumerate(full_meta):
             if i % chunksize == 0 and i > 0:
-                outpath = root / f"../train_{i//chunksize - 1}" / f"metadata.jsonl"
+                outpath = chunk_folder / f"metadata.jsonl"
                 print(f"saving chunk to {outpath}")
                 with jsonlines.open(outpath, "w") as f:
                     f.write_all(meta_chunk)
                 meta_chunk = []
+                chunk_ind += 1
+                chunk_folder = root / f"../train_{chunk_ind}"
 
-            row["colour_file_name"] = str(Path(row["colour_file_name"]).relative_to())
+            row["colour_file_name"] = str((root / row["colour_file_name"]).relative_to(chunk_folder))
+            row["depth_file_name"] = str((root / row["depth_file_name"]).relative_to(chunk_folder))
             meta_chunk.append(row)
 
         if len(meta_chunk) > 0:
-            outpath = root / f"../train_{i//chunksize}" / f"metadata.jsonl"
+            outpath = chunk_folder / f"metadata.jsonl"
             print(f"saving final chunk to {outpath}")
             with jsonlines.open(outpath, "w") as f:
                 f.write_all(meta_chunk)
