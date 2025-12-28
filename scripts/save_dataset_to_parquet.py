@@ -11,23 +11,18 @@ def main(data_conf: DictConfig) -> None:
     outpath = Path(data_conf.get("root_data_dir", )) / "../lsun_full_parquet/data"
     outpath.mkdir(parents=True, exist_ok=True)
 
-    opts = copy.deepcopy(OmegaConf.to_container(data_conf))
-    for key in ["p_hor_flip", "p_colour_jitter"]:
-        opts.pop(key, None)
+    shards = list(Path(data_conf.root_data_dir).glob("train_*"))
+    n_shards = len(shards)
+    for index, shard in enumerate(shards):
+        ds = datasets.load_dataset("imagefolder", data_dir=shard,
+                                   split="train", verification_mode=datasets.VerificationMode.NO_CHECKS)
+        output_path_template = outpath / f"train-{index:05d}-of-{n_shards:05d}.parquet"
+        ds.to_parquet(output_path_template)
 
-    splitnames = {"train": "train", "val": "validation"}
 
-    for split in ["val", "train"]:
-        print(f"loading dataset for {split} split")
-        ds = datasets.load_dataset("imagefolder", data_dir=Path(data_conf.root_data_dir) / splitnames[split], split="train", verification_mode=datasets.VerificationMode.NO_CHECKS, streaming=True)
-        # ds = ds.filter(lambda x: x["split"] == split)
-        n_shards = math.ceil(len(ds) / 16384)
-        print(f"split {split} into {n_shards} shards")
-
-        for index in tqdm.tqdm(range(n_shards)):
-            shard = ds.shard(index=index, num_shards=n_shards, contiguous=True)
-            output_path_template = outpath / f"{splitnames[split]}-{index:05d}-of-{n_shards:05d}.parquet"
-            shard.to_parquet(output_path_template)
+    ds_val = datasets.load_dataset("imagefolder", data_dir=Path(data_conf.root_data_dir) / "validation",
+                                   split="train", verification_mode=datasets.VerificationMode.NO_CHECKS)
+    ds_val.to_parquet(outpath / f"validation-00000-of-00001.parquet")
 
 if __name__ == "__main__":
     main()
