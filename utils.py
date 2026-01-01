@@ -477,10 +477,17 @@ def load_image_datasets(data_conf, precompute_latents=False):
         return train_dataset, test_dataset
 
     print(data_conf)
+
     tx = {"colour": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)]),
           "semseg": v2.Compose([v2.Resize(data_conf.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
-                                v2.CenterCrop(data_conf.input_size)]),
+                                    v2.CenterCrop(data_conf.input_size)]),
           "depth": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)])}
+
+    if data_conf.dataset_name == "webdataset":
+        pre_tx = {"colour":  v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True)]),
+          "semseg": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True)]),
+          "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True)])}
+        tx = {m: v2.Compose([pre_tx[m], tx[m]]) for m in data_conf.modality}
 
     return_class = "return_class" in data_conf and data_conf.return_class
 
@@ -533,7 +540,7 @@ def load_huggingface_datasets(data_conf, precompute_latents=False):
     return train_dataset, test_dataset
 
 
-def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, rank=0, data_parallel=False, num_workers=4):
+def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, rank=0, data_parallel=False, num_workers=4, webdataset=False):
     kwargs = {'num_workers': num_workers, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
                                        shuffle=True) if data_parallel else None
@@ -542,11 +549,13 @@ def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, ra
 
     train_collate_fn = None # train_dataset.collate_fn if hasattr(train_dataset, "collate_fn") else None 
     test_collate_fn = None # test_dataset.collate_fn if hasattr(test_dataset, "collate_fn") else None
+    B = batch_size if not webdataset else None
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=B,
                                                shuffle=not data_parallel, sampler=train_sampler,
                                                collate_fn=train_collate_fn, **kwargs)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size, shuffle=False,
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=B,
+                                              shuffle=False,
                                               sampler=test_sampler,
                                               collate_fn=test_collate_fn, **kwargs)
 

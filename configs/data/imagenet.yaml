@@ -3,3 +3,4 @@ root_data_dir:  /rds/general/user/ds3119/ephemeral/imagenet/ILSVRC/Data/CLS-LOC/
 input_size: 128
 modality: ["colour", "depth"]
 modality_exts: {"colour": "JPEG", "depth": "png"}  # specify extensions for each modality
+return_class: true

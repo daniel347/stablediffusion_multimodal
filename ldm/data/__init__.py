@@ -4,4 +4,5 @@ from .dataset_CelebAMask import MMCelebA
 from .dataset_FFHQ import MMFFHQ
 from .dataset_latents import LatentDataset
 from .dataset_NYU_Processed import NYULabelled
+from .dataset_webformat import WebDataset
 from .register_datasets import *

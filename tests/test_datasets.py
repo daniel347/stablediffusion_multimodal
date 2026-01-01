@@ -1,3 +1,4 @@
+
 import pytest
 from ldm.data import get_dataset
 from ldm.data.dataset_RGBSemseg import resize_semseg
@@ -29,18 +30,43 @@ dataset_opts = {"imagenet": {"transform": v2.Compose([v2.Resize(256), v2.CenterC
                             "root_data_dir": "../../datasets/FFHQ_256_Mask",
                             "modality": ["colour", "semseg"],
                             "single_label": True,
-                            "return_index": False}}
+                            "return_index": False},
+                 "web_lsun": {"transform": {"colour":  v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)]),
+                                            "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)])},
+                              "modality": ["colour", "depth"],
+                              "root_data_dir": "../../datasets/lsun_web_small"},
+                 "web_imagenet": {"transform": {"colour": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)]),
+                                           "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)])},
+                              "modality": ["colour", "depth"],
+                              "class_map_path": "LOC_synset_mapping.txt",
+                              "root_data_dir":"../../datasets/imagenet_web_small"}}
+
+def get_data_sample(dataset, index=0):
+    if not getattr(dataset, "is_iterable", False):
+        return dataset[index]
+    else:
+        return next(iter(dataset))
+
+def unbatch(data):
+    if isinstance(data, (list, tuple)):
+        return [unbatch(d) for d in data]
+    elif isinstance(data, dict):
+        return {k: unbatch(v) for k, v in data.items()}
+    else:
+        return data[0]
 
 
-@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "mm_celeba"), ("train", "mm_ffhq"), ("train", "lsun"),
-                                                ("test", "nyu_depth"), ("val", "imagenet"), ("val", "mm_celeba"), ("val", "mm_ffhq"), ("val", "lsun")])
+@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "mm_celeba"), ("train", "mm_ffhq"), ("train", "lsun"), ("train", "web_lsun"), ("train", "web_imagenet"),
+                                                ("test", "nyu_depth"), ("val", "imagenet"), ("val", "mm_celeba"), ("val", "mm_ffhq"), ("val", "lsun"), ("validation", "web_lsun"), ("validation", "web_imagenet")])
 def test_image_load(split, dataset_name):
     loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
+    if "web" in loader_name:
+        loader_name = "webdataset"
     train_dataset = get_dataset(loader_name, **dataset_opts[dataset_name], split=split)
-    rgb, depth = train_dataset[0]
+    rgb, depth = get_data_sample(train_dataset)
 
     # NB depth is actually semseg for mm_celeba
-    _, rgb_h, rgb_w = rgb.shape
+    *_, rgb_h, rgb_w = rgb.shape
     *_, depth_h, depth_w = depth.shape
 
     assert rgb_w > 0
@@ -50,14 +76,17 @@ def test_image_load(split, dataset_name):
     assert depth_w > 0
 
 
-@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "lsun"),
-                                                ("test", "nyu_depth"), ("val", "imagenet"), ("test", "lsun")])
+@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "lsun"), ("train", "web_lsun"), ("train", "web_imagenet"),
+                                                ("test", "nyu_depth"), ("val", "imagenet"), ("test", "lsun"), ("validation", "web_lsun"), ("validation", "web_imagenet")])
 def test_transform(split, dataset_name):
     loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
+    if "web" in loader_name:
+        loader_name = "webdataset"
     train_dataset = get_dataset(loader_name, **dataset_opts[dataset_name], split=split)
-    rgb, depth = train_dataset[0]
-    assert rgb.shape == (3, 256, 256)
-    assert depth.shape == (1, 256, 256)
+    rgb, depth = get_data_sample(train_dataset)
+
+    assert rgb.shape[-3:] == (3, 256, 256)
+    assert depth.shape[-3:] == (1, 256, 256)
 
     assert rgb.dtype == torch.float32
     assert depth.dtype == torch.float32
@@ -185,3 +214,41 @@ def test_nyu_labelled_3_mode():
         assert data[0].shape == (3, 256, 256)
         assert data[1].shape == (1, 256, 256)
         assert data[2].shape == (256, 256)
+        break
+
+@pytest.mark.parametrize("batched", [True, False])
+def test_webdataset_class(batched):
+    opts = dataset_opts["web_imagenet"]
+    opts["return_class"] = True
+    train_dataset = get_dataset("webdataset", **opts, split="train")
+    if batched:
+        train_dataset.batch_output(4)
+    (rgb, depth), cls = get_data_sample(train_dataset)
+
+    if batched:
+        assert cls.dtype == torch.int64
+        assert len(cls.shape) == 1
+    else:
+        assert isinstance(cls, int)
+
+@pytest.mark.parametrize("split,dataset_name", [("train", "web_lsun"), ("train", "web_imagenet"),
+                                                ("validation", "web_lsun"), ("validation", "web_imagenet")])
+def test_webdataset_dataloader(split, dataset_name):
+    from torch.utils.data import DataLoader
+    loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
+    if "web" in loader_name:
+        loader_name = "webdataset"
+
+    opts = dataset_opts[dataset_name]
+
+    train_dataset = get_dataset(loader_name, **opts, split=split)
+    train_dataset.batch_output(4)
+    dataloader = DataLoader(train_dataset, batch_size=None, num_workers=0)
+
+    for i, data in enumerate(dataloader):
+        rgb, depth = data
+        assert rgb.shape == (4, 3, 128, 128)
+        assert depth.shape == (4, 1, 128, 128)
+
+        if i >= 2:
+            break

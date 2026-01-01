@@ -298,7 +298,14 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             train_dataset, test_dataset = load_huggingface_datasets(conf.data)
         else:
             train_dataset, test_dataset = load_image_datasets(conf.data)
-        train_loader, test_loader = create_dataloaders(train_dataset, test_dataset, conf.training.batch_size, world_size, rank, data_parallel, num_workers=0)
+        train_loader, test_loader = create_dataloaders(train_dataset,
+                                                       test_dataset,
+                                                       conf.training.batch_size,
+                                                       world_size,
+                                                       rank,
+                                                       data_parallel,
+                                                       num_workers=0,
+                                                       webdataset=conf.data.dataset_name=="webdataset")
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
         data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [

@@ -130,6 +130,7 @@ class ImagenetMultiModal(Dataset):
                 for k in fp_dict.keys():
                     if isinstance(fp_dict[k], Path):
                         fp_dict[k] = str(fp_dict[k])
+                fp_dict["ind"] = idx
                 rets.append(fp_dict)
 
             return rets
