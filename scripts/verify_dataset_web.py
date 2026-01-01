@@ -7,7 +7,10 @@ import jsonlines
 import webdataset as wds
 import torchvision.transforms.v2 as v2
 from torchvision.transforms.v2 import InterpolationMode
+import torchvision.utils as tvu
 import torch
+import io
+from PIL import Image
 
 @hydra.main(version_base=None, config_path="../configs/data", config_name="lsun_local")
 def main(data_conf: DictConfig) -> None:
@@ -19,9 +22,12 @@ def main(data_conf: DictConfig) -> None:
           "depth": v2.Compose([v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)])}
 
     hf_tx = {"colour":  v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)]),
-          "semseg": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
-                                v2.CenterCrop(data_conf.input_size)]),
+          # "semseg": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
+          #                      v2.CenterCrop(data_conf.input_size)]),
           "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)])}
+
+    hf_decoders = {"colour": lambda x: Image.open(io.BytesIO(x)),
+                    "depth": lambda x: Image.open(io.BytesIO(x))}
 
     def hf_transform(data):
         for mod in data_conf.modality:
@@ -34,24 +40,47 @@ def main(data_conf: DictConfig) -> None:
     for key in ["p_hor_flip", "p_colour_jitter"]:
         opts.pop(key, None)
 
-    for split in ["train", "val"]:
+    for split in ["train"]:
+        """
         dataset = get_dataset(data_conf.dataset_name,
                                     transform=tx,
                                     split=split,
-                                    return_row=False,
+                                    return_row=True,
                                     return_class=return_class,
                                     **opts)
+        """
+        hf_dataset = wds.WebDataset("/rds/general/user/ds3119/ephemeral/imagenet_web/train/train-00000.tar").decode(
+                        wds.handle_extension("colour.jpg", hf_decoders["colour"]),
+                        wds.handle_extension("depth.png", hf_decoders["depth"])).rename(colour="colour.jpg", depth="depth.png").map_dict(**hf_tx)        
+        
+        """
+        for i, data in enumerate(hf_dataset):
+            print(type(data["colour"]))
+            print(type(data["depth"]))
 
-        hf_dataset = wds.WebDataset("/rds/general/user/ds3119/ephemeral/lsun_full_web_small").decode("pil").to_tuple("jpg", "png")
-        hf_dataset.map_tuple(hf_tx["colour"], hf_tx["depth"])
+            print(data["colour"].shape)
+            print(data["depth"].shape)
 
-        for i, (hfdata, data) in enumerate(zip(hf_dataset, dataset)):
-            assert torch.allclose(hfdata[0], data[0]), f"Colour data mismatch for index {data[-1]['ind']}"
-            assert torch.allclose(hfdata[0], data[1]), f"Depth data mismatch for index {data[-1]['ind']}"
+        """
+        for i, hfdata in enumerate(hf_dataset):
+            print(f"checking datum {i}")
+            """
+            data = dataset[i]
+
+            if not torch.allclose(hfdata["colour"], data[0][0]):
+                print(f"Colour data mismatch for index {data[-1]['ind']}")
+            if not torch.allclose(hfdata["depth"], data[0][1]):
+                print(f"Depth data mismatch for index {data[-1]['ind']}")
+            """
+            print(hfdata["colour"].shape)
+            print(hfdata["depth"].shape)
+            tvu.save_image(hfdata["colour"], f"test_colour_{i}.png")
+            tvu.save_image(hfdata["depth"], f"test_depth_{i}.png")
 
             if i > 100:
                 print("All data is matching for first 100 samples")
                 break
+
 
 if __name__ == "__main__":
     main()

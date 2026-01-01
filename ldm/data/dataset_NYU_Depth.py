@@ -182,6 +182,8 @@ class NYUDepth(Dataset):
             for k in fp_dict.keys():
                 if isinstance(fp_dict[k], Path):
                     fp_dict[k] = str(fp_dict[k])
+            fp_dict["ind"] = idx
+
             return outs, fp_dict
         else:
             return outs
