@@ -8,7 +8,7 @@ import random
 from .register_datasets import register_dataset
 from pathlib import Path
 import webdataset as wds
-
+import re
 
 @register_dataset("webdataset")
 class WebDataset(IterableDataset):
@@ -23,6 +23,7 @@ class WebDataset(IterableDataset):
                  class_map_path=None,
                  return_index=False,
                  return_row=False,
+                 nodesplitter=None,
                  **kwargs):
 
         super().__init__()
@@ -37,13 +38,20 @@ class WebDataset(IterableDataset):
         self.modality = modality
         self.transform = transform if transform is not None else {m: lambda x: x for m in modality}
 
+        if split == "val": split = "validation"
+
         data_dir = Path(root_data_dir) / split
+
         data_nums = [int(d.name.split(".")[0].split("-")[-1]) for d in data_dir.glob("*.tar")]
         data_num_min, data_num_max = min(data_nums), max(data_nums)
-        wds_path = "train-{%s..%s}.tar" % (str(data_num_min).zfill(5), str(data_num_max).zfill(5))
+        if data_num_min == data_num_max:
+            wds_path = f"{split}-{str(data_num_min).zfill(5)}.tar"
+        else:
+            wds_path = "%s-{%s..%s}.tar" % (split, str(data_num_min).zfill(5), str(data_num_max).zfill(5))
         wds_path = str(data_dir / wds_path).replace("\\", "/")
+        if re.search(r"^\w:", wds_path): wds_path = f"file:{wds_path}"
 
-        self.ds = (wds.WebDataset(wds_path)
+        self.ds = (wds.WebDataset(wds_path, nodesplitter=nodesplitter)
                    .shuffle(1000 if split == "train" else 0)
                    .decode(wds.handle_extension("colour.jpg", self.colour_decoder),
                           wds.handle_extension("depth.png", self.depth_decoder))
@@ -88,6 +96,10 @@ class WebDataset(IterableDataset):
     def __iter__(self):
         return iter(self.ds)
 
+    def __len__(self):
+        # We dont know the length so return 1
+        return 1
+
     def map_output(self, sample):
         outs = [sample[m] for m in self.modality]
 
@@ -110,7 +122,7 @@ class WebDataset(IterableDataset):
             if self.return_index:
                 raise ValueError("return_index not supported in WebDataset iterator")
             elif self.return_row:
-                fp_dict = {"path": sample["__key__"]}
+                fp_dict = {"key": sample["__key__"]}
                 rets.append(fp_dict)
 
             return rets
@@ -125,7 +137,8 @@ class WebDataset(IterableDataset):
             if self.return_class:
                 data_out.append(torch.tensor(data[1], dtype=torch.long))
             if self.return_row:
-                data_out.append(data[-1])
+                pathdict = {k: [di[k] for di in data[-1]] for k in data[-1][0].keys()}
+                data_out.append(pathdict)
             return tuple(data_out)
         return imgs
 
@@ -142,22 +155,3 @@ class WebDataset(IterableDataset):
             return (torch.clamp(img, 0, 1) * 255).to(torch.uint8).permute(1, 2, 0).numpy()[:, :, ::-1]
         else:
             return img
-
-if __name__ == "__main__":
-    from torchvision.transforms import v2
-    opts = {"transform": {"colour":  v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)]),
-                                            "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)])},
-                              "modality": ["colour", "depth"],
-                              "root_data_dir": "../../datasets/lsun_web_small"},
-    dataset = WebDataset(**opts)
-
-    from torch.utils.data import DataLoader
-
-    dataloader = DataLoader(dataset, batch_size=4, num_workers=4)
-
-    for i, data in enumerate(dataloader):
-        colours, depths, class_nums = data
-        print("Batch ", i, " colours shape: ", colours.shape, " depths shape: ", depths.shape,
-              " class nums: ", class_nums)
-        if i == 2:
-            break

@@ -22,11 +22,11 @@ from torchvision.utils import make_grid
 from torch.optim.lr_scheduler import LinearLR, ChainedScheduler, ExponentialLR, CosineAnnealingWarmRestarts, LambdaLR
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data.distributed import DistributedSampler
 import torch.multiprocessing as mp
 import torchvision.utils as tvu
 from torch.amp import GradScaler, autocast
 from torchvision.transforms import Resize, InterpolationMode
+from torch.distributed.algorithms.join import Join
 
 """
 import ray
@@ -41,6 +41,7 @@ import tempfile
 import sys
 import glob
 import logging
+import contextlib
 
 from ldm.util import instantiate_from_config, Timer, GradAutoClipper, count_params
 from ldm.data import get_dataset, MMCelebA
@@ -52,7 +53,8 @@ import cmmd_pytorch as cmmd
 from utils import (save_and_log_latents, save_and_log_img, expand_sub_confs, move_data_to_device, override_config,
                    save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders,
                    cat_dists_or_tensor_latents,
-                   DiversityMetrics, DisplayMAELatent, duplicate_stable_diff_weights, select_modalities)
+                   DiversityMetrics, DisplayMAELatent, duplicate_stable_diff_weights, select_modalities,
+                   create_web_dataloaders)
 from reconstruct_model_phema import reconstruct_phema
 import ldm.models.diffusion as diffusion
 import cv2
@@ -110,11 +112,10 @@ def preprocess_data(data, modalities, device, return_class=False, return_row=Fal
 
     if isinstance(data, list):
         if return_row:
-            row = data[-1]
-            data = data[:-1]
+            row = data.pop(-1)
         if return_class:
-            classes = data[-1]
-            data = data[:-1]
+            classes = data.pop(-1)
+        data = data[0]
 
     elif isinstance(data, dict):
         if return_row:
@@ -436,18 +437,23 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
         test_param_name = "model.input_blocks.4.0.in_layers.0.weight"
 
-        if conf.data.get("is_huggingface", False):
-            train_dataset, test_dataset = load_huggingface_datasets(conf.data, conf.training.precompute_latents)
-        else:
-            train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents)
+        train_dataset, test_dataset = load_image_datasets(conf.data, conf.training.precompute_latents, data_parallel)
 
-        train_loader, test_loader = create_dataloaders(train_dataset,
-                                                       test_dataset,
-                                                       conf.training.batch_size,
-                                                       world_size,
-                                                       rank,
-                                                       data_parallel,
-                                                       webdataset=conf.data.dataset_name == "webdataset")
+        if conf.data.dataset_name == "webdataset":
+            train_loader, test_loader = create_web_dataloaders(train_dataset,
+                                                           test_dataset,
+                                                           conf.training.batch_size,
+                                                           world_size,
+                                                           rank,
+                                                           data_parallel,
+                                                           num_workers=0)
+        else:
+            train_loader, test_loader = create_dataloaders(train_dataset,
+                                                           test_dataset,
+                                                           conf.training.batch_size,
+                                                           world_size,
+                                                           rank,
+                                                           data_parallel)
 
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
         data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [Path(conf.data.root_data_dir)]
@@ -626,18 +632,17 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                                 # print(f"latent meat shape: {latent_means.shape} std shape: {latent_stds.shape}")
                                 print(latents.shape)
 
-
-                    for k, (latent, r) in enumerate(zip(latents, (row[f"{modality[0]}_path"]) if isinstance(row, dict) else row)):
-                        if isinstance(r, str):
-                            save_path = Path(r.replace(modality[0], "latent"))
+                    for k, latent in enumerate(latents):
+                        if isinstance(row, dict) and f"{modality[0]}_path" in row:
+                            save_path = Path(row[f"{modality[0]}_path"][k].replace(modality[0], "latent"))
                             for root in data_root_dirs:
                                 if save_path.is_relative_to(root):
                                     save_path = out_base_folder / save_path.relative_to(root.parent)  # keep the dataset folder name
-                        else:
+                        elif isinstance(row, dict) and "key" in row:
+                            save_path = out_base_folder / f"latent/{row['key'][k]}.pt"
+                        elif isinstance(row[k], int):
                             save_path = out_base_folder / f"latent/{r:07d}.pt"
                         save_path.parent.mkdir(parents=True, exist_ok=True)
-                        # print(save_path)
-                        data_to_save = {}
 
                         if dists:
                             mean, std = torch.chunk(latent, 2, dim=dist_dim)
@@ -1488,7 +1493,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             test_worsening_count = 0
 
             print("Entering training loop")
-            with Timer('MMVAEplus') as t:
+            context = Join([model, optimizer]) if data_parallel else contextlib.nullcontext()
+
+            with context:
                 if conf.training.precompute_latents and not already_precomputed:
                     # Compute the latents and reload the latent dataloader
                     print("Beginning latent computation and saving")

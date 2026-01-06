@@ -27,6 +27,7 @@ from pathlib import Path
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 import datasets
+import webdataset as wds
 
 # Constants
 class Constants(object):
@@ -466,7 +467,7 @@ def load_checkpoint(ema, model, optimiser, scheduler, path, map_location='cpu', 
     return sd["iteration"] if "iteration" in sd else 0
 
 
-def load_image_datasets(data_conf, precompute_latents=False):
+def load_image_datasets(data_conf, precompute_latents=False, data_parallel=False):
     if isinstance(data_conf, ListConfig):
         # We have multiple datasets to concat
         train_datasets, test_datasets = list(zip(*[load_image_datasets(dc, precompute_latents) for dc in data_conf]))
@@ -499,6 +500,10 @@ def load_image_datasets(data_conf, precompute_latents=False):
             # Dont augment if precomputing latents
             train_opts.pop(key, None)
 
+    if data_conf.dataset_name == "webdataset" and data_parallel:
+        train_opts["nodesplitter"] = webdataset_node_splitter
+        test_opts["nodesplitter"] = webdataset_node_splitter
+
     train_dataset = get_dataset(data_conf.dataset_name,
                                 transform=tx,
                                 split=["train", "test"],
@@ -514,33 +519,20 @@ def load_image_datasets(data_conf, precompute_latents=False):
 
     return train_dataset, test_dataset
 
-def load_huggingface_datasets(data_conf, precompute_latents=False):
 
-    if isinstance(data_conf, ListConfig):
-        raise NotImplementedError("Huggingface dataset list config not implemented yet")
+def create_web_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, rank=0, data_parallel=False, num_workers=4):
+    kwargs = {'num_workers': num_workers, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
 
-    hf_tx = {"colour":  v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)]),
-          "semseg": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size, interpolation=InterpolationMode.NEAREST_EXACT),
-                                v2.CenterCrop(data_conf.input_size)]),
-          "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(data_conf.input_size), v2.CenterCrop(data_conf.input_size)])}
+    train_dataset.batch_output(batch_size)
+    test_dataset.batch_output(batch_size)
 
-    def hf_transform(data):
-        for mod in data_conf.modality:
-            data[mod] = hf_tx[mod](data[mod])
-        return data
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=None, **kwargs)
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=None, **kwargs)
+
+    return train_loader, test_loader
 
 
-    hf_dataset = datasets.load_dataset(data_conf.root_data_dir)
-    hf_dataset.set_transform(hf_transform)
-    # hf_dataset = hf_dataset.with_format("torch")
-
-    train_dataset = hf_dataset["train"]
-    test_dataset = hf_dataset["val"]
-
-    return train_dataset, test_dataset
-
-
-def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, rank=0, data_parallel=False, num_workers=4, webdataset=False):
+def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, rank=0, data_parallel=False, num_workers=4):
     kwargs = {'num_workers': num_workers, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank,
                                        shuffle=True) if data_parallel else None
@@ -549,12 +541,11 @@ def create_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, ra
 
     train_collate_fn = None # train_dataset.collate_fn if hasattr(train_dataset, "collate_fn") else None 
     test_collate_fn = None # test_dataset.collate_fn if hasattr(test_dataset, "collate_fn") else None
-    B = batch_size if not webdataset else None
 
-    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=B,
+    train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=batch_size,
                                                shuffle=not data_parallel, sampler=train_sampler,
                                                collate_fn=train_collate_fn, **kwargs)
-    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=B,
+    test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=batch_size,
                                               shuffle=False,
                                               sampler=test_sampler,
                                               collate_fn=test_collate_fn, **kwargs)
@@ -570,6 +561,23 @@ def cat_dists_or_tensor_latents(latents, dim=1):
         # Distributions
         latents = torch.cat([l.mean for l in latents], dim=dim)
     return latents
+
+
+def webdataset_node_splitter(src, group=None):
+    if torch.distributed.is_initialized():
+        if group is None:
+            group = torch.distributed.group.WORLD
+        rank = torch.distributed.get_rank(group=group)
+        size = torch.distributed.get_world_size(group=group)
+        print(f"nodesplitter: rank={rank} size={size}")
+        count = 0
+        for i, item in enumerate(src):
+            if i % size == rank:
+                yield item
+                count += 1
+        print(f"nodesplitter: rank={rank} size={size} count={count} DONE")
+    else:
+        yield from src
 
 
 class DiversityMetrics():

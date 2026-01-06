@@ -36,6 +36,7 @@ import cmmd_pytorch as cmmd
 from itertools import product
 import math
 import timm.optim.optim_factory as optim_factory
+import contextlib
 
 from ldm.models.mmvae_data_parallel_wrapper import MMVAEDataParallelWrapper
 from ldm.modules.ema import DummyEMA
@@ -45,7 +46,7 @@ from ldm.modules.lora_layers import mark_only_lora_as_trainable
 from reconstruct_model_phema import reconstruct_phema
 
 from utils import (save_and_log_latents, save_and_log_img, duplicate_stable_diff_weights, expand_sub_confs,
-                   move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, load_huggingface_datasets, create_dataloaders,
+                   move_data_to_device, save_checkpoint, load_checkpoint, load_image_datasets, create_dataloaders, create_web_dataloaders,
                    cat_dists_or_tensor_latents, insert_stable_diff_weights, select_modalities)
 
 import pyiqa
@@ -293,26 +294,31 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print("Using mixed precision training")
             scaler = GradScaler()
 
-        # Load dataset
-        if conf.data.get("is_huggingface", False):
-            train_dataset, test_dataset = load_huggingface_datasets(conf.data)
-        else:
-            train_dataset, test_dataset = load_image_datasets(conf.data)
-        train_loader, test_loader = create_dataloaders(train_dataset,
-                                                       test_dataset,
-                                                       conf.training.batch_size,
-                                                       world_size,
-                                                       rank,
-                                                       data_parallel,
-                                                       num_workers=0,
-                                                       webdataset=conf.data.dataset_name=="webdataset")
-
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
         data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [
             Path(conf.data.root_data_dir)]
         dataset_name = conf.dataset_name
         modality = data_conf_0.modality
         returns_class = data_conf_0.get("returns_class", False)
+
+        # Load dataset
+        train_dataset, test_dataset = load_image_datasets(conf.data, data_parallel=data_parallel)
+
+        if dataset_name == "webdataset":
+            train_loader, test_loader = create_web_dataloaders(train_dataset,
+                                                               test_dataset,
+                                                               conf.training.batch_size,
+                                                               world_size,
+                                                               rank,
+                                                               data_parallel)
+        else:
+            train_loader, test_loader = create_dataloaders(train_dataset,
+                                                           test_dataset,
+                                                           conf.training.batch_size,
+                                                           world_size,
+                                                           rank,
+                                                           data_parallel,
+                                                           num_workers=0)
 
         if isinstance(train_dataset, torch.utils.data.ConcatDataset):
             display_data_fs = [getattr(train_dataset.datasets[0], f"{mode}_display") for mode in data_conf_0.modality]
@@ -1381,7 +1387,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             train_pbar = tqdm.tqdm(enumerate(train_loader), total=len(train_loader),
                                    position=rank if data_parallel else 0)
 
-            with Timer('MMVAEplus') as t:
+            context = Join([model, optimizer]) if data_parallel else contextlib.nullcontext()
+
+            with context:
                 # test(0, conf.training.start_iter, 0, compute_metrics)
 
                 for subepoch, itercount in enumerate(range(start_iter,
