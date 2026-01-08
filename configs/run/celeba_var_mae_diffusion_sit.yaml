@@ -3,12 +3,12 @@
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 device: "cuda:0"
 name: "celeba_var_mae_sit_train"
-notes: "We try training diffusion on the MAE latent space with no regularisation - I expect this to go badly!"
+notes: "We try training diffusion on the improved variational MAE on CelebA."
 
 training:
   precompute_latents: True
   force_recompute: True
-  precompute_latents_path: latents_precompute_rgb_mae_no_reg  # /rds/general/user/ds3119/ephemeral/
+  precompute_latents_path: latents_precompute_rgb_vmae  # /rds/general/user/ds3119/ephemeral/
   latent_scale_per_channel: False
   compute_latent_scale: True
 
@@ -23,11 +23,11 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_10_21__09_24_46_celeba_mae_train_no_vq/model_22000.pt"  # /rds/general/user/ds3119/ephemeral/
+        ckpt_path: "/rds/general/user/ds3119/home/multimodal_generation/outputs/MM_CelebA_Autoencoder/checkpoints/2025_12_10__11_39_45_celeba_var_mae_train/model_8400.pt"  # /rds/general/user/ds3119/ephemeral/
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_11_10__20_01_47_celeba_mae_sit_train/model_6000.pt" 
+model_initialisation:
 
 defaults:
-  - override /model: mae-sit-mm-rgb-no-quant
+  - override /model: mae-sit-mm-rgb-vae
   - override /sampler: ddpm
   - _self_
