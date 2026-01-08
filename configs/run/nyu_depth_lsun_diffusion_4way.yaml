@@ -1,12 +1,12 @@
 # @package _global_
 
-name: "nyu_lsun_ae_diff_rerun"
-notes: "We train diffusion with our latest NYU LSUN autoencoder. We also employ sampling of the latent space during the diffusion training. We rerun to check the code"
+name: "nyu_lsun_full_ae_diff"
+notes: "We train diffusion with our latest NYU LSUN autoencoder. We also employ sampling of the latent space during the diffusion training. We train on the full LSUN dataset for comparison"
 
 training:
   precompute_latents: True
   force_recompute: False
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_lsun_full
   latent_scale_per_channel: True
   compute_latent_scale: True
 
@@ -19,4 +19,5 @@ model:
         ckpt_path: "/rds/general/user/ds3119/home/multimodal_generation/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt"
 
 defaults:
+  - override /data: lsun_web
   - _self_
