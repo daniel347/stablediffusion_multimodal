@@ -6,20 +6,25 @@ name: "celeba_mae_train_resample"
 notes: "We try training our MAE on CelebA rgb images with the parameters of the VMAE. We project the codewords up to the right size and also resample the code book every 2000 iterations. We start with 6000 unquantised iterations"
 
 training:
+  weight_decay: 0.05
   lr: 1e-4
   num_epochs: 60
   patience: 60  # dont early stop
-        
+  batch_size: 256
+
   model_opts:
     total_mask_ratio: 0.5
-    shared_mask_ratio: 0.75
+    shared_mask_ratio: 1.0
 
-  test_every_iter: 3000
+  test_every_iter: 300
   objective:
     params:        
       start_adv_iter: 2000
-      wadversary: 50
+      wadversary: 0.0
+      wlpips: [0.5]
       mmd_zw_weight: 0.0
+      wll: 1.0
+      kl_weight: 0
       freq_vq_resample: 2000
       stop_vq_resample: 12000
       vq_resample_noise: 0.03
@@ -31,7 +36,7 @@ training:
 
 model_initialisation: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_14__09_39_14_celeba_mae_train_resample_vq_warm_start/model_12000.pt"
 init_from_stable_diffusion: False
-init_from_mae: True
+init_from_mae: False
 resume_training: False
 
 

@@ -12,7 +12,7 @@ params:
       hidden_size: 768
       patch_size: 1  # put tokens in directly ( with projection )
       num_heads: 12
-      input_size: 8
+      input_size: 16
       num_classes: null
       in_channels: 32
       learn_sigma: False
@@ -40,7 +40,7 @@ params:
             embed_dim: 192
             depth: 8
             num_heads: 12
-            decoder_embed_dim: 5129
+            decoder_embed_dim: 192
             decoder_depth: 12
             decoder_num_heads: 12
             mlp_ratio: 4

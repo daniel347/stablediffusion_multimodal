@@ -37,6 +37,7 @@ init_from_stable_diffusion: False
 init_from_mae: False
 resume_training: False
 
+
 defaults:
   - override /model: mae-sit-mm-rgb-vae
   - _self_
