@@ -3,7 +3,7 @@ params:
   path_type: "Linear"
   prediction: "velocity"
   loss_weight: null
-  input_shape: [192, 16, 16]
+  input_shape: [32, 16, 16]
 
   scorenet_config:
     target: SiT.models.SiT
@@ -12,9 +12,9 @@ params:
       hidden_size: 768
       patch_size: 1  # put tokens in directly ( with projection )
       num_heads: 12
-      input_size: 8
+      input_size: 16
       num_classes: null
-      in_channels: 192
+      in_channels: 32
       learn_sigma: False
       n_cls_tokens: 1
       use_fp16: False
