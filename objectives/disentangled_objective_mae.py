@@ -37,6 +37,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                  w_unmasked=None,
                  w_fullmask=None,
                  w_shared=None,
+                 decoder_only=False,
                  **kwargs):
         super(DisentanglingObjectiveMAE, self).__init__()
 
@@ -83,6 +84,8 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         self.min_encs = [None, None]
         self.last_mse_codebook_err = 0
         self.vq_betas = [getattr(getattr(vae, "quantiser", None), "beta", None) for vae in self.mod.vaes]
+
+        self.decoder_only = decoder_only
 
     def _m_dreg(self, model, X, iteration=0, model_params={}, **kwargs):
         loss_dict = {"lpips": 0, "recon_logprob": 0, "prior": 0, "z_dist": 0,
@@ -157,7 +160,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
                 self.min_encs[m] = me.flatten(end_dim=-2).sum(dim=0)
 
         # KL loss
-        if self.mod.is_variational:
+        if self.mod.is_variational and not self.decoder_only:
             for w, z in zip(W, Z):
                 prior_w = DiagonalGaussian(mean=torch.zeros_like(w.mean), logvar=torch.zeros_like(w.logvar))
                 kl_div_w = torch.distributions.kl.kl_divergence(w, prior_w).unsqueeze(0) # unsqueeze for K
@@ -175,7 +178,7 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
         # Z distance loss (Symmetric kl but only works for 2 modalities)
         if len(Z) != 2:
             print("WARNING: Z distance loss only works for 2 modalities, skipping")
-        else:
+        elif not self.decoder_only:
             if self.mod.is_variational:
                 z1_norm = torch.linalg.vector_norm(Z[0].mean, dim=(1, 2))
                 z2_norm = torch.linalg.vector_norm(Z[1].mean, dim=(1, 2))
@@ -187,31 +190,38 @@ class DisentanglingObjectiveMAE(torch.nn.Module):
 
             lws.append(-z_dist_loss.unsqueeze(0)/2)
             loss_dict["z_dist_normed_euclidean"] = -z_dist_loss.clone().detach().cpu().sum().item()
+        else:
+            lws.append(torch.zeros(K, B, dtype=torch.float32, device=X[0].device))
 
 
         # z - w independence loss with MMD
-        mmd_loss = MMDIndependenceLoss(target_dim=2)
+        if not self.decoder_only:
+            mmd_loss = MMDIndependenceLoss(target_dim=2)
 
-        for r, (qz_x, qw_x_r) in enumerate(zip(Z, W)):
-            lmmd_zw_r = torch.tensor(0.0, device=qz_x.device)
-            lmmd_ww_r = torch.tensor(0.0, device=qz_x.device)
-            for d, qw_x in enumerate(W):
-                print(f"qz_x mean: {qz_x.shape}")
-                print(f"qw_x mean: {qw_x.shape}")
-                if self.mod.is_variational:
-                    lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x.mean, qw_x.mean)
-                    if r != d:
-                        lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r.mean, qw_x.mean)
-                else:
-                    lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x, qw_x)
-                    if r != d:
-                        lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r, qw_x)
+            for r, (qz_x, qw_x_r) in enumerate(zip(Z, W)):
+                lmmd_zw_r = torch.tensor(0.0, device=qz_x.device)
+                lmmd_ww_r = torch.tensor(0.0, device=qz_x.device)
+                for d, qw_x in enumerate(W):
+                    print(f"qz_x mean: {qz_x.shape}")
+                    print(f"qw_x mean: {qw_x.shape}")
+                    if self.mod.is_variational:
+                        lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x.mean, qw_x.mean)
+                        if r != d:
+                            lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r.mean, qw_x.mean)
+                    else:
+                        lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x, qw_x)
+                        if r != d:
+                            lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r, qw_x)
 
-            lws.append( - lmmd_zw_r * torch.ones(K, B, dtype=torch.float32, device=lmmd_zw_r.device))
-            lws.append( - lmmd_ww_r * torch.ones(K, B, dtype=torch.float32, device=lmmd_zw_r.device))
+                lws.append( - lmmd_zw_r * torch.ones(K, B, dtype=torch.float32, device=lmmd_zw_r.device))
+                lws.append( - lmmd_ww_r * torch.ones(K, B, dtype=torch.float32, device=lmmd_zw_r.device))
 
-            loss_dict["mmd_zw"] -= lmmd_zw_r.clone().detach().cpu().sum().item()
-            loss_dict["mmd_ww"] -= lmmd_ww_r.clone().detach().cpu().sum().item()
+                loss_dict["mmd_zw"] -= lmmd_zw_r.clone().detach().cpu().sum().item()
+                loss_dict["mmd_ww"] -= lmmd_ww_r.clone().detach().cpu().sum().item()
+        else:
+            for _ in Z:
+                lws.append(torch.zeros(K, B, dtype=torch.float32, device=X[0].device))
+                lws.append(torch.zeros(K, B, dtype=torch.float32, device=X[0].device))
 
         # stack loss type
         lws = torch.stack(lws, dim=-1)
