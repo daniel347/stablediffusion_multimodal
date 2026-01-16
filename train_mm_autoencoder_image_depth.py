@@ -405,7 +405,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                             grad_clipper.autoclip_grad()
                         scaler.step(optimizer)
 
-
                     else:
                         loss, loss_dict, model_outs = objective(model, data, K=conf.training.K, iteration=itercount, set_l0=(i==0 or i==objective.start_adv_iter), model_params=model_opts)
                         loss = -loss

@@ -16,7 +16,7 @@ training:
     total_mask_ratio: 0.5
     shared_mask_ratio: 1.0
 
-  test_every_iter: 300
+  test_every_iter: 1000
   objective:
     params:        
       start_adv_iter: 2000
@@ -29,15 +29,15 @@ training:
       stop_vq_resample: 12000
       vq_resample_noise: 0.03
       start_vq: 6000
-
+      beta: 0.1
 
   discriminator:
     discriminator_lr: 4e-4
 
-model_initialisation: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_11_14__09_39_14_celeba_mae_train_resample_vq_warm_start/model_12000.pt"
+model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2026_01_15__12_06_28_celeba_mae_train/model_8000.pt"
 init_from_stable_diffusion: False
 init_from_mae: False
-resume_training: False
+resume_training: True
 
 
 defaults:
