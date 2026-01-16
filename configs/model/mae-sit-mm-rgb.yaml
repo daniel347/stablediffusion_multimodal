@@ -53,5 +53,5 @@ params:
                 n_e: 8192
                 e_dim: 64
                 e_dim_in: 192
-                beta: 1
+                beta: 300
                 normalise: True

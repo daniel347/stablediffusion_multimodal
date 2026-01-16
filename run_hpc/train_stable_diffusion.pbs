@@ -1,5 +1,5 @@
 #!/bin/bash
-#PBS -l select=1:ncpus=4:mem=24gb:ngpus=0
+#PBS -l select=1:ncpus=4:mem=24gb:ngpus=1
 #PBS -l walltime=06:00:00
 
 eval "$(~/miniconda3/bin/conda shell.bash hook)"
