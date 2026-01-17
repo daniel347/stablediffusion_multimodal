@@ -235,9 +235,9 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                   "encoders and using the z combiner network")
             freeze_encoders(model, data_parallel, freeze=True)
             mod.use_z_comb_network = True  # Default to using the z combiner when encoding
-        elif conf.training.objective.kwargs.get("decoder_only", False):
+        elif conf.training.objective.params.get("decoder_only", False):
             print("Training decoder only - Freezing parameters of the encoders")
-            for vae in model.vaes:
+            for vae in model.module.vaes:
                 vae.freeze_encoder()
 
 
