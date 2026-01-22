@@ -1,19 +1,17 @@
 # @package _global_
 
 name: "nyu_lsun_ae_diff_test_metrics_new_ref"
-notes: "We test metrics for the nyu_lsun_ae_diff model with optimised ema of std 0.175. We recompute TCE and TIE because of an error in the depth computation."
+notes: "We test metrics for the nyu_lsun_full_ae_diff model with optimised ema of std 0.125. We recompute TCE and TIE because of an error in the depth computation."
 
 function:
   name: test_metrics
-  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True, metrics: ["fid", "kid"]}
-
-dataset_name: nyu_depth_lsun_new
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True, metrics: ["fid", "kid", "tce", "tie", "cmmd"]}
 
 training:
   precompute_latents: True
   force_recompute: False
   latent_scale_per_channel: True
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_2
+  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_lsun_full
   compute_latent_scale: True
 
 model:
@@ -22,8 +20,9 @@ model:
       params:
         ckpt_path: null
 
-model_initialisation: /rds/general/user/ds3119/home/multimodal_generation/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_01__04_10_09_nyu_lsun_ae_diff/model_it60000_ema_0.175.pt
+model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2026_01_20__15_41_50_nyu_lsun_full_ae_diff/model_it144000_ema_0.125.pt
 
 defaults:
+  - override /data: lsun_web
   - override /ema: dummy_ema
   - _self_
