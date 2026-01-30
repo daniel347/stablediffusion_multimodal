@@ -941,7 +941,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             else:
                 run_params = {"S": 1000}  # For all but DDPM we must specify a number of timesteps
 
-            gen_batch_size = 64
+            gen_batch_size = 1
             n_batches = n_samples // gen_batch_size
 
             tempdirs = {}
