@@ -5,9 +5,9 @@ notes: "We compute metrics for the nyu_lsun_sit_diff model, with ema std 0.125."
 
 function:
   name: test_metrics
-  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True, metrics: ["fid", "kid", "tce", "tie", "cmmd"]}
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: False, metrics: ["fid", "kid", "tce", "tie", "cmmd"], folder_name: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2026_01_20__16_44_39_nyu_lsun_sit_diff_ema_opt_test_metrics/temp_fid"}
 
-dataset_name: nyu_depth_lsun"
+dataset_name: nyu_depth_lsun
   
 training:
   precompute_latents: True

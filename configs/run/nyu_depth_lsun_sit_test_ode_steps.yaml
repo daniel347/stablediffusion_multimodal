@@ -1,11 +1,11 @@
 # @package _global_
 
-name: "nyu_lsun_sit_diff_ema_opt_test_metrics"
-notes: "We compute metrics for the nyu_lsun_sit_diff model, with ema std 0.125."
+name: "nyu_lsun_sit_diff_ema_opt_test_ode_steps"
+notes: "We check the number of steps the variable step size ode solver uses"
 
 function:
   name: generate
-  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 64, gen_samples: True}
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 64}
 
 dataset_name: nyu_depth_lsun
   
