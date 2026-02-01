@@ -27,6 +27,6 @@ model_initialisation: "/rds/general/user/ds3119/home/multimodal_generation/outpu
 defaults:
   - override /model: sit-mm-rgb-depth
   - override /sampler: ddpm
-  - override /data: lsun_web
+  - override /data: lsun
   - override /ema: dummy_ema
   - _self_
