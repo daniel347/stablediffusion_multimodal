@@ -12,7 +12,7 @@ class LatentDPS(nn.Module):
         self.manifold_constraint = manifold_constraint
         self.curvature_bound = curvature_bound
 
-    def forward(self, zprev, zt, z0, y, t, et, **kwargs):
+    def forward(self, zprev, zt, z0, y, t, et, return_correction=False, **kwargs):
         z0_scaled = self.model_first_stage.scale_latents(z0, reverse=True)
         x0 = self.model_first_stage.decode(z0_scaled)
 
@@ -39,4 +39,6 @@ class LatentDPS(nn.Module):
                 print(f"curvature_manifold_error: {curvature_manifold_error}")
                 scale = torch.clamp((self.curvature_bound / curvature_manifold_error).sqrt(), min=None, max=self.scale)
 
+        if return_correction:
+            return -scale * norm_grads
         return zprev - scale * norm_grads

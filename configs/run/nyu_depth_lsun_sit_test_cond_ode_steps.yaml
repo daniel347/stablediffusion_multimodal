@@ -27,7 +27,7 @@ guidance:
     target: ldm.models.guidance.latent_dps.LatentDPS
     params:
       mod_weights: [1.0, 1.0]
-      scale: 1
+      scale: 10
 
   meas_confs:
     - null
