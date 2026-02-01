@@ -10,7 +10,7 @@ function:
 dataset_name: nyu_depth_lsun
   
 training:
-  precompute_latents: True
+  precompute_latents: False
   force_recompute: False
   latent_scale_per_channel: True
   precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_lsun_full
@@ -27,7 +27,7 @@ guidance:
     target: ldm.models.guidance.latent_dps.LatentDPS
     params:
       mod_weights: [1.0, 1.0]
-      scale: 10
+      scale: 65.0
 
   meas_confs:
     - null
@@ -35,10 +35,11 @@ guidance:
       params: {}
 
 model_initialisation: "/rds/general/user/ds3119/home/multimodal_generation/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2026_01_06__14_52_49_sit_diff_full_lsun/model_it144000_ema_0.125.pt"
+# "C:/Users/daniel/Documents/ImperialCodeStuff/stablediffusion_multimodal/output_checkpoints/NYU_Depth_Stable_Diffusion/2026_01_06__14_52_49_sit_diff_full_lsun/model_it144000_ema_0.125.pt" #
 
 defaults:
   - override /model: sit-mm-rgb-depth
   - override /sampler: ddpm
-  - override /data: lsun
+  - override /data: lsun_web
   - override /ema: dummy_ema
   - _self_
