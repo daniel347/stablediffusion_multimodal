@@ -118,6 +118,7 @@ def preprocess_data(data, modalities, device, return_class=False, return_row=Fal
         data = data[0]
 
     elif isinstance(data, dict):
+        print({k: v.shape for k, v in data.items()})
         if return_row:
             row = data["ind"]
         if return_class:
@@ -1197,6 +1198,16 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                             y.append(None)
                         else:
                             y.append(meas_model(d))
+                    print("y:", [yi.shape if yi is not None else None for yi in y])
+
+                    for m, (name, samples) in enumerate(zip(modality, data)):
+                        for k, s in enumerate(samples):
+                            save_and_log_img(s.unsqueeze(0), f'GT/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
+
+                    for m, (name, samples) in enumerate(zip(modality, y)):
+                        if samples is not None:
+                            for k, s in enumerate(samples):
+                                save_and_log_img(s.unsqueeze(0), f'y/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
 
                     latents = sampler.sample(verbose=enable_pbars,
                                              batch_size=gen_batch_size,
@@ -1218,15 +1229,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         print(f"sample modality {m} shape: {samples.mean.shape}")
                         for k, s in enumerate(samples.mean):
                             save_and_log_img(s.unsqueeze(0), f'Generation/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
-
-                    for m, (name, samples) in enumerate(zip(modality, data)):
-                        for k, s in enumerate(samples):
-                            save_and_log_img(s.unsqueeze(0), f'GT/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
-
-                    for m, (name, samples) in enumerate(zip(modality, y)):
-                        if samples is not None:
-                            for k, s in enumerate(samples):
-                                save_and_log_img(s.unsqueeze(0), f'y/m{m}_{i*gen_batch_size + k}', runPath, display_data_fs[m], 0, run, save_kwargs={})
 
                     if i * gen_batch_size >= n_samples:
                         break
