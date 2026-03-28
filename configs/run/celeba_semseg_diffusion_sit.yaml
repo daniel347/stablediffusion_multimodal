@@ -18,7 +18,7 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "/rds/general/user/ds3119/home/multimodal_generation/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_30__20_39_50_low_l1_finetune_zcomb/model_2000.pt"
+        ckpt_path: # "/rds/general/user/ds3119/home/multimodal_generation/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_30__20_39_50_low_l1_finetune_zcomb/model_2000.pt"
 
 model_initialisation:
 
