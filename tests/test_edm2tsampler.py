@@ -21,7 +21,7 @@ def constuct_alphas_cumprod(beta_schedule="linear",
     return torch.from_numpy(alphas_cumprod)
 
 
-def construct_tsampler(config_path="tests/configs/test_edm2tsampler.yaml"):
+def construct_tsampler(config_path="configs/test_edm2tsampler.yaml"):
     with open(config_path) as f:
         config = yaml.safe_load(f)
         alphas_cumprod = constuct_alphas_cumprod()

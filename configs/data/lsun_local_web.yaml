@@ -1,4 +1,0 @@
-dataset_name: webdataset
-root_data_dir:  "C:/Users/danie/Documents/ImperialCodeStuff/datasets/lsun_web_small"
-input_size: 128
-modality: ["colour", "depth"]

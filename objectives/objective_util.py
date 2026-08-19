@@ -36,7 +36,7 @@ def compute_microbatch_split(x, K):
 
 def reconstruction_loss(px_u, x_d, llik_scale, loss_dict, wlpips_d, wll_d, lpips, channel_weighting_d, fail_on_nan=True, return_breakdown=False, masks=None, maskweights=None, legacy=False):
     lpx_u_elem = 0
-    print(f"px_u batch shape: {px_u.batch_shape}  x_d shape: {x_d.shape}")
+    # print(f"px_u batch shape: {px_u.batch_shape}  x_d shape: {x_d.shape}")
 
     if isinstance(px_u, torch.distributions.Categorical):
         x_num = MMCelebA.one_hot_semseg_to_index(x_d)

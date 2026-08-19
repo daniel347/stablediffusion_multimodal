@@ -41,44 +41,21 @@ def main(data_conf: DictConfig) -> None:
         opts.pop(key, None)
 
     for split in ["train"]:
-        """
-        dataset = get_dataset(data_conf.dataset_name,
-                                    transform=tx,
-                                    split=split,
-                                    return_row=True,
-                                    return_class=return_class,
-                                    **opts)
-        """
         hf_dataset = wds.WebDataset("/rds/general/user/ds3119/ephemeral/imagenet_web/train/train-00000.tar").decode(
                         wds.handle_extension("colour.jpg", hf_decoders["colour"]),
                         wds.handle_extension("depth.png", hf_decoders["depth"])).rename(colour="colour.jpg", depth="depth.png").map_dict(**hf_tx)        
         
-        """
-        for i, data in enumerate(hf_dataset):
-            print(type(data["colour"]))
-            print(type(data["depth"]))
 
-            print(data["colour"].shape)
-            print(data["depth"].shape)
-
-        """
         for i, hfdata in enumerate(hf_dataset):
             print(f"checking datum {i}")
-            """
-            data = dataset[i]
 
-            if not torch.allclose(hfdata["colour"], data[0][0]):
-                print(f"Colour data mismatch for index {data[-1]['ind']}")
-            if not torch.allclose(hfdata["depth"], data[0][1]):
-                print(f"Depth data mismatch for index {data[-1]['ind']}")
-            """
             print(hfdata["colour"].shape)
             print(hfdata["depth"].shape)
             tvu.save_image(hfdata["colour"], f"test_colour_{i}.png")
             tvu.save_image(hfdata["depth"], f"test_depth_{i}.png")
 
             if i > 100:
-                print("All data is matching for first 100 samples")
+                print("First 100 images checked, stopping.")
                 break
 
 

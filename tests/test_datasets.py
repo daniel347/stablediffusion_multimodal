@@ -1,45 +1,37 @@
 
 import pytest
 from ldm.data import get_dataset
-from ldm.data.dataset_RGBSemseg import resize_semseg
-from torchvision.transforms import v2
+from torchvision.transforms import v2, InterpolationMode
 import torch
 import torchvision.utils as tvu
+from pathlib import Path
+
+datasets_path = Path(r"C:\Users\danie\Documents\ImperialSoftwareProjects\datasets")
 
 dataset_opts = {"imagenet": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
                              "modality": ["colour", "depth"],
-                             "root_data_dir": "../../datasets/imagenet/ILSVRC/Data/CLS-LOC/",
+                             "root_data_dir": datasets_path / "imagenet/ILSVRC/Data/CLS-LOC/",
                              "modality_exts": {"colour": "JPEG", "depth": "png"}},
-                "nyu_labelled": {"transform": {"colour": v2.Resize([256, 256]), "semseg": lambda x: resize_semseg(x, (256, 256)), "depth": v2.Resize([256, 256])},
-                              "modality": ["colour", "depth"],
-                              "root_data_dir": "../../datasets/nyuv2_labelled",
-                              "classes": ["bedroom"]},
                 "nyu_depth": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
                               "modality": ["colour", "depth"],
-                              "root_data_dir": "../../datasets/nyuv2_processed",
-                              "classes": ["bedroom"]},
+                              "root_data_dir": datasets_path / "nyuv2_processed"},
                 "lsun": {"transform": v2.Compose([v2.Resize(256), v2.CenterCrop(256)]),
                               "modality": ["colour", "depth"],
                               "modality_exts": {"colour": "jpg", "depth": "png"},
-                              "root_data_dir": "../../datasets/lsun"},
-                "mm_celeba": {"transform": {"colour": v2.Resize([256, 256]), "semseg": lambda x: resize_semseg(x, (256, 256))},
+                              "root_data_dir": datasets_path / "lsun"},
+                "mm_celeba": {"transform": {"colour": v2.Resize([256, 256]), "semseg": v2.Resize(256, interpolation=InterpolationMode.NEAREST_EXACT)},
                               "modality": ["colour", "semseg"],
-                              "root_data_dir": "../../datasets/CelebAMask-HQ",
+                              "root_data_dir": datasets_path / "CelebAMask-HQ",
                               "single_label": False},
-                "mm_ffhq": {"transform": {"colour": v2.Resize([256, 256]), "semseg": lambda x: resize_semseg(x, (256, 256))},
-                            "root_data_dir": "../../datasets/FFHQ_256_Mask",
-                            "modality": ["colour", "semseg"],
-                            "single_label": True,
-                            "return_index": False},
-                 "web_lsun": {"transform": {"colour":  v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)]),
-                                            "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)])},
+                 "web_lsun": {"transform": {"colour":  v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(256), v2.CenterCrop(256)]),
+                                            "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(256), v2.CenterCrop(256)])},
                               "modality": ["colour", "depth"],
-                              "root_data_dir": "../../datasets/lsun_web_small"},
-                 "web_imagenet": {"transform": {"colour": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)]),
-                                           "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(128), v2.CenterCrop(128)])},
+                              "root_data_dir": datasets_path / "lsun_web_small"},
+                 "web_imagenet": {"transform": {"colour": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(256), v2.CenterCrop(256)]),
+                                           "depth": v2.Compose([v2.PILToTensor(), v2.ToDtype(torch.float32, scale=True), v2.Resize(256), v2.CenterCrop(256)])},
                               "modality": ["colour", "depth"],
                               "class_map_path": "LOC_synset_mapping.txt",
-                              "root_data_dir":"../../datasets/imagenet_web_small"}}
+                              "root_data_dir": datasets_path / "imagenet_web_small"}}
 
 def get_data_sample(dataset, index=0):
     if not getattr(dataset, "is_iterable", False):
@@ -56,8 +48,8 @@ def unbatch(data):
         return data[0]
 
 
-@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "mm_celeba"), ("train", "mm_ffhq"), ("train", "lsun"), ("train", "web_lsun"), ("train", "web_imagenet"),
-                                                ("test", "nyu_depth"), ("val", "imagenet"), ("val", "mm_celeba"), ("val", "mm_ffhq"), ("val", "lsun"), ("validation", "web_lsun"), ("validation", "web_imagenet")])
+@pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "mm_celeba"), ("train", "lsun"), ("train", "web_lsun"), ("train", "web_imagenet"),
+                                                ("test", "nyu_depth"), ("val", "imagenet"), ("val", "mm_celeba"), ("val", "lsun"), ("validation", "web_lsun"), ("validation", "web_imagenet")])
 def test_image_load(split, dataset_name):
     loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
     if "web" in loader_name:
@@ -77,7 +69,7 @@ def test_image_load(split, dataset_name):
 
 
 @pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "imagenet"), ("train", "lsun"), ("train", "web_lsun"), ("train", "web_imagenet"),
-                                                ("test", "nyu_depth"), ("val", "imagenet"), ("test", "lsun"), ("validation", "web_lsun"), ("validation", "web_imagenet")])
+                                                ("val", "nyu_depth"), ("val", "imagenet"), ("val", "lsun"), ("validation", "web_lsun"), ("validation", "web_imagenet")])
 def test_transform(split, dataset_name):
     loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
     if "web" in loader_name:
@@ -91,14 +83,14 @@ def test_transform(split, dataset_name):
     assert rgb.dtype == torch.float32
     assert depth.dtype == torch.float32
 
-    assert rgb.min() >= 0.0
-    assert rgb.max() <= 1.0
+    assert torch.allclose(rgb.min(), torch.tensor(0.0))
+    assert torch.allclose(rgb.max(), torch.tensor(1.0))
 
-    assert depth.min() >= 0.0
-    assert depth.max() <= 1.0
+    assert torch.allclose(depth.min(),torch.tensor(0.0))
+    assert torch.allclose(depth.max(), torch.tensor(1.0))
 
 @pytest.mark.parametrize("split,dataset_name", [("train", "nyu_depth"), ("train", "lsun"),
-                                                ("test", "nyu_depth"), ("test", "lsun")])
+                                                ("val", "nyu_depth"), ("val", "lsun")])
 def test_class_selection(split, dataset_name):
     loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
     dataset = get_dataset(loader_name, **dataset_opts[dataset_name], split=split, classes=["bedroom", "basement"])
@@ -108,8 +100,8 @@ def test_class_selection(split, dataset_name):
     assert df.scene_class.isin(["bedroom", "basement"]).all()
 
 
-@pytest.mark.parametrize("split,dataset_name,expected_len", [("train", "nyu_depth", 50688), ("train", "imagenet", 1300), ("train", "mm_celeba", 24183), ("train", "mm_ffhq", 50000), ("train", "lsun", 90000),
-                                                             ("test", "nyu_depth", 654), ("val", "imagenet", 50), ("val", "mm_celeba", 2993), ("val", "mm_ffhq", 10000), ("test", "lsun", 10000)])
+@pytest.mark.parametrize("split,dataset_name,expected_len", [("train", "nyu_depth", 50688), ("train", "imagenet", 1300), ("train", "mm_celeba", 24183), ("train", "lsun", 90000),
+                                                             ("val", "nyu_depth", 654), ("val", "imagenet", 50), ("val", "mm_celeba", 2993), ("val", "lsun", 10000)])
 def test_len(split, dataset_name, expected_len):
     loader_name = dataset_name if dataset_name != "lsun" else "nyu_depth"
     train_dataset = get_dataset(loader_name, **dataset_opts[dataset_name], split=split)
@@ -117,34 +109,26 @@ def test_len(split, dataset_name, expected_len):
     assert len(train_dataset) == expected_len
 
 
-@pytest.mark.parametrize("split,dataset_name,single_label", [("train", "mm_celeba", False), ("train", "mm_celeba", True), ("train", "mm_ffhq", True),
-                                                             ("val", "mm_celeba", False), ("val", "mm_celeba", True), ("val", "mm_ffhq", True)])
-def test_celeba_transform(split, dataset_name, single_label):
+@pytest.mark.parametrize("split,dataset_name", [("train", "mm_celeba"),
+                                                ("val", "mm_celeba"),])
+def test_celeba_transform(split, dataset_name):
     opts = dataset_opts[dataset_name]
-    opts["single_label"] = single_label
     train_dataset = get_dataset(dataset_name, **opts, split=split)
     rgb, semseg = train_dataset[0]
 
-    if single_label:
-        assert semseg.shape == (256, 256)  # single label by default
-        assert semseg.dtype == torch.uint8
-
-        assert semseg.min() >= 0
-        assert semseg.max() <= 18
-    else:
-        assert semseg.shape[1:] == (256, 256)
-        assert semseg.dtype == torch.float32
-        # One hot vector so this holds
-        assert semseg.min() >= 0
-        assert semseg.max() <= 1
+    assert semseg.shape[1:] == (256, 256)
+    assert semseg.dtype == torch.float32
+    # One hot vector so this holds
+    assert semseg.min() >= torch.tensor(0.0)
+    assert semseg.max() <= torch.tensor(1.0)
 
     assert rgb.shape == (3, 256, 256)
     assert rgb.dtype == torch.float32
-    assert rgb.min() >= 0.0
-    assert rgb.max() <= 1.0
+    assert rgb.min() >= torch.tensor(0.0)
+    assert rgb.max() <= torch.tensor(1.0)
 
 
-@pytest.mark.parametrize("split,dataset_name", [("train", "mm_celeba"), ("train", "mm_ffhq"), ("val", "mm_celeba"), ("val", "mm_ffhq")])
+@pytest.mark.parametrize("split,dataset_name", [("train", "mm_celeba"), ("val", "mm_celeba")])
 def test_semseg_to_rgb_display(split, dataset_name):
     train_dataset = get_dataset(dataset_name, **dataset_opts[dataset_name], split=split)
     _, semseg = train_dataset[0]
@@ -156,24 +140,6 @@ def test_semseg_to_rgb_display(split, dataset_name):
     assert rgb_display.min() >= 0.0
     assert rgb_display.max() <= 1.0
 
-
-def test_celeba_simgle_label_compat_semseg():
-    opts = dataset_opts["mm_celeba"]
-    opts["single_label"] = True
-    dataset = get_dataset("mm_celeba", **opts, split="train")
-    assert dataset.single_label == True
-
-    _, semseg = dataset[0]
-
-    assert semseg.shape == (256, 256)
-    assert semseg.min() >= 0
-    assert semseg.max() <= 18
-
-    rgb_display = dataset.semseg_display(semseg)
-    assert rgb_display.shape == (3, 256, 256)
-    assert rgb_display.dtype == torch.float32
-    assert rgb_display.min() >= 0.0
-    assert rgb_display.max() <= 1.0
 
 
 def test_celeba_single_label_vis_images():
@@ -203,18 +169,6 @@ def test_imagenet_return_class():
 
         if i >= 3:
             break
-
-def test_nyu_labelled_3_mode():
-    opts = dataset_opts["nyu_labelled"]
-    opts["modality"] = ["colour", "depth", "semseg"]
-    dataset = get_dataset("nyu_labelled", **opts, split="test")
-
-    for i, data in enumerate(dataset):
-        assert len(data) == 3
-        assert data[0].shape == (3, 256, 256)
-        assert data[1].shape == (1, 256, 256)
-        assert data[2].shape == (256, 256)
-        break
 
 @pytest.mark.parametrize("batched", [True, False])
 def test_webdataset_class(batched):
@@ -247,8 +201,9 @@ def test_webdataset_dataloader(split, dataset_name):
 
     for i, data in enumerate(dataloader):
         rgb, depth = data
-        assert rgb.shape == (4, 3, 128, 128)
-        assert depth.shape == (4, 1, 128, 128)
+        print(rgb)
+        assert rgb.shape == (4, 3, 256, 256)
+        assert depth.shape == (4, 1, 256, 256)
 
         if i >= 2:
             break

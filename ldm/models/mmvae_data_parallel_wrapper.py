@@ -8,4 +8,5 @@ class MMVAEDataParallelWrapper(nn.Module):
         self.module = model
 
     def forward(self, function, *args, **kwargs):
+        """As torch data distributed parallel by default only splits inputs to the forward function, we wrap the model and call the function by string name."""
         return getattr(self.module, function)(*args, **kwargs)

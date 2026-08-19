@@ -1,7 +1,6 @@
 import pyiqa
 import torch
 from pyiqa.archs.fid_arch import generate_reference_statistics
-import glob
 import os
 from ldm.data.dataset_CelebAMask import MMCelebA
 from torchvision.transforms import v2
@@ -32,7 +31,7 @@ generate_reference_statistics(dir=None,
                               )
 
 # Test computation of FID
-test_path = "../outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_04_29__12_20_45_rgb_only/temp_fid_colour"
+test_path = "/path/to/example/images"
 fid = metric(test_path, dataset_name="mm_celeba_colour", dataset_split="all",  dataset_res=128, center_crop=True)
 
 print(f"Computed fid of: {fid}")
@@ -52,7 +51,7 @@ generate_reference_statistics(dir=None,
                               )
 
 # Test computation of KID
-test_path = "../outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_04_29__12_20_45_rgb_only/temp_fid_colour"
+test_path = "/path/to/example/images"
 kid = metric(test_path, dataset_name="mm_celeba_colour", dataset_split="all",  dataset_res=128, center_crop=True)
 
 print(f"Computed kid of: {kid}")

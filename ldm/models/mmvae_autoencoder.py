@@ -9,9 +9,6 @@ from ..data.dataset_CelebAMask import MMCelebA
 from .z_combiner_net import ZCombinerNet
 
 class MMVAEplus(nn.Module):
-    """
-    MMVAEplus class definition.
-    """
     def __init__(self, prior_dist, latent_channel_z, latent_channel_w, cross_w_mode="sample", vae_params=None, ckpt_path=None, avg_z=False, all_combinations=False, stop_self_z_grad=False, z_net_params=None, scale_per_channel=False, **kwargs):
         super(MMVAEplus, self).__init__()
         if isinstance(prior_dist, str):
@@ -113,12 +110,23 @@ class MMVAEplus(nn.Module):
             return self._pz_params[0], F.softmax(self._pz_params[1], dim=(1, 2, 3)) * self._pz_params[1].size(-1) + 1e-20
 
     def self_and_cross_generation_choose_latent_dist(self, x, latent_dist_params, K=1, all_combinations=None, stop_self_z_grad=False):
+
         """
-        Choose the latent distribution for self- and cross-generation.
-        Args:
-            x: Input
-            K: Number of samples for reparameterization in latent space
-            latent_dist_params: Parameters of latent distribution. One of pw_params or pw_params_aux
+        Perform self and cross modal reconstructions with a chosen latent distribution (either the prior or the auxiliary distribution).
+
+        Input:
+            - x: list of data samples for each modality
+            - latent_dist_params: string indicating which latent distribution to use for cross-modal generation. Options are "pw_params" (prior) or "pw_params_aux" (auxiliary)
+            - K: number of samples drawn from the latent distribution for reconstruction. Always set to 1 for this work.
+            - all_combinations: if True, computes 8 different reconstructions for two modalities. Not used in this work.
+            - stop_self_z_grad: if True, stops the gradient of the shared latent z for self-reconstructions. This has been shown to improve disentanglement in MMVAE++ (https://arxiv.org/html/2403.06338v1). Not used in this work.
+
+        Returns:
+            - qu_xs: List of encoding distributions (one per encoder)
+            - px_us: Matrix of self- and cross- reconstructions. px_zs[m][n] contains
+                    m --> n  reconstruction.
+            - uss: List of latent codes, one for each modality. uss[m] contains latents inferred
+                   from modality m. Note there latents are the concatenation of private and shared latents.
         """
 
         if all_combinations is None: all_combinations = self.all_combinations
@@ -137,7 +145,6 @@ class MMVAEplus(nn.Module):
 
         zs = [torch.split(us, [self.latent_channel_w, self.latent_channel_z], dim=2)[1] for us in uss]
         if self.avg_z:
-            print("Averaging z")
             z_avg = torch.stack(zs, dim=0).mean(dim=0)
 
         # Loop over unimodal vaes and compute cross-modal reconstructions
@@ -206,45 +213,12 @@ class MMVAEplus(nn.Module):
         return latents_w
 
     def forward(self, x, K=1, all_combinations=None):
-        # print(f"model forward received x: {[xi.shape for xi in x]} on device {[xi.device for xi in x]}")
-        """
-        Forward function.
-        Input:
-            - x: list of data samples for each modality
-            - K: number of samples for reparameterization in latent space
-
-        Returns:
-            - qu_xs: List of encoding distributions (one per encoder)
-            - px_us: Matrix of self- and cross- reconstructions. px_zs[m][n] contains
-                    m --> n  reconstruction.
-            - uss: List of latent codes, one for each modality. uss[m] contains latents inferred
-                   from modality m. Note there latents are the concatenation of private and shared latents.
-        """
         return self.self_and_cross_generation_choose_latent_dist(x, "pw_params_aux", K=K, all_combinations=all_combinations)
 
     def self_and_cross_modal_generation_forward(self, data, K=1, all_combinations=None):
-        """
-        Test-time self- and cross-model generation forward function.
-        Args:
-            data: Input
-
-        Returns:
-            Unimodal encoding distribution, Matrix of self- and cross-modal reconstruction distrubutions, Latent embeddings
-
-        """
         return self.self_and_cross_generation_choose_latent_dist(data, "pw_params", K=K, all_combinations=all_combinations)
 
-
     def self_and_cross_modal_generation(self, data, all_combinations=None):
-        """
-        Test-time self- and cross-reconstruction.
-        Args:
-            data: Input
-
-        Returns:
-            Matrix of self- and cross-modal reconstructions
-
-        """
         with torch.no_grad():
             _, px_us, _ = self.self_and_cross_modal_generation_forward(data, all_combinations=all_combinations)
             # ------------------------------------------------
@@ -261,7 +235,6 @@ class MMVAEplus(nn.Module):
                         recons[i][j] = px_us[i][j].mean
 
         return recons
-
 
     def forward_z_comb_net(self, data, sample=False):
         *w_dists, z_comb_dist = self.encode(data, return_dist=True, use_z_combnet=True)
@@ -354,7 +327,7 @@ class MMVAEplus(nn.Module):
 
     def generate_unconditional(self, N):
         """
-        Unconditional generation.
+        Unconditional generation from the VAE itself by sampling latents from the prior distribution.
         Args:
             N: Number of samples to generate.
         Returns:
@@ -375,6 +348,7 @@ class MMVAEplus(nn.Module):
         return data  # list of generations---one for each modality
 
     def scale_latents(self, latents, reverse=False):
+        """Scales latents to have zero mean and unit variance. If reverse is True, scales back to original range."""
         if reverse:
             if len(self.latent_scale.shape) == 1:
                 return (latents * self.latent_scale[None, :, None, None]) + self.latent_mean[None, :, None, None]

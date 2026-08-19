@@ -1,4 +1,4 @@
 dataset_name: webdataset
-root_data_dir:  "/rds/general/user/ds3119/ephemeral/lsun_web_small" # "/rds/general/user/ds3119/ephemeral/lsun_full_web"
+root_data_dir:  "datasets/lsun_web"
 input_size: 128
 modality: ["colour", "depth"]

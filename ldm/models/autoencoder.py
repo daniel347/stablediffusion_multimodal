@@ -223,11 +223,6 @@ class AutoencoderKL(pl.LightningModule):
 
         return z
 
-"""
-    def reconstruct(self, input, sample_posterior=True):
-        return self.forward(input, sample_posterior)[1].mean
-"""
-
 
 class IdentityFirstStage(torch.nn.Module):
     def __init__(self, *args, vq_interface=False, **kwargs):

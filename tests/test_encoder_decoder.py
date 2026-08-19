@@ -8,7 +8,7 @@ import copy
 
 
 def construct_model(model):
-    with open("tests/configs/test_encoder_decoder.yaml") as f:
+    with open("configs/test_encoder_decoder.yaml") as f:
         config = yaml.safe_load(f)
 
     return model(**config), config

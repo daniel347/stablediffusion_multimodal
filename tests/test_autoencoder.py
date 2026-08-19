@@ -6,7 +6,7 @@ from ldm.modules.distributions.distributions import DiagonalGaussianDistribution
 from torch.distributions import Laplace
 
 
-def construct_vae(config_path="tests/configs/test_autoencoder.yaml"):
+def construct_vae(config_path="configs/test_autoencoder.yaml"):
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
@@ -76,9 +76,9 @@ def test_decoder_K5():
 
 def test_init_with_sd():
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    vae, conf = construct_vae("tests/configs/test_autoencoder_conform_to_3_channel.yaml")
+    vae, conf = construct_vae("configs/test_autoencoder_conform_to_3_channel.yaml")
 
-    sd_state_dict = torch.load("/home/ds3119/multimodal_generation/stablediffusion/checkpoints/v2-1_512-ema-pruned.ckpt")
+    sd_state_dict = torch.load("../checkpoints/v2-1_512-ema-pruned.ckpt", weights_only=False)
     first_stage_dict = {}
 
     for name, param in sd_state_dict["state_dict"].items():
@@ -128,7 +128,4 @@ def test_forward(K):
     assert isinstance(post, DiagonalGaussianDistribution)
     assert isinstance(dec, Laplace)
     assert z.shape == zw_mean_shape
-
-    assert vae.qu_x_params is not None
-    assert vae.qu_x_params.mean.shape == zw_mean_shape[1:]
 

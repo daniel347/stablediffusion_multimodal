@@ -4,7 +4,7 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Autoencoder"
 notes: "Training the z combiner on the most recent autoencoder involving MM CelebA dataset with RGB and semantic segmentation inputs."
-name: "correct_mmd_loss_z_comb"
+name: "autoencoder_z_comb"
 print_freq: 50
 outputdir: /rds/general/user/ds3119/ephemeral/outputs
 

@@ -215,10 +215,6 @@ class PowerEMAWrapper(nn.Module):
             param.data.copy_(c_param.data)
 
 
-
-
-
-
 class PowerFunctionEMA(nn.Module):
     @torch.no_grad()
     def __init__(self, net, stds=[0.050, 0.100]):

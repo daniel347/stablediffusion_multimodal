@@ -4,12 +4,12 @@ params:
   monitor: val/rec_loss
   embed_spatial_dim: 32
   conform_to_3_channel: true  # perform deterministic repetition and averaging to
-  # convert 1 channel to 3 channels and back, so we may start from pretrained encoder
+  # convert 1 channel to 3 channels and back, so we can initialise from a pretrained encoder
   ddconfig:
     #attn_type: "vanilla-xformers"
     double_z: true
     z_channels: 4
-    w_channels: 1
+    w_channels: 2
     resolution: 256
     in_channels: 1
     out_ch: 1

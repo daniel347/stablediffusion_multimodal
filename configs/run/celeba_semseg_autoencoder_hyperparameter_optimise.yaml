@@ -1,5 +1,0 @@
-# @package _global_
-
-training.objective.params.wadversary: 10000
-training.num_epochs: 20
-training.test_every_iter: 400

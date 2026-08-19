@@ -1,6 +1,6 @@
 import torch
 
-ckpt_path = "/home/ds3119/multimodal_generation/stablediffusion/checkpoints/sd-v1-4.ckpt"
+ckpt_path = "../checkpoints/sd-v1-4.ckpt"
 ckpt = torch.load(ckpt_path)["state_dict"]
 
 def extract_autoencoder(state_dict):
@@ -22,5 +22,5 @@ def extract_autoencoder(state_dict):
 
 autoencoder_state_dict = extract_autoencoder(ckpt)
 
-autoencoder_path = "/home/ds3119/multimodal_generation/stablediffusion/checkpoints/sd-v1-4-autoencoder.ckpt"
+autoencoder_path = "../checkpoints/sd-v1-4-autoencoder.ckpt"
 torch.save(autoencoder_state_dict, autoencoder_path)

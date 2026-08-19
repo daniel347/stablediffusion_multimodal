@@ -27,12 +27,12 @@ cmmd.compute_and_cache_embeddings(dir=None,
                                   device=device)
 
 # Test computation of CMMD
-test_path = "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_02__16_49_22_nyu_lsun_joint_diff_ema_opt_test_metrics/temp_fid_colour"
+test_path = "path/to/example/images"
 cmmd_val = cmmd.compute_cmmd(test_path, dataset_name="nyu_depth_lsun_colour", dataset_split="val",  dataset_res=299, device=device)
 
 # print(f"Computed colour CMMD of: {cmmd_val}")
 
-test_path = "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_07_02__16_49_22_nyu_lsun_joint_diff_ema_opt_test_metrics/temp_fid_depth"
+test_path = "path/to/example/images"
 cmmd_val = cmmd.compute_cmmd(test_path, dataset_name="nyu_depth_lsun_depth", dataset_split="val",  dataset_res=299, device=device)
 
 print(f"Computed depth CMMD of: {cmmd_val}")

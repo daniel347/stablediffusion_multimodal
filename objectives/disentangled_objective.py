@@ -64,7 +64,7 @@ class DisentanglingObjective(torch.nn.Module):
         qz_xs, qw_xs = [], []
         # for r, qu_x in enumerate(qu_xs_):
         for r, qu_x in enumerate(qu_xs):
-            qu_x_r_mean, qu_x_r_std = qu_x.mean, qu_x.std  # mod.vaes[r].qu_x_params.mean, mod.vaes[r].qu_x_params.std
+            qu_x_r_mean, qu_x_r_std = qu_x.mean, qu_x.std
 
             assert not torch.isnan(qu_x_r_mean).any(), f"Model output is nan (qu_x_r_mean[{r}])"
             assert not torch.isnan(qu_x_r_std).any(), f"Model output is nan (qu_x_r_std[{r}])"
@@ -172,8 +172,8 @@ class DisentanglingObjective(torch.nn.Module):
             lmmd_zw_r = 0
             lmmd_ww_r = 0
             for d, qw_x in enumerate(qw_xs):
-                print(f"qz_x mean: {qz_x.mean.shape}")
-                print(f"qw_x mean: {qw_x.mean.shape}")
+                # print(f"qz_x mean: {qz_x.mean.shape}")
+                # print(f"qw_x mean: {qw_x.mean.shape}")
                 lmmd_zw_r = lmmd_zw_r + mmd_loss(qz_x.mean, qw_x.mean)
                 if r != d:
                     lmmd_ww_r = lmmd_ww_r + mmd_loss(qw_x_r.mean, qw_x.mean)

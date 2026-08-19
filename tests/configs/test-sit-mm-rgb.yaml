@@ -1,0 +1,64 @@
+target: SiT.sit_model.SiTModel
+params:
+  path_type: "Linear"
+  prediction: "velocity"
+  loss_weight: null
+  input_shape: [4, 16, 16]
+
+  scorenet_config:
+    target: SiT.models.SiT
+    params:
+      depth: 12
+      hidden_size: 768
+      patch_size: 2
+      num_heads: 12
+      input_size: 16
+      num_classes: null
+
+  unet_config:
+    params:
+      num_classes: null
+      use_fp16: false
+
+  first_stage_config:
+    target: ldm.models.non_disentangled_autoencoder.NonDisentanglingAE
+    params:
+      prior_dist: normal
+      latent_channel_u: 4
+      ckpt_path: #
+      seperable: False
+      lik_dist_splits: [ 3 ]
+      lik_dists: [ Laplace ]
+      final_acts: [ identity ]
+      llik_scales: [ 1.0 ]
+      scale_per_channel: False
+
+      vae_params:
+        - target: ldm.models.autoencoder.AutoencoderKL  # RGB images
+          params:
+            ckpt_path: "../checkpoints/sd-v1-4-autoencoder.ckpt" # "/home/ds3119/multimodal_generation/trained_models/model_8.rar"
+            embed_dim: 4  #  = latent_channel_z + latent_channel_w
+            monitor: val/rec_loss
+            embed_spatial_dim: 16
+            return_lik_dist: False
+            ddconfig:
+              #attn_type: "vanilla-xformers"
+              double_z: true
+              z_channels: 4  # This is really z + w channels
+              w_channels: 2
+              resolution: 256
+              in_channels: 3
+              out_ch: 3
+              ch: 128
+              ch_mult:
+                - 1
+                - 2
+                - 4
+                - 4
+              num_res_blocks: 2
+              attn_resolutions: [ ]
+              dropout: 0.0
+              checkpoint: True
+              use_lora: false
+            lossconfig:
+              target: torch.nn.Identity

@@ -2,9 +2,9 @@ import pytest
 from SiT.sit_model import SiTModel
 import yaml
 import torch
+from omegaconf import OmegaConf
 
-with open("configs/model/mae-sit-mm-rgb.yaml", 'r') as f:
-    model_params = yaml.safe_load(f)["params"]
+model_params = OmegaConf.load("configs/test-sit-mm-rgb.yaml").params
 
 def construct_sit_model():
     model = SiTModel(**model_params)

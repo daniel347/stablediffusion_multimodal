@@ -42,13 +42,7 @@ class LatentDataset(Dataset):
             latent_out = {k: v.to("cpu") for k, v in latent.items() if k != "class"}
         elif isinstance(latent, torch.Tensor):
             latent_out = latent.to("cpu")
-        """
-        if isinstance(latent, dict) and "mean" in latent and "std" in latent:
-            # Return a distribution to support sampling
-            latent_out = {"mean": latent["mean"].to("cpu"), "std": latent["std"].to("cpu")}
-        elif isinstance(latent, dict) and "latent" in latent:
-            latent_out = latent["latent"].to("cpu")
-        """
+
 
         if not self.return_class and not self.return_index:
             return latent_out
@@ -60,22 +54,4 @@ class LatentDataset(Dataset):
                 rets.append(idx)
 
             return rets
-
-"""
-    def collate_fn(self, data):
-        print(f"collate called with data: {data}")
-        if isinstance(data[0], Normal):
-            mean = torch.stack([d.mean for d in data])
-            std = torch.stack([d.std for d in data])
-            collated = Normal(mean, std)
-            return collated
-        elif isinstance(data[0], torch.Tensor):
-            collated = torch.stack(data)
-            return collated
-        elif isinstance(data[0], list) or isinstance(data[0], tuple):
-            # Collate each element of the list
-            return (self.collate_fn([d[i] for d in data]) for i in range(len(data[0]))) 
-        else:
-            return torch.tensor(data)
-"""
 

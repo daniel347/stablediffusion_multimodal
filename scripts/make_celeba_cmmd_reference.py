@@ -1,6 +1,5 @@
 import torch
 import cmmd_pytorch as cmmd
-import glob
 import os
 from ldm.data.dataset_CelebAMask import MMCelebA
 
@@ -21,7 +20,7 @@ cmmd.compute_and_cache_embeddings(dir=None,
                                   device=device)
 
 # Test computation of CMMD
-test_path = "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_07_01__02_38_23_new_hyp_sample_latents/test_fid_colour"
+test_path = "/path/to/example/images"
 cmmd_val = cmmd.compute_cmmd(test_path, dataset_name="mm_celeba_colour", dataset_split="train",  dataset_res=299, device=device)
 
 print(f"Computed CMMD of: {cmmd_val}")
