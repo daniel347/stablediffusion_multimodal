@@ -15,7 +15,7 @@ params:
   scale_factor: 0.18215
   use_ema: False
 
-  unet_config:
+  scorenet_config:
     target: ldm.modules.diffusionmodules.openaimodel.UNetModel
     params:
       use_checkpoint: False

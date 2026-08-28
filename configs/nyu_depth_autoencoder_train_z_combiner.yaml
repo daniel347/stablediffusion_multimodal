@@ -4,7 +4,7 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
 print_freq: 50
-outputdir: /rds/general/user/ds3119/ephemeral/outputs/
+outputdir: ./outputs/
 name: "nyu_lsun_ae_z_comb"
 notes: "We train the NYU LSUN autoencoder z combiner"
 
@@ -26,12 +26,16 @@ training:
   objective_is_z_combiner: True
   lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
 
-model_initialisation: "/rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_20__20_56_49_nyu_lsun_ae/model_12000.pt" # "../trained_models/model_8.rar"
-resume_training: false
+# the FID reference file is found as {fid_ref_name}_{modality}_{fid_ref_split}.npz in the pyiqa cache directory
+fid_ref_name: "nyu_depth_lsun"
+fid_ref_split: "val"
+
+model_initialisation: # Path to model training from which to start training the z combiner.
+resume_training: False
 init_from_stable_diffusion: False
 
 defaults:
-  - data: nyu_depth_lsun_bedroom
+  - data: lsun_web
   - model: v2-inference-mm
   - training: autoencoder_training_default
   - override training/objective: 4way_z_combiner_objective

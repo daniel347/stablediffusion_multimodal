@@ -1,14 +1,15 @@
 seed: 1
 device: "cuda:0" # "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Stable_Diffusion"
-print_freq: 50
-outputdir: /rds/general/user/ds3119/ephemeral/outputs
 name: "correct_mmd_loss"
 notes: "We train diffusion with the autoencoder trained with correct mmd loss over the channel dim"
 
+print_freq: 50
+outputdir: ./outputs
+
 function:
   name: training_loop # test_metrics  # training_loop  # test_epoch
-  kwargs: {} # {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 128}  # {out_nimgs: [459648], out_stds: [0.075, 0.1, 0.125, 0.15, 0.175, 0.2, 0.225], n_samples: 256}
+  kwargs: {}
 
 dataset_name: mm_celeba
 
@@ -19,11 +20,11 @@ training:
   num_epochs: 50
   start_iter: 0
   patience: 50
-  test_every_iter: 1000
+  test_every_iter: 10
 
   precompute_latents: True
   force_recompute: False
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute
+  precompute_latents_path: ./latents_precompute
   compute_latent_scale: True
   latent_scale_per_channel: True
 
@@ -31,7 +32,8 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__22_56_48_correct_mmd_loss_z_comb/model_4800.pt"
+        # Set the trained autoencoder checkpoint here
+        ckpt_path: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__22_56_48_correct_mmd_loss_z_comb/model_4800.pt"
 
 model_initialisation: # ../outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_06_24__08_18_56_new_hyp_diff_train/model_it6384_ema_0.100.pt
 init_from_stable_diffusion: False

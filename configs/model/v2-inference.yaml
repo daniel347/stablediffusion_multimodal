@@ -17,7 +17,7 @@ model:
     scale_factor: 0.18215
     use_ema: False # we set this to false because this is an inference only config
 
-    unet_config:
+    scorenet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
         use_checkpoint: True

@@ -4,18 +4,8 @@ experiment: "MM_CelebA_Stable_Diffusion"
 print_freq: 50
 
 function:
-  name: test_optimum_EMA # training_loop  # test_epoch
-  kwargs: {out_epochs: [13, 17, 20], out_stds: [0.1, 0.125, 0.15, 0.175, 0.2, 0.225]}
-
-data:
-  dataset_name: mm_celeba
-  root_data_dir:  /home/ds3119/datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ  # ../../datasets/CelebAMask-HQ
-  input_size: 128
-  modality: ["colour", "semseg"]
-  p_hor_flip: 0
-  p_color_jitter: 0
-  outputdir: ../outputs
-
+  name: test_optimum_EMA
+  kwargs: {out_nimgs: [2160000], out_stds: [0.1, 0.125, 0.15, 0.175, 0.2, 0.225], n_samples: 256}
 
 training:
   use_mixed_precision: False
@@ -38,33 +28,16 @@ training:
 
   z_mode: "z_combiner"  # one of ["random", "avg", "z_combiner" or an integer between 0 and NUM_VAES-1]
 
-  grad_clipper:
-    clip_percentile: 95
-    clip_update_freq: 10
-    keep_history_upto: 5000
-    start_clip: 10
-
-  t_sampler:
-
-# ema:
-#   target: ldm.modules.ema.DummyEMA
-#   params: {}
-
-ema:
-  target: ldm.modules.ema.PowerFunctionEMA
-  params:
-    stds: [0.05, 0.10]
-
-sampler:
-  target: "ddpm"
-  params: {}
-  run_params:
-    S: 1000
-
-
 eval:
   inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
 
-model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg-32.yaml
-model_initialisation: "/home/ds3119/multimodal_generation/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_04_28__11_18_27_32_latents/model_13.pt"
+model_initialisation:
 init_from_stable_diffusion: False
+
+defaults:
+  - data: mm_celeba
+  - model: v2-inference-mm-rgb-semseg
+  - training: diffusion_training_default
+  - sampler: ddim_timetravel
+  - ema: power_ema
+  - _self_

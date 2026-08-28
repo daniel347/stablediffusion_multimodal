@@ -520,7 +520,7 @@ def load_image_datasets(data_conf, precompute_latents=False, data_parallel=False
     return train_dataset, test_dataset
 
 
-def create_web_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, rank=0, data_parallel=False, num_workers=4):
+def create_web_dataloaders(train_dataset, test_dataset, batch_size, world_size=1, rank=0, data_parallel=False, num_workers=0):
     kwargs = {'num_workers': num_workers, 'pin_memory': True} if not data_parallel else {"num_workers": 0, "pin_memory": True}
 
     train_dataset.batch_output(batch_size)

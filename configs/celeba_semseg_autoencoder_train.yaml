@@ -8,7 +8,7 @@ name: "autoencoder_train"
 notes: "We train the multimodal autoencoder on the MM CelebA dataset with RGB and semantic segmentation inputs."
 
 print_freq: 50
-outputdir: /rds/general/user/ds3119/ephemeral/outputs
+outputdir: ./outputs
 
 function:
   name: training_loop
@@ -35,6 +35,10 @@ training:
 
 model_initialisation:
 init_from_stable_diffusion: True
+
+# the FID reference file is found as {fid_ref_name}_{modality}_{fid_ref_split}.npz in the pyiqa cache directory
+fid_ref_name: "mm_celeba"
+fid_ref_split: "all"
 
 defaults:
   - data: mm_celeba

@@ -17,7 +17,7 @@ model:
     use_ema: True
     reset_num_ema_updates: True
 
-    unet_config:
+    scorenet_config:
       target: ldm.modules.diffusionmodules.openaimodel.UNetModel
       params:
         use_checkpoint: False

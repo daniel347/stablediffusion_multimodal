@@ -1,4 +1,4 @@
 dataset_name: webdataset
-root_data_dir:  "datasets/lsun_web"
+root_data_dir:  "../datasets/lsun_web_small"
 input_size: 128
 modality: ["colour", "depth"]

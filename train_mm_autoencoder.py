@@ -184,7 +184,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         vaes = mod.vaes
         NUM_VAES = len(vaes)
 
-        model_opts = OmegaConf.to_container(conf.training.get("model_opts", {}))
+        model_opts = OmegaConf.to_container(conf.training.model_opts) if "model_opts" in conf.training else {}
 
         if "ema" in conf:
             print(f"Using EMA {conf.ema.target}")
@@ -299,14 +299,13 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
         data_conf_0 = conf.data[0] if isinstance(conf.data, ListConfig) else conf.data
         data_root_dirs = [Path(cd.root_data_dir) for cd in conf.data] if isinstance(conf.data, ListConfig) else [
             Path(conf.data.root_data_dir)]
-        dataset_name = conf.dataset_name
         modality = data_conf_0.modality
         returns_class = data_conf_0.get("returns_class", False)
 
         # Load dataset
         train_dataset, test_dataset = load_image_datasets(conf.data, data_parallel=data_parallel)
 
-        if dataset_name == "webdataset":
+        if conf.data.dataset_name == "webdataset":
             train_loader, test_loader = create_web_dataloaders(train_dataset,
                                                                test_dataset,
                                                                conf.training.batch_size,
@@ -649,8 +648,8 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     scores = []
                     for mod in modality:
                         if mod in ["colour", "depth"]:
-                            split = "test" if dataset_name == "nyu_depth" else "all" if dataset_name == "mm_celeba" else "val"
-                            score = metric(tempdirs[mod], dataset_name=f"{dataset_name}_{mod}", dataset_res=128, dataset_split=split, center_crop=True)
+                            split = conf.fid_ref_split
+                            score = metric(tempdirs[mod], dataset_name=f"{conf.fid_ref_name}_{mod}", dataset_res=128, dataset_split=split, center_crop=True)
                             if enable_wandb:
                                 wandb.log({f"{met}_{mod}": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
 
