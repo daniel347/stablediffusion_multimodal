@@ -28,15 +28,6 @@ from torch.amp import GradScaler, autocast
 from torchvision.transforms import Resize, InterpolationMode
 from torch.distributed.algorithms.join import Join
 
-"""
-import ray
-from ray import tune
-from ray import train
-from ray.train import Checkpoint, get_checkpoint
-from ray.tune.schedulers import ASHAScheduler, HyperBandForBOHB
-from ray.tune.search.bohb import TuneBOHB
-import ray.cloudpickle as pickle
-"""
 import tempfile
 import sys
 import glob
@@ -58,7 +49,6 @@ from utils import (save_and_log_latents, save_and_log_img, expand_sub_confs, mov
 from reconstruct_model_phema import reconstruct_phema
 import ldm.models.diffusion as diffusion
 import cv2
-from mae.distribution import DiagonalGaussian
 
 import random
 from functools import partial
@@ -369,9 +359,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if conf.training.test_only:
             runId += "_test"
 
-        if ray_tune:
-            runId += f"_rank{train.get_context().get_world_rank()}"
-
         if conf.name is not None:
             runId += f"_{conf.name}"
 
@@ -426,13 +413,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
         if conf.model_initialisation is not None:
             start_iter = load_checkpoint(ema, model, optimizer, scheduler, conf.model_initialisation)
 
-        if ray_tune:
-            checkpoint = get_checkpoint()
-            if checkpoint:
-                with checkpoint.as_directory() as checkpoint_dir:
-                    data_path = Path(checkpoint_dir) / "data.pkl"
-                    start_iter = load_checkpoint(ema, model, optimizer, scheduler, data_path)
-
         if start_iter is None:
             start_iter = conf.training.start_iter
 
@@ -464,11 +444,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             display_data_fs = [getattr(train_dataset.datasets[0], f"{mode}_display") for mode in data_conf_0.modality]
         else:
             display_data_fs = [getattr(train_dataset, f"{mode}_display") for mode in data_conf_0.modality]
-
-        if start_iter > 0 and start_iter < 50:
-            # this is almost certainly an epoch number
-            print("converting start epoch to start iter")
-            start_iter *= len(train_loader)
 
         already_precomputed = False
         if conf.training.precompute_latents:
@@ -506,34 +481,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             mae_latent_disp = DisplayMAELatent()
 
         n_cls_tokens = getattr(model_scorenet, "n_cls_tokens", 0)
-
-        def fit_mae_latent_disp(dataloaders, split="train", n_batches=20):
-            data_loader = dataloaders["train_loader" if split == "train" else "test_loader"]
-            all_latents = []
-
-            if enable_pbars:
-                pbar = tqdm.tqdm(enumerate(data_loader), total=len(data_loader),
-                                 position=rank if data_parallel else 0)
-            else:
-                pbar = enumerate(data_loader)
-
-            with (torch.no_grad()):
-                for i, dataT in pbar:
-                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device, return_class=return_class)
-
-                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES,
-                                               z_mode=conf.training.z_mode,
-                                               sample=sample,
-                                               cls_tokens=False)
-                    latents = model_first_stage.scale_latents(latents)
-                    all_latents.append(latents)
-
-                    if i >= n_batches:
-                        break
-
-            latents = torch.cat(all_latents, dim=0)
-            mae_latent_disp.fit(latents)
-
 
         def get_latent_scale_factor(dataloaders, split="train", n_batches=1, per_channel=True):
 
@@ -693,8 +640,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                     latents = model_first_stage.scale_latents(latents)
 
-                    # print(f"Latent scale: {latents.std(dim=(0, 2, 3))}   mean: {latents.mean(dim=(0, 2, 3))}")
-
                     if use_mixed_precision:
                         with autocast(dtype=torch.float16, device_type="cuda"):
                             loss, loss_dict = model(latents, c=(classes if return_class else None), t_sampler=t_sampler, **forward_kwargs)
@@ -725,16 +670,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     if ema is not None:
                         ema.update(conf.training.batch_size)
 
-                    """
-                    for a in range(len(ema.emas)):
-                        print("Checking emas")
-                        if not torch.all(ema.emas[a][test_param_name].data != model.state_dict()[test_param_name].data):
-                            print(f"EMA {a} matches model parameters in iteration {i}.")
-                        for b in range(a):
-                            if not torch.all(ema.emas[b][test_param_name].data != ema.emas[a][test_param_name].data):
-                                print(f"EMA {b} matches EMA {a} parameters in iteration {i}.")
-                    """
-
                     if i % scheduler_step_freq == 0:
                         scheduler.step()
                         # print(f"Learning rate: {scheduler.get_last_lr()}")
@@ -743,34 +678,15 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                         wandb.log({"Loss/train": loss, "lr": scheduler.get_last_lr()[0]}, step=itercount)
 
                     if i == 0:
-                        # test decode the saved latents
-                        if getattr(model_first_stage, "masked_autoencoder", False):
-                            latents_unscaled = model_first_stage.scale_latents(latents, reverse=True)
-                            decoded_imgs = model_first_stage.decode_no_mask(latents_unscaled, cls_tokens=cls_tokens)[0]
+                        if model_first_stage.factorised_latent_space:
+                            *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
 
-                            for m, (name, dbatch) in enumerate(zip(modality, decoded_imgs)):
-                                save_and_log_img(dbatch, f"DataDecoded/{name}", runPath,
-                                                 display_data_fs[m], step=itercount, wandb_run=run)
-
-                        if getattr(model_first_stage, "masked_autoencoder", False):
-                            latents_disp = mae_latent_disp.transform(latents)
-                            save_and_log_latents(latents_disp, f'Latents/u', runPath, itercount, run)
+                            for j, latent in enumerate(latents_w):
+                                save_and_log_latents(latent, f'Latents/wm{j}', runPath, itercount, run)
+                            if latents_z.shape[1] > 0:
+                                save_and_log_latents(latents_z, f'Latents/z', runPath, itercount, run)
                         else:
-                            # TODO: Find a way to visualise the latent space of the masked autoencoder - maybe a PCA idk?
-                            if model_first_stage.factorised_latent_space:
-                                *latents_w, latents_z = torch.split(latents, [model_first_stage.w_channels for _ in range(NUM_VAES)] + [model_first_stage.z_channels], dim=1)
-
-                                for j, latent in enumerate(latents_w):
-                                    save_and_log_latents(latent, f'Latents/wm{j}', runPath, itercount, run)
-                                if latents_z.shape[1] > 0:
-                                    save_and_log_latents(latents_z, f'Latents/z', runPath, itercount, run)
-                            else:
-                                save_and_log_latents(latents, f'Latents/u', runPath, itercount, run)
-                        """
-                        for m, (name, dbatch) in enumerate(zip(modality, latent)):
-                            save_and_log_img(dbatch, f"Data/{name}", runPath,
-                                             display_data_fs[m], step=itercount, wandb_run=run)
-                        """
+                            save_and_log_latents(latents, f'Latents/u', runPath, itercount, run)
 
                     itercount += 1
                     if itercount >= n_stopiter:
@@ -912,26 +828,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
             print('====>             Test loss: {:.4f}'.format(epoch_loss))
 
             return epoch_loss
-
-
-        def test_loss_by_timestep(dataloaders):
-            ts = torch.linspace(50, 950, 19, device=device).long()  # Test at these timesteps
-            test_losses = []
-            for i, t in enumerate(ts):
-                t_sampler = lambda x: t.unsqueeze(0).expand(x.shape[0]).to(device)
-                loss = test_epoch(dataloaders, 0, i, 0, gen=False, t_sampler=t_sampler)
-                test_losses.append(loss)
-
-                if enable_wandb:
-                    wandb.log({"Loss/test": loss, "t": t.detach().cpu()}, step=i)
-
-            test_losses = torch.tensor(test_losses)
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(ts.cpu().numpy(), test_losses.cpu().numpy())
-            ax.set_xlabel("Timestep")
-            ax.set.e632858_ylabel("Test Loss")
-
-            fig.savefig(runPath / "timestep_wise_loss.png")
 
 
         def generate(dataloaders, subepoch, itercount, epochcount, n_samples=64, log_to_wandb=False, folder_name=None, save_latents=False):
@@ -1083,94 +979,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 if enable_wandb:
                     wandb.log({"n_epochs": out_nimgs[step], "ema_std": out_stds[step]}, step=step)
 
-        def plot_timestep_logvars():
-            logvars = model.logvar.cpu().detach().numpy()
-            timesteps = np.arange(0, len(logvars))
-            plot = sns.lineplot(x=timesteps, y=logvars)
-            plot.set(xlabel="Diffusion timestep", ylabel="timestep log weighting")
-            fig = plot.get_figure()
-            fig.savefig(os.path.join(runPath, "timestep_logvars.png"))
-
-
-        def test_compare_bisenet(dataloaders, step, n_samples=32):
-            test_metrics(dataloaders, step, step, step, n_samples=n_samples, log_to_wandb=True)  # Generate images with our method
-            colour_input_folder = os.path.join(runPath, f'temp_fid_colour')
-
-            run_bisenet(step, colour_input_folder)
-
-
-        def run_bisenet(epoch, img_dir=None, dataloader=None, out_folder_name="bisenet_output", n_imgs=32):
-            bisenet_output_folder = os.path.join(runPath, out_folder_name)
-            if not os.path.exists(bisenet_output_folder):
-                os.mkdir(bisenet_output_folder)
-
-            from BiSeNetFace.model import BiSeNet
-            from BiSeNetFace.remap_classes import bisenet_to_mm_class_inds
-            from PIL import Image
-
-            out_folder_name = os.path.join(runPath, out_folder_name)
-            if not os.path.exists(out_folder_name):
-                os.mkdir(out_folder_name)
-
-            cp = '79999_iter.pth'
-
-            n_classes = 19
-            net = BiSeNet(n_classes=n_classes)
-            net.to(device)
-            save_pth = os.path.join('BiSeNetFace/res/cp', cp)
-            net.load_state_dict(torch.load(save_pth))
-            net.eval()
-
-            to_tensor = v2.Compose([
-                v2.ToTensor(),
-                v2.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-            ])
-
-            B = 1 if img_dir is not None else conf.training.batch_size
-
-            iter = dataloader if dataloader is not None else os.listdir(img_dir)
-            if enable_pbars:
-                iter = tqdm.tqdm(iter)
-
-            with torch.no_grad():
-                for i, data in enumerate(iter):
-                    if isinstance(data, str):  # we have a file path
-                        img = Image.open(os.path.join(img_dir, data))
-                        orig_size = img.size
-
-                        image = img.resize((512, 512), Image.BILINEAR)
-                        image = to_tensor(image)
-                        image = torch.unsqueeze(image, 0)
-                        image = image.to(device)
-                    else:
-                        img = data[0]
-                        orig_size = img.shape[2:]
-                        image = v2.functional.resize(img, (512, 512), Image.BILINEAR, antialias=True)
-                        image = v2.functional.normalize(image, mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225))
-                        image = image.to(device)
-
-
-                    out = net(image)[0]
-                    parsing = out.argmax(1)
-                    s_disp = []
-                    for p in parsing:
-                        p = bisenet_to_mm_class_inds(p)
-                        p = MMCelebA.index_semseg_to_one_hot(p)
-                        s_disp.append(display_data_fs[1](p.detach().cpu()))
-
-                    s_disp = torch.stack(s_disp, dim=0)
-                    s_disp = v2.functional.resize(s_disp, orig_size, v2.InterpolationMode.BILINEAR, antialias=True)
-
-                    for j, s in enumerate(s_disp):
-                        img_path = os.path.join(out_folder_name, f"bisenet_{i*B + j}.png")
-                        tvu.save_image(s, img_path)
-
-                        if enable_wandb:
-                            step_num = ((i*B + j + 1) * len(train_loader)) if log_iterations else i*B + j
-                            run.log({"Generation/bisenet_m1": wandb.Image(s_disp)}, step=step_num)
-
-                    if i*B >= n_imgs:
-                        break
 
         def generate_conditional(dataloaders, n_samples=32, run_bisenet_on_input=False):
             if "sampler" in conf:
@@ -1233,262 +1041,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     if i * gen_batch_size >= n_samples:
                         break
 
-            if run_bisenet_on_input:
-                run_bisenet(0, dataloader=dataloaders["test_loader"])
-
-
-        def check_latent_quality(dataloaders, n_latents=1024):
-            if enable_pbars:
-                pbar = tqdm.tqdm(enumerate(dataloaders["train_loader"]),
-                                 total=len(dataloaders["train_loader"]),
-                                 position=rank if data_parallel else 0)
-            else:
-                pbar = enumerate(dataloaders["test_loader"])
-
-            b_loss = 0
-            all_latents = []
-            all_latent_dists = []
-
-            if conf.training.precompute_latents and not already_precomputed:
-                conf.training.precompute_latents = False  # we want to compute latents on the fly
-
-            if conf.training.compute_latent_scale:
-                latent_mean, latent_scale = get_latent_scale_factor(dataloaders, n_batches=100,
-                                                                    per_channel=conf.training.latent_scale_per_channel)
-                model_first_stage.latent_mean = torch.nn.Parameter(latent_mean)
-                model_first_stage.latent_scale = torch.nn.Parameter(latent_scale)
-                print(f"found latent mean of: {latent_mean} and std of {latent_scale}")
-                print("resaving the first stage model with latent mean and scale")
-                # torch.save(model_first_stage.state_dict(),
-                #            conf.model.params.first_stage_config.params.ckpt_path)
-
-            with (torch.no_grad(), ema.ema_scope("Epoch test")):
-                for i, dataT in pbar:
-                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device,
-                                                         return_class=return_class)
-
-                    latent_dist = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, return_dist=True, sample=False, cls_tokens=False)
-                    latents = latent_dist.sample()
-                    
-                    print(f"latent dist means: {latent_dist.mean.mean(dim=(0, 2, 3))} stds: {latent_dist.stddev.mean(dim=(0, 2, 3))}")
-
-                    latents = model_first_stage.scale_latents(latents)
-                    latent_dist = torch.distributions.Normal(model_first_stage.scale_latents(latent_dist.mean).detach().cpu(),
-                                                             model_first_stage.scale_latents_std(latent_dist.stddev).detach().cpu())
-
-
-                    all_latents.append(latents.detach().cpu())
-                    all_latent_dists.append(latent_dist)
-                    if i * conf.training.batch_size >= n_latents:
-                        break
-
-            all_latents = torch.cat(all_latents, dim=0)
-
-            # Compute channel wise std
-            channel_stds = all_latents.std(dim=(0, 2, 3))
-            channel_means = all_latents.mean(dim=(0, 2, 3))
-
-            print(f"channel means: {channel_means} channel stds: {channel_stds}")
-
-            # And check for spatial uniformity
-            avg_latent = all_latents.mean(dim=0, keepdim=True)
-            avg_latent_std = all_latents.std(dim=0, keepdim=True)
-
-            save_and_log_latents(avg_latent, "Latents/latent_avg", runPath, 0, run)
-            save_and_log_latents(avg_latent_std, "Latents/latent_std", runPath, 0, run)
-
-            # check MMD with gaussian
-            mmd_dist = MMDGaussianLoss(sigma=0.1)
-            mmd_loss = mmd_dist(all_latents)
-            print(f"MMD loss of latents: {mmd_loss.item()}")
-
-            # Compute a KL divergence between the empirical MoG Latent distribution and a Gaussian
-            mix = torch.distributions.Categorical(torch.ones(all_latents.shape[0], device=device))
-            comp = torch.distributions.Normal(torch.cat([d.mean for d in all_latent_dists], dim=0),
-                                                torch.cat([d.stddev for d in all_latent_dists], dim=0))
-            comp = torch.distributions.Independent(comp, 3)
-            mix_dist = torch.distributions.MixtureSameFamily(mix, comp)
-
-            log_q = mix_dist.log_prob(all_latents)
-            log_p = torch.distributions.Normal(0, 1).log_prob(all_latents).mean(dim=(1, 2, 3))
-
-            kl_div = torch.mean(log_q - log_p)
-            print(f"KL divergence between empirical MoG and Gaussian: {kl_div.item()}")
-
-            wandb.log({"latent_mmd": mmd_loss.item(), "latent_kl_div": kl_div.item()}, step=0)
-
-
-        def compute_latent_metrics(dataloaders,
-                                   subepoch,
-                                   itercount,
-                                   epochcount,
-                                   metrics=["fid", "kid", "mmd"],
-                                   folder_name=None,
-                                   gen_samples=True,
-                                   compute_refs=False,
-                                   ref_feat_path=None,
-                                   **generate_kwargs):
-
-            metric_outs = {met: 0 for met in metrics}
-
-            def compute_latent_feats(dataloader):
-                if enable_pbars:
-                    pbar = tqdm.tqdm(enumerate(dataloader),
-                                     total=len(dataloader),
-                                     position=rank if data_parallel else 0)
-                else:
-                    pbar = enumerate(dataloader)
-
-                inception_feats = []
-                mmd_feats = []  # simply flattened latents
-
-                fid_resize = Resize((299, 299), interpolation=InterpolationMode.BICUBIC)
-                fid_model = pyiqa.create_metric("fid", device=device).net.model
-
-                with (torch.no_grad(), ema.ema_scope("Epoch test")):
-                    for i, dataT in pbar:
-                        data, classes, row = preprocess_data(dataT, conf.data.modality, device=device,
-                                                             return_class=return_class)
-
-                        latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode,
-                                                   sample=sample,
-                                                    cls_tokens=False)
-                        latents = model_first_stage.scale_latents(latents)
-                        n_chans = latents.shape[1]
-                        batch_size = latents.shape[0]
-
-                        if "mmd" in metrics:
-                            latents_flat = latents.reshape(batch_size, -1)
-                            mmd_feats.append(latents_flat.detach().cpu())
-
-                        if "fid" in metrics or "kid" in metrics:
-                            latents = latents / 2  # scale lower so more of the values are within [-1, 1]
-                            latents = fid_resize(latents)
-                            latents_grey = latents.reshape(-1, *latents.shape[2:]).unsqueeze(1)
-                            latents_grey = latents_grey.expand((-1, 3, -1, -1))
-
-                            feat = fid_model(latents_grey.to(device), False, False)
-                            feat = feat[0].squeeze(-1).squeeze(-1).detach().cpu()
-                            feat = feat.reshape(batch_size, n_chans, -1)
-                            inception_feats.append(feat)
-
-                    return torch.cat(inception_feats, dim=0), torch.cat(mmd_feats, dim=0)
-
-            if compute_refs:
-                ref_incep_feats, ref_mmd_feats = compute_latent_feats(dataloaders["train_loader"])
-                save_path = Path(runPath) / "ref_latent_feats.pt"
-                torch.save({"inception": ref_incep_feats, "mmd": ref_mmd_feats}, save_path)
-            else:
-                assert ref_feat_path is not None
-                ref_feats = torch.load(ref_feat_path, map_location="cpu")
-                ref_incep_feats, ref_mmd_feats = ref_feats["inception"], ref_feats["mmd"]
-
-            if gen_samples:
-                tempdirs = generate(dataloaders, subepoch, itercount, epochcount, folder_name=folder_name, save_latents=True, **generate_kwargs)
-            else:
-                tempdirs = {"latent": f"{folder_name}_latent"} if folder_name else {"latent": os.path.join(runPath, 'temp_fid_latent')}
-
-            gen_dataset = get_dataset("latents", latent_path=tempdirs["latent"], split="train", modality=["latent"])
-            gen_dataloader = torch.utils.data.DataLoader(gen_dataset, batch_size=conf.training.batch_size, shuffle=False, num_workers=4, pin_memory=True)
-            
-            print(f"found {len(gen_dataset)} generated latents")
-
-            gen_incep_feats, gen_mmd_feats = compute_latent_feats(gen_dataloader)
-
-            if "fid" in metrics:
-                metric_outs["fid"] = []  # per channel
-                for c in range(gen_incep_feats.shape[1]):
-                    mu1, sig1 = np.mean(ref_incep_feats[:, c].numpy(), axis=0), np.cov(ref_incep_feats[:, c].numpy(), rowvar=False)
-                    mu2, sig2 = np.mean(gen_incep_feats[:, c].numpy(), axis=0), np.cov(gen_incep_feats[:, c].numpy(), rowvar=False)
-                    metric_outs["fid"].append(frechet_distance(mu1, sig1, mu2, sig2))
-
-            if "kid" in metrics:
-                metric_outs["kid"] = []  # per channel
-                for c in range(gen_incep_feats.shape[1]):
-                    metric_outs["kid"].append(kernel_distance(ref_incep_feats[:, c].numpy(), gen_incep_feats[:, c].numpy()))
-
-            if "mmd" in metrics:
-                metric_outs["mmd"] = kernel_distance(ref_mmd_feats.numpy(), gen_mmd_feats.numpy())
-
-            if enable_wandb:
-                for met, score in metric_outs.items():
-                    if isinstance(score, list):
-                        for c, s in enumerate(score):
-                            wandb.log({f"{met}_latent/channel_{c}": s, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
-                    else: 
-                        wandb.log({f"{met}_latent": score, "epoch": epochcount, "subepoch": subepoch}, step=itercount)
-
-            return metric_outs
-
-
-        def compute_manifold_dimensionality(dataloaders, n_samples=72, t=50, n_reps=6*16*16):
-            if conf.training.batch_size != 1:
-                train_loader, test_loader = create_dataloaders(dataloaders["train_dataset"],
-                                                               dataloaders["train_dataset"],
-                                                               1,
-                                                               world_size, rank,
-                                                               data_parallel)
-            else:
-                train_loader, test_loader = dataloaders["train_loader"], dataloaders["test_loader"]
-
-            n_reps = 6*16*16
-
-            t = torch.ones(conf.training.batch_size, device=device, dtype=torch.long) * t
-            spectrums = []
-
-            with (torch.no_grad(), ema.ema_scope("Epoch test")):
-                for i, dataT in enumerate(test_loader):
-                    data, classes, row = preprocess_data(dataT, conf.data.modality, device=device,
-                                                         return_class=return_class)
-
-                    latents = generate_latents(conf, model_first_stage, data, NUM_VAES, z_mode=conf.training.z_mode, sample=False, cls_tokens=False)
-                    latents = model_first_stage.scale_latents(latents)
-                    latent_shape = latents.shape[1:]
-
-                    latents = latents.expand(conf.training.batch_size, -1, -1, -1)
-
-                    epsilons = []
-
-                    for j in range(math.ceil(n_reps / conf.training.batch_size) + 1):
-                        latents_noisy = model.q_sample(latents, t, noise=None)
-                        epsilon = model.model(latents_noisy, t)
-                        epsilons.append(epsilon.detach().cpu())
-
-                        if j == 0:
-                            save_and_log_latents(latents_noisy, f'Latents/noised', runPath, i, run)
-
-                    epsilons = torch.cat(epsilons, dim=0)
-                    epsilons = epsilons.reshape(epsilons.shape[0], -1)
-                    U, S, Vh = torch.linalg.svd(epsilons)
-                    spectrums.append(S)
-
-                    fig, ax = plt.subplots()
-                    ax.plot(S)
-                    ax.set_ylim(0, S.mean() * 5)
-                    ax.set_xlabel("Singular Value Index")
-                    ax.set_ylabel("Singular Value")
-
-                    dim = torch.numel(latents[0]) - torch.argmax(torch.abs(torch.diff(S))) - 1
-                    print(f"Manifold dimensionality for sample {i}: {dim.item()}")
-
-                    V_samples = Vh[torch.arange(0, n_reps, 100)].reshape(-1, *latent_shape)
-                    save_and_log_latents(V_samples, f'singular_vectors', runPath, i, run)
-
-                    if enable_wandb:
-                        wandb.log({"manifold_dimensionality": dim.item(), "singular_values": fig}, step=i)
-
-                    if i >= n_samples:
-                        break
-
-            spectrums = torch.stack(spectrums, dim=0)
-            fig, ax = plt.subplots()
-            ax.plot(spectrums.T)
-            ax.set_xlabel("Singular Value Index")
-            ax.set_ylabel("Singular Value")
-
-            if enable_wandb:
-                wandb.log({"all_singular_values": fig}, step=i+1)
-
 
         def training_loop(dataloaders):
             best_test_loss = 10000
@@ -1526,9 +1078,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
 
                 print(f"Using a latent mean of {model_first_stage.latent_mean} and latent scale of {model_first_stage.latent_scale}")
 
-                if getattr(model_first_stage, "masked_autoencoder", False):
-                    fit_mae_latent_disp(dataloaders, n_batches=5)
-
                 epochcount = 0
                 n_iter = conf.training.test_every_iter if "test_every_iter" in conf.training else len(dataloaders["train_loader"])
                 train_pbar = tqdm.tqdm(enumerate(dataloaders["train_loader"]), total=len(dataloaders["train_loader"]),
@@ -1546,52 +1095,18 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                     metrics = test_metrics(dataloaders, subepoch, itercount + n_iter, epochcount)
                     print("============================ finished computing FID =========================")
 
-                    if ray_tune:
-                        # todo make this work with iteration training
-                        checkpoint_data = {
-                            "epoch": itercount,
-                            "net_state_dict": model.state_dict(),
-                            "optimizer_state_dict": optimizer.state_dict(),
-                        }
-                        with tempfile.TemporaryDirectory(dir="/home/ds3119/ray_tmp") as checkpoint_dir:
-                            print("Saving ray tune checkpoint and reporting")
-                            data_path = Path(checkpoint_dir) / "data.pkl"
-                            save_checkpoint(ema, model, optimizer, scheduler, itercount, data_path)
-                            checkpoint = Checkpoint.from_directory(checkpoint_dir)
-                            train.report({"loss": test_loss, **{f"{met}_{mod}": score for met, scores in metrics.items() for mod, score in zip(modality, scores)}}, checkpoint=checkpoint)
+                    save_checkpoint(ema, model, optimizer, scheduler, itercount+n_iter, runPath / f"model_{itercount+n_iter}.pt")
+                    if test_loss < best_test_loss:
+                        pass
                     else:
-                        """
-                        print("Checking emas")
-                        for i in range(len(ema.emas)):
-                            print(i)
-                            if torch.allclose(ema.emas[i][test_param_name].data, model.state_dict()[test_param_name].data):
-                                print(f"EMA {i} is equal to model parameters at the end of subepoch {subepoch}.")
-                            for j in range(i):
-                                if torch.allclose(ema.emas[j][test_param_name].data, ema.emas[i][test_param_name].data):
-                                    print(f"EMA {j} is equal to EMA {i} parameters at the end of subepoch {subepoch}.")
+                        test_worsening_count += 1
+                        if test_worsening_count > conf.training.patience and not ray_tune:
+                            print(
+                                f"Early stopping. Best test loss attained in epoch: {subepoch - conf.training.patience}")
+                            logger.info("saving last model")
+                            save_checkpoint(ema, model, optimizer, scheduler, itercount+n_iter, runPath / "last_model.pt")
 
-                        print("checking ema state dict")
-                        ema_sd = ema.state_dict()
-                        for i in range(len(ema.emas)):
-                            print(i)
-                            if torch.allclose(ema_sd["emas"][i][test_param_name].data, model.state_dict()[test_param_name].data):
-                                print(f"EMA {i} state dict is equal to model parameters at the end of subepoch {subepoch}.")
-                            for j in range(i):
-                                if torch.allclose(ema_sd["emas"][j][test_param_name].data, ema_sd["emas"][i][test_param_name].data):
-                                    print(f"EMA {j} state dict is equal to EMA {i} parameters at the end of subepoch {subepoch}.")
-                        """
-                        save_checkpoint(ema, model, optimizer, scheduler, itercount+n_iter, runPath / f"model_{itercount+n_iter}.pt")
-                        if test_loss < best_test_loss:
-                            pass
-                        else:
-                            test_worsening_count += 1
-                            if test_worsening_count > conf.training.patience and not ray_tune:
-                                print(
-                                    f"Early stopping. Best test loss attained in epoch: {subepoch - conf.training.patience}")
-                                logger.info("saving last model")
-                                save_checkpoint(ema, model, optimizer, scheduler, itercount+n_iter, runPath / "last_model.pt")
-
-                                break
+                            break
 
         if conf.function.name is not None:
             locals()[conf.function.name](dataloaders=dataloaders, **conf.function.kwargs)
@@ -1612,15 +1127,6 @@ def run_training(rank, conf, data_parallel=False, world_size=None, ray_tune=Fals
                 os.remove(m)
 
 
-
-
-def run_training_ray_tune(config, conf, **params):
-    conf = override_config(conf, config)
-    print(conf)
-
-    run_training(conf=conf, **params)
-
-
 @hydra.main(version_base=None, config_path="configs", config_name="nyu_depth_lsun_stable_diffusion_train.yaml")
 def main(conf: DictConfig) -> None:
     conf = expand_sub_confs(conf)
@@ -1631,87 +1137,16 @@ def main(conf: DictConfig) -> None:
     torch.manual_seed(conf.seed)
     np.random.seed(conf.seed)
 
-
-    if optimise_hyperparameters:
-        logger.info("Beginning hyperparameter tuning")
-        ray.init(_temp_dir="/home/ds3119/ray_tmp")
-
-        num_samples = 10
-        max_num_epochs = 15
-        gpus_per_trial = 1
-
-        output_dir = Path(os.path.join(conf.outputdir, conf.experiment, "ray_tune"))
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        assert isinstance(conf.device, str), "Hyperparameter optimisation only works with single GPU"
-        config = {
-            "model.params.unet_config.params.model_channels": tune.choice([128, 192, 320, 448]),
-            "model.params.unet_config.params.num_res_blocks": tune.choice([1, 2, 3]),
-            "training.lr": tune.choice([ 1e-5, 5e-5, 1e-4, 5e-4, 1e-3]),
-            # "training.batch_size": tune.choice([8, 16, 32, 64]),
-        }
-
-        algo = TuneBOHB(metric="loss", mode="min")
-        algo = tune.search.ConcurrencyLimiter(algo, max_concurrent=1)
-        scheduler = HyperBandForBOHB(
-            time_attr="training_iteration",
-            metric="loss",
-            mode="min",
-            max_t=1800)
-
-        trainable = partial(run_training_ray_tune, rank="cuda:0", conf=conf, data_parallel=False, world_size=1, ray_tune=True, enable_pbars=False)
-        trainable_with_resources = tune.with_resources(trainable,
-                                                       resources={"gpu": 1})
-
-        tuner = tune.Tuner(
-            trainable_with_resources,
-            tune_config=tune.TuneConfig(
-                search_alg=algo,
-                scheduler=scheduler,
-                num_samples=num_samples,
-            ),
-            run_config=train.RunConfig(
-                name="bohb_exp",
-                stop={"training_iteration": max_num_epochs},
-            ),
-            param_space=config,
+    # start the training function, possibly with data parallelism
+    if isinstance(conf.device, str):
+        run_training(conf.device, conf, False)
+    elif isinstance(conf.device, Iterable):
+        mp.spawn(
+            run_training,
+            args=(conf, True, len(conf.device)),
+            nprocs=len(conf.device),
+            join=True
         )
-        result = tuner.fit()
-
-        # save last results
-        result.get_dataframe().to_csv(output_dir / "last_epoch_results.csv")
-
-        for metric in ["loss", "fid_colour", "fid_depth"]:
-            print("==================")
-            print(f"{metric}")
-            print("==================")
-            best_trial = result.get_best_result(metric, "min")
-            print(f"Best trial config: {best_trial.config}")
-            print(f"Best trial final validation loss: {best_trial.metrics['loss']}")
-
-            best_checkpoint = best_trial.checkpoint
-            with best_checkpoint.as_directory() as dir:
-                data_path = Path(dir) / "data.pkl"
-                shutil.copy(data_path, output_dir / "best_checkpoint_loss_data.pkl")
-
-            print("==================")
-
-            # Get last reported results per trial
-            df_best_metric = result.get_dataframe(
-                filter_metric=metric, filter_mode="min"
-            )
-            df_best_metric.to_csv(output_dir / f"best_{metric}_results.csv")
-    else:
-        # start the training function, possibly with data parallelism
-        if isinstance(conf.device, str):
-            run_training(conf.device, conf, False)
-        elif isinstance(conf.device, Iterable):
-            mp.spawn(
-                run_training,
-                args=(conf, True, len(conf.device)),
-                nprocs=len(conf.device),
-                join=True
-            )
 
 
 if __name__ == '__main__':
