@@ -1,6 +1,7 @@
 import pyiqa
 import torch
 from pyiqa.archs.fid_arch import generate_reference_statistics
+import cmmd_pytorch as cmmd
 import glob
 from torchvision.transforms import v2
 
@@ -16,6 +17,9 @@ depth_imgs = glob.glob(nyu_dir+"/depth/bedroom_*/*") + glob.glob(lsun_dir+"/dept
 
 print("Found {} colour images and {} depth images".format(len(colour_imgs), len(depth_imgs)))
 
+"""
+FID Reference
+"""
 fid = pyiqa.create_metric("fid", device=device)
 
 generate_reference_statistics(dir=None,
@@ -40,7 +44,9 @@ generate_reference_statistics(dir=None,
                               # intermediate_resize=v2.Resize((128, 128))
                               )
 
-
+"""
+KID Reference
+"""
 kid = pyiqa.create_metric("kid", device=device)
 
 generate_reference_statistics(dir=None,
@@ -66,3 +72,20 @@ generate_reference_statistics(dir=None,
                               res=299,
                               # intermediate_resize=v2.Resize((128, 128))
                               )
+
+"""
+CMMD Reference
+"""
+cmmd.compute_and_cache_embeddings(dir=None,
+                                  files=colour_imgs,
+                                  dataset_name="nyu_depth_lsun_colour",
+                                  dataset_res=299,
+                                  dataset_split="val",
+                                  device=device)
+
+cmmd.compute_and_cache_embeddings(dir=None,
+                                  files=depth_imgs,
+                                  dataset_name="nyu_depth_lsun_depth",
+                                  dataset_res=299,
+                                  dataset_split="val",
+                                  device=device)

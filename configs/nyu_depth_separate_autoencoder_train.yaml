@@ -1,0 +1,41 @@
+# @package _global_
+
+seed: 1
+device: "cuda:0"  # ["cuda:0", "cuda:1"]
+experiment: "NYU_Depth_Autoencoder"
+name: "nyu_lsun_separable"
+notes: "We perform an ablation experiment using just a joint autoencoder"
+
+print_freq: 50
+outputdir: /rds/general/user/ds3119/ephemeral/outputs
+
+function:
+  name: training_loop
+  params: {}
+
+dataset_name: nyu_depth_lsun
+
+training:
+  model_opts: {}
+  test_every_iter: 3000
+  patience: 10
+  objective:
+    params:
+      wlpips: [ 7000, 7000.0 ]
+      wadversary: 10000
+
+# the FID reference file is found as {fid_ref_name}_{modality}_{fid_ref_split}.npz in the pyiqa cache directory
+fid_ref_name: "nyu_depth_lsun"
+fid_ref_split: "val"
+
+model_initialisation:
+resume_training: False
+init_from_stable_diffusion: True
+
+defaults:
+  - data: lsun_web
+  - model: v2-inference-mm-non-disentangled-seperable
+  - training: autoencoder_training_default
+  - override training/discriminator: mm_joint_discriminator_rgb_depth
+  - override training/objective: non_disentangling_objective
+  - _self_
