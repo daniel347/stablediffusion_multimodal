@@ -1,18 +1,8 @@
 # @package _global_
 
-seed: 1
-device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
-print_freq: 50
-outputdir: ./outputs/
 name: "nyu_lsun_ae_z_comb"
 notes: "We train the NYU LSUN autoencoder z combiner"
-
-function:
-  name: training_loop
-  params: {}
-
-dataset_name: nyu_depth
 
 training:
   test_every_iter: 1000 # test and save the model every so many iterations
@@ -26,18 +16,9 @@ training:
   objective_is_z_combiner: True
   lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
 
-# the FID reference file is found as {fid_ref_name}_{modality}_{fid_ref_split}.npz in the pyiqa cache directory
-fid_ref_name: "nyu_depth_lsun"
-fid_ref_split: "val"
-
 model_initialisation: # Path to model training from which to start training the z combiner.
 resume_training: False
 init_from_stable_diffusion: False
 
 defaults:
-  - data: lsun_web
-  - model: v2-inference-mm
-  - training: autoencoder_training_default
-  - override training/objective: 4way_z_combiner_objective
-  - override training/discriminator: mm_joint_discriminator_rgb_depth
-  - _self_
+  - override /training/objective: 4way_z_combiner_objective

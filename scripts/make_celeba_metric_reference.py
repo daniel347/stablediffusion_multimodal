@@ -1,10 +1,15 @@
 import pyiqa
 import torch
-from pyiqa.archs.fid_arch import generate_reference_statistics
+from .fid_arch_pyiqa import generate_reference_statistics
 import os
 from ldm.data.dataset_CelebAMask import MMCelebA
 from torchvision.transforms import v2
 import cmmd_pytorch as cmmd
+
+'''
+This script generates reference statistics for the CelebA dataset for FID, KID, and CMMD metrics. Reference files
+are saved to the scripts folder and should be moved to the cache folder within your pyiqa installation directory.
+'''
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -32,10 +37,13 @@ generate_reference_statistics(dir=None,
                               intermediate_resize=v2.Resize((128, 128))
                               )
 
+'''
+ # Example
 test_path = "/path/to/example/images"
 fid = metric(test_path, dataset_name="mm_celeba_colour", dataset_split="all",  dataset_res=128, center_crop=True)
 
 print(f"Computed fid of: {fid}")
+'''
 
 """
 KID Reference
@@ -53,10 +61,12 @@ generate_reference_statistics(dir=None,
                               intermediate_resize=v2.Resize((128, 128))
                               )
 
-# Test computation of KID
+'''
+ # Example
 test_path = "/path/to/example/images"
 kid = metric(test_path, dataset_name="mm_celeba_colour", dataset_split="all",  dataset_res=128, center_crop=True)
 print(f"Computed kid of: {kid}")
+'''
 
 """
 CMMD Reference
@@ -68,8 +78,10 @@ cmmd.compute_and_cache_embeddings(dir=None,
                                   dataset_split="train",
                                   device=device)
 
-# Test computation of CMMD
+'''
+ # Example
 test_path = "/path/to/example/images"
 cmmd_val = cmmd.compute_cmmd(test_path, dataset_name="mm_celeba_colour", dataset_split="train",  dataset_res=299, device=device)
 
 print(f"Computed CMMD of: {cmmd_val}")
+'''

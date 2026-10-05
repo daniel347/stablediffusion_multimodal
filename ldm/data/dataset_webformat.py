@@ -24,6 +24,7 @@ class WebDataset(IterableDataset):
                  return_index=False,
                  return_row=False,
                  nodesplitter=None,
+                 mod_to_web_map=None,
                  **kwargs):
 
         super().__init__()
@@ -37,29 +38,31 @@ class WebDataset(IterableDataset):
             modality = [modality]
         self.modality = modality
         self.transform = transform if transform is not None else {m: lambda x: x for m in modality}
+        self.return_class = return_class
+        self.mod_to_web_map = mod_to_web_map if mod_to_web_map is not None else {m: m for m in modality}
 
         if split == "val": split = "validation"
 
         data_dir = Path(root_data_dir) / split
+        if data_dir.exists() and len(list(data_dir.glob("*.tar"))) > 0:
+            data_nums = [int(d.name.split(".")[0].split("-")[-1]) for d in data_dir.glob("*.tar")]
+            data_num_min, data_num_max = min(data_nums), max(data_nums)
+            if data_num_min == data_num_max:
+                wds_path = f"{split}-{str(data_num_min).zfill(5)}.tar"
+            else:
+                wds_path = "%s-{%s..%s}.tar" % (split, str(data_num_min).zfill(5), str(data_num_max).zfill(5))
+            wds_path = str(data_dir / wds_path).replace("\\", "/")
+            if re.search(r"^\w:", wds_path): wds_path = f"file:{wds_path}"
 
-        data_nums = [int(d.name.split(".")[0].split("-")[-1]) for d in data_dir.glob("*.tar")]
-        data_num_min, data_num_max = min(data_nums), max(data_nums)
-        if data_num_min == data_num_max:
-            wds_path = f"{split}-{str(data_num_min).zfill(5)}.tar"
-        else:
-            wds_path = "%s-{%s..%s}.tar" % (split, str(data_num_min).zfill(5), str(data_num_max).zfill(5))
-        wds_path = str(data_dir / wds_path).replace("\\", "/")
-        if re.search(r"^\w:", wds_path): wds_path = f"file:{wds_path}"
+            decoders = (wds.handle_extension(v, getattr(self, f"{k}_decoder")) for k, v in self.mod_to_web_map.items())
 
-        self.ds = (wds.WebDataset(wds_path, nodesplitter=nodesplitter)
-                   .shuffle(1000 if split == "train" else 0)
-                   .decode(wds.handle_extension("colour.jpg", self.colour_decoder),
-                          wds.handle_extension("depth.png", self.depth_decoder))
-                   .rename(colour="colour.jpg", depth="depth.png")
-                   .map_dict(**self.transform)
-                   .map(self.map_output))
+            self.ds = (wds.WebDataset(wds_path, nodesplitter=nodesplitter)
+                       .shuffle(1000 if split == "train" else 0)
+                       .decode(*decoders)
+                       .rename(**mod_to_web_map)
+                       .map_dict(**self.transform)
+                       .map(self.map_output))
 
-        self.return_class = return_class
         if self.return_class and class_map_path:
             classes = []
             with open(Path(root_data_dir) / class_map_path) as f:

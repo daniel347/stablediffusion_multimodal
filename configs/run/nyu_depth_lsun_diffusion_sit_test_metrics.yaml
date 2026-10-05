@@ -1,0 +1,34 @@
+# @package _global_
+
+name: "sit_diff_test_metrics"
+notes: "We compute generation metrics for the SiT diffusion using the ode sampler"
+
+function:
+  name: test_metrics
+  kwargs: {subepoch: 0, itercount: 0, epochcount: 0, n_samples: 10000, gen_samples: True}
+
+training:
+  precompute_latents: False
+  latent_scale_per_channel: True
+  compute_latent_scale: False
+
+  patience: 20
+
+model:
+  params:
+    first_stage_config:
+      params:
+        ckpt_path:
+
+    use_ode: True
+    sampler_kwargs: 
+        atol: 2.5e-7
+        rtol: 2.5e-4
+
+model_initialisation:  "output_checkpoints/NYU_Depth_Stable_Diffusion/2026_01_06__14_52_49_sit_diff_full_lsun/model_it144000_ema_0.125.pt"
+
+defaults:
+  - override /model: sit-mm-rgb-depth
+  - override /sampler: ddpm
+  - override /ema: dummy_ema
+  - _self_

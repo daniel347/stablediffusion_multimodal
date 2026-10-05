@@ -1,18 +1,8 @@
 # @package _global_
 
-seed: 1
-device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "MM_CelebA_Autoencoder"
 notes: "Training the z combiner on the most recent autoencoder involving MM CelebA dataset with RGB and semantic segmentation inputs."
 name: "autoencoder_z_comb"
-print_freq: 50
-outputdir: ./outputs
-
-function:
-  name: training_loop
-  params: {}
-
-dataset_name: mm_celeba
 
 training:
   objective:
@@ -28,15 +18,9 @@ training:
   objective_is_z_combiner: True
   lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
 
-model_initialisation: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__09_52_59_correct_mmd_loss/model_2400.pt"
+model_initialisation:
 resume_training: False
 init_from_stable_diffusion: False
 
 defaults:
-  - data: mm_celeba
-  - ema: dummy_ema
-  - model: v2-inference-mm-rgb-semseg
-  - training: autoencoder_training_default
-  - override training/objective: 4way_z_combiner_objective
-  - override training/discriminator: mm_joint_discriminator_semseg
-  - _self_
+  - override /training/objective: 4way_z_combiner_objective

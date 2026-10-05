@@ -471,7 +471,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
             print(loss_series)
             return epochcount, train_pbar
 
-        def test(subepoch, itercount, epochcount, compute_metrics=False, metrics=["fid", "kid"], latent_noise_std=0.0):
+        def test(subepoch, itercount, epochcount, compute_metrics=False, metrics=["fid"], latent_noise_std=0.0):
             b_loss = 0
             loss_series = None
 
@@ -488,7 +488,7 @@ def run_training(rank, conf, data_parallel=False, world_size=None):
                     tempdir.mkdir(parents=True, exist_ok=True)
                     tempdirs[mode] = tempdir
 
-            enc_counts = [(torch.zeros(vae.quantiser.n_e) if getattr(vae, "quantiser", None) is not None else None) for vae in
+            enc_counts = [(torch.zeros(vae.quantiser. n_e) if getattr(vae, "quantiser", None) is not None else None) for vae in
                           mod.vaes]
 
             with (torch.no_grad(), ema.ema_scope("Epoch test")):

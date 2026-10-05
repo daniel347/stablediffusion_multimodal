@@ -1,9 +1,15 @@
 import pyiqa
 import torch
-from pyiqa.archs.fid_arch import generate_reference_statistics
+from .fid_arch_pyiqa import generate_reference_statistics
 import cmmd_pytorch as cmmd
 import glob
-from torchvision.transforms import v2
+
+'''
+This script generates reference statistics for the NYU depth and LSUN combined dataset for FID, KID, and CMMD metrics. 
+Reference files are saved to the scripts folder and should be moved to the cache folder within your pyiqa installation 
+directory.
+'''
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
