@@ -11,7 +11,7 @@ training:
   precompute_latents: True
   force_recompute: False
   latent_scale_per_channel: True
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_lsun_full
+  precompute_latents_path: ./latents_precompute_lsun_full
   compute_latent_scale: True
 
 model:
@@ -20,9 +20,10 @@ model:
       params:
         ckpt_path: null
 
-model_initialisation: /rds/general/user/ds3119/ephemeral/outputs/NYU_Depth_Stable_Diffusion/checkpoints/2026_01_20__15_41_50_nyu_lsun_full_ae_diff/model_144000.pt
+# Here the path directory should contain a number of intermediate checkpoints, used to construct the EMA.
+model_initialisation: /path/to/trained/diffusion/model
 
 defaults:
-  - override /data: lsun_web
+  - override /data: nyu_depth_lsun_bedroom
   - override /ema: dummy_ema
   - _self_

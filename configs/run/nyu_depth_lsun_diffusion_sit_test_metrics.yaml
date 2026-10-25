@@ -25,7 +25,7 @@ model:
         atol: 2.5e-7
         rtol: 2.5e-4
 
-model_initialisation:  "output_checkpoints/NYU_Depth_Stable_Diffusion/2026_01_06__14_52_49_sit_diff_full_lsun/model_it144000_ema_0.125.pt"
+model_initialisation:  "/path/to/trained/multimodal/diffusion/model"
 
 defaults:
   - override /model: sit-mm-rgb-depth

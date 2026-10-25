@@ -1,7 +1,7 @@
 # @package _global_
 
 name: "sit_diff_full_lsun"
-notes: "We retrain our best nyu lsun autoencoder using the SiT diffusion model. We train with the full lsun dataset"
+notes: "We retrain our best nyu lsun autoencoder using the SiT diffusion model."
 
 function:
   name: training_loop
@@ -13,7 +13,7 @@ training:
 
   precompute_latents: True
   force_recompute: False
-  precompute_latents_path: /rds/general/user/ds3119/ephemeral/latents_precompute_lsun_full # ". ../../datasets/lsun"
+  precompute_latents_path: ./latents_precompute_lsun
   compute_latent_scale: True
   latent_scale_per_channel: True
 
@@ -21,7 +21,7 @@ model:
   params:
     first_stage_config:
       params:
-        ckpt_path: # "/rds/general/user/ds3119/home/multimodal_generation/outputs/NYU_Depth_Autoencoder/checkpoints/2025_06_27__12_15_36_nyu_lsun_ae_z_comb/model_19000.pt"
+        ckpt_path: "/path/to/trained/autoencoder/checkpoint"  # Set the trained autoencoder checkpoint here
 model_initialisation:
 
 defaults:

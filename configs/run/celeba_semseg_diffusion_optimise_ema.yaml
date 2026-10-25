@@ -22,7 +22,7 @@ model:
       params:
         ckpt_path:
 
-model_initialisation:  ""
+model_initialisation:  "./path/to/trained/diffusion/model"
 
 defaults:
   - override /sampler: ddpm

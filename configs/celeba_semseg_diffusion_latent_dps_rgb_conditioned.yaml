@@ -1,7 +1,7 @@
 seed: 1
 device: "cuda:0"
 experiment: "MM_CelebA_Stable_Diffusion"
-name: "conditional_generation"
+name: "conditional_gen_rgb_from_semseg"
 notes: "We test the multimodal diffusion model for conditional generation of RGB given the semantic segmentation map"
 print_freq: 50
 
@@ -18,7 +18,7 @@ training:
   latent_scale_per_channel: False
 
 model_conf: configs/stable-diffusion/v2-inference-mm-rgb-semseg.yaml
-model_initialisation: "/home/ds3119/multimodal_generation/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_04_04__20_18_28_nvidia_ema/model_it20_ema_0.175.pt"
+model_initialisation: "/path/to/trained/multimodal/model"
 init_from_stable_diffusion: False
 
 defaults:

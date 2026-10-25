@@ -14,7 +14,7 @@ training:
   latent_scale_per_channel: True
   compute_latent_scale: False
 
-model_initialisation: ../outputs/NYU_Depth_Stable_Diffusion/checkpoints/2025_06_16__12_05_34_4way_z_comb_channel_norm/model_it24000_ema_0.100.pt
+model_initialisation: "/path/to/trained/diffusion/model"
 
 defaults:
   - override /ema: dummy_ema

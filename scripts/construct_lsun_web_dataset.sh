@@ -1,8 +1,8 @@
 shopt -s globstar nullglob caseglob
 
-source="../../datasets/lsun_mini/"
-dest="../../datasets/lsun_mini_temp"
-web_dataset_dest="../../datasets/lsun_mini_web"
+source="../../datasets/lsun/"
+dest="../../datasets/lsun_temp"
+web_dataset_dest="../../datasets/lsun_web"
 colour_ext="jpg"
 depth_ext="png"
 

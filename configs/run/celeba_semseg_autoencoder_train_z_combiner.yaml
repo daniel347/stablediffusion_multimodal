@@ -18,7 +18,7 @@ training:
   objective_is_z_combiner: True
   lr_decoder: 6e-5  # Smaller rate for decoders in z_combiner_training
 
-model_initialisation:
+model_initialisation:  # Path to model training from which to start training the z combiner.
 resume_training: False
 init_from_stable_diffusion: False
 

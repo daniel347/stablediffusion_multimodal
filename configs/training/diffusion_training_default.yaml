@@ -9,7 +9,7 @@ test_only: False
 
 precompute_latents: True
 force_recompute: True
-precompute_latents_path: ../../datasets/latents_precompute
+precompute_latents_path: ./latents_precompute
 compute_latent_scale: True
 latent_scale_per_channel: False
 

@@ -22,7 +22,7 @@ model:
       params:
         ckpt_path:
 
-model_initialisation:  "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_12_04__21_15_57_sit_diff/model_40000.pt" 
+model_initialisation:  "/path/to/trained/diffusion/model"
 
 defaults:
   - override /model: sit-mm-rgb-semseg

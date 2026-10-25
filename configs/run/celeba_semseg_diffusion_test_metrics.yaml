@@ -1,7 +1,7 @@
 # @package _global_
 
 name: "sit_diff_test_metrics"
-notes: "We compute generation metrics for the SiT diffusion using the ode sampler"
+notes: "We compute generation metrics for the SiT diffusion"
 
 function:
   name: test_metrics
@@ -25,7 +25,7 @@ model:
         atol: 2.5e-7
         rtol: 2.5e-4
 
-model_initialisation:  """
+model_initialisation:  "/path/to/trained/diffusion/model"
 
 defaults:
   - override /sampler: ddpm

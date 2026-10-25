@@ -4,10 +4,10 @@ seed: 1
 device: "cuda:0"  # ["cuda:0", "cuda:1"]
 experiment: "NYU_Depth_Autoencoder"
 name: "nyu_lsun_separable"
-notes: "We perform an ablation experiment using just a joint autoencoder"
+notes: "We perform an ablation experiment using individual autoencoders for each modality, with no shared latent space"
 
 print_freq: 50
-outputdir: /rds/general/user/ds3119/ephemeral/outputs
+outputdir: ./outputs
 
 function:
   name: training_loop

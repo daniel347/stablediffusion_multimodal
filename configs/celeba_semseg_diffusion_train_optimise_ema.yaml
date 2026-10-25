@@ -28,10 +28,7 @@ training:
 
   z_mode: "z_combiner"  # one of ["random", "avg", "z_combiner" or an integer between 0 and NUM_VAES-1]
 
-eval:
-  inception_path: ./data/pt_inception-2015-12-05-6726825d.pth
-
-model_initialisation:
+model_initialisation:  "/path/to/trained/diffusion/model"
 init_from_stable_diffusion: False
 
 defaults:

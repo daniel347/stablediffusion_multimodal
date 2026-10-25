@@ -33,9 +33,10 @@ model:
     first_stage_config:
       params:
         # Set the trained autoencoder checkpoint here
-        ckpt_path: # "/rds/general/user/ds3119/ephemeral/outputs/MM_CelebA_Autoencoder/checkpoints/2025_09_10__22_56_48_correct_mmd_loss_z_comb/model_4800.pt"
+        ckpt_path: "/path/to/autoencoder/checkpoint"
 
-model_initialisation: # ../outputs/MM_CelebA_Stable_Diffusion/checkpoints/2025_06_24__08_18_56_new_hyp_diff_train/model_it6384_ema_0.100.pt
+# Leave model initialisation blank unless resuming from an interrupted training.
+model_initialisation:
 init_from_stable_diffusion: False
 
 defaults:
