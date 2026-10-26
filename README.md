@@ -1,4 +1,9 @@
-# Multi-Modal Latent Diffusion using Information Disentangling Autoencoders
+# Multi-Modal Latent Diffusion using Information Disentangling Autoencoders: Official Code Repository
+
+<p align="center">
+  <img src="/assets/celebaExamples.png"/>
+  <img src="/assets/nyuExamples.png"/>
+</p>
 
 This repository contains code to accompany the paper [*Multi-Modal Latent Diffusion using Information Disentangling Autoencoders*](https://arxiv.org/abs/2211.13227), and includes training and inference scripts for both autoencoders and latent diffusion models.
 The code is based on [Stable Diffusion](https://github.com/compvis/stable-diffusion) and [MMVAE]() repositories.
